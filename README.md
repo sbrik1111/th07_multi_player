@@ -13,6 +13,19 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
+**v0.1.4** turns every `Advanced settings` switch off by default. The
+player-name labels and `netplay_trace.txt` were both on, so a fresh install drew
+names over the ships and wrote a growing file next to the executable without
+anyone having asked for either. All five start off now.
+
+It also adds a fifth switch, **Pin FPU control word**. Direct3D sets the x87
+control word when it creates the device and again on every reset, which decides
+how the whole simulation rounds; pinning it stops a graphics driver from
+changing that mid-session. It is off by default, because on every machine
+measured the word was already the value it would be pinned to. Unlike the other
+four it is host-authoritative: peers that round differently are the exact
+failure it exists to prevent.
+
 **v0.1.3** fixes a freeze. The rollback keeps a short history of saved frames,
 and a frame whose bomb effects did not fit in its buffer was discarded instead
 of saved. A rewind that later needed that frame found nothing, decided the
@@ -107,15 +120,19 @@ There is no keyboard mapping for a third local player.
 
 ## Launcher settings
 
-`Advanced settings` holds four switches. All four are per-PC preferences;
-players do not have to agree on them.
+`Advanced settings` holds five switches. All five start off.
 
-| Setting | Default | Effect |
-| --- | --- | --- |
-| Guest evasive bot (test) | off | Hands the guest's ship to a bot that dodges, collects power and lives, keeps its distance from a boss, and bombs its way out of a hit |
-| Net diagnostics | off | Draws `NET H RTT 25ms D0` at the top of the playfield |
-| Show player names at stage start | on | Each player's name over their ship for the first four seconds of a stage |
-| Write netplay_trace.txt | on | Records what the peers stopped agreeing about, for diagnosing a desync. A few megabytes an hour |
+| Setting | Effect |
+| --- | --- |
+| Guest evasive bot (test) | Hands the guest's ship to a bot that dodges, collects power and lives, keeps its distance from a boss, and bombs its way out of a hit |
+| Net diagnostics | Draws `NET H RTT 25ms D0` at the top of the playfield |
+| Show player names at stage start | Each player's name over their ship for the first four seconds of a stage |
+| Write netplay_trace.txt | Records what the peers stopped agreeing about, for diagnosing a desync. A few megabytes an hour. Turn it on before a session you expect to report |
+| Pin FPU control word | Holds the x87 control word to one value every frame, so a graphics driver cannot change how floats round mid-session |
+
+The first four are per-PC preferences; players do not have to agree on them.
+The FPU pin is not: it decides how the simulation rounds, so the host's answer
+is applied to everyone. Guests keep their own box but the host's value wins.
 
 A lost or recovering connection is always reported regardless of the
 diagnostics setting.
