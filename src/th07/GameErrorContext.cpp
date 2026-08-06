@@ -31,6 +31,11 @@ bool IsPriorityLogLine(const char *line, size_t length)
         // divergence" into a claim about an unknown amount of gameplay.
         "info : test stage",
         "info : rollback history invalidated",
+        // A machine property, logged only when it changes or is corrected. If
+        // a driver is moving how the peers round floats, this is the only line
+        // that says so, and it is written early enough to be recycled
+        // otherwise.
+        "info : fpu control word",
         "info : point extend awarded",
         "info : stage clear bonus",
         "info : cherry max growth",

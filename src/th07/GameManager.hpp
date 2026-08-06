@@ -96,6 +96,7 @@ void ExtendPlayerFromItem(u8 playerId);
 void ExtendAllPlayersFromPoints();
 i32 GetSharedBorderThreshold();
 f32 GetMultiplayerBossDamageMultiplier();
+i32 GetMultiplayerRankPenalty(i32 amount);
 void ApplyActivePlayerCountParameters(i32 previousCount, i32 newCount);
 
 struct Rank
