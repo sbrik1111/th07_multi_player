@@ -299,7 +299,17 @@ Item *ItemManager::SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state)
     i32 transferTargetId;
 
     item = &this->items[this->nextIndex];
-    if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
+    // States 3 to 5 are a transfer thrown at one particular player. The
+    // Power-to-Cherry rule below asks whether some unrelated slot is at
+    // maximum, which has nothing to do with the player this was aimed at:
+    // letting it apply would turn a handed-over Power into Cherry on the
+    // way across.
+    if ((itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG) &&
+        state >= 3 && state <= 5)
+    {
+        /* deliberately not converted */
+    }
+    else if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
     {
         if (!Netplay::IsMultiplayer())
         {

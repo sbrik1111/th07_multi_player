@@ -319,6 +319,154 @@ static bool IsPlayerActiveForLifeTransfer(const Player *player)
     return IsPlayerActiveForProximity(player);
 }
 
+i32 g_powerGiveTaps[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
+i32 g_powerGiveWindow[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
+
+// The partner who would receive power: nearest is not the question, the
+// one who has the least of it is. Ties go to the lower slot so all three
+// peers pick the same one.
+static Player *SelectPowerTransferReceiver(const Player *giver)
+{
+    Player *best = NULL;
+    i32 bestPower = 0;
+    i32 playerId;
+
+    if (!giver || !IsPlayerSlotActive(giver->initParam))
+    {
+        return NULL;
+    }
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        Player *candidate;
+        i32 power;
+        f32 dx;
+        f32 dy;
+        if (playerId == giver->initParam ||
+            !IsPlayerSlotActive((u8)playerId))
+        {
+            continue;
+        }
+        candidate = &g_Players[playerId];
+        if (!IsPlayerActiveForProximity(candidate))
+        {
+            continue;
+        }
+        power = GetPlayerPower((u8)playerId);
+        if (power >= 128)
+        {
+            continue;
+        }
+        dx = giver->positionCenter.x - candidate->positionCenter.x;
+        dy = giver->positionCenter.y - candidate->positionCenter.y;
+        // The same 20 pixels the life transfer uses.
+        if (dx * dx + dy * dy > 400.0f)
+        {
+            continue;
+        }
+        if (!best || power < bestPower ||
+            (power == bestPower && playerId < best->initParam))
+        {
+            best = candidate;
+            bestPower = power;
+        }
+    }
+    return best;
+}
+
+static bool IsPowerTransferArmed(const Player *giver)
+{
+    return giver && GetActivePlayerCount() >= 2 &&
+        IsPlayerActiveForProximity(giver) &&
+        GetPlayerPower(giver->initParam) >= POWER_GIVE_AMOUNT &&
+        SelectPowerTransferReceiver(giver) != NULL;
+}
+
+// Five taps of the shot button, each within POWER_GIVE_TAP_WINDOW frames
+// of the last, hand POWER_GIVE_AMOUNT across.
+//
+// Shot rather than bomb because nothing has to be taken away to read it:
+// the shots fire as usual and the gesture reads the press edges underneath
+// them. Only the shot bit is compared, so moving, focusing or bombing at
+// the same time makes no difference to it.
+static void UpdatePowerTransfer(Player *giver)
+{
+    Player *receiver;
+    i32 id;
+    i32 state;
+    i32 index;
+
+    if (!giver)
+    {
+        return;
+    }
+    id = giver->initParam;
+    if (id < 0 || id >= TH07_MULTI_MAX_PLAYERS)
+    {
+        return;
+    }
+    if (!IsPowerTransferArmed(giver))
+    {
+        g_powerGiveTaps[id] = 0;
+        g_powerGiveWindow[id] = 0;
+        return;
+    }
+    if (g_powerGiveWindow[id] > 0)
+    {
+        g_powerGiveWindow[id]--;
+        if (g_powerGiveWindow[id] == 0)
+        {
+            // Too slow. A tap that arrives after the window is the first
+            // tap of a new attempt rather than the next of this one.
+            g_powerGiveTaps[id] = 0;
+        }
+    }
+    if (!WAS_PRESSED_PLAYER(giver, TH_BUTTON_SHOOT))
+    {
+        return;
+    }
+    g_powerGiveTaps[id]++;
+    g_powerGiveWindow[id] = POWER_GIVE_TAP_WINDOW;
+    if (g_powerGiveTaps[id] < POWER_GIVE_TAPS_REQUIRED)
+    {
+        g_SoundPlayer.PlaySoundByIdx(SOUND_21, 0);
+        return;
+    }
+    g_powerGiveTaps[id] = 0;
+    g_powerGiveWindow[id] = 0;
+    receiver = SelectPowerTransferReceiver(giver);
+    if (!receiver)
+    {
+        return;
+    }
+    if (GetPlayerPower(giver->initParam) < POWER_GIVE_AMOUNT)
+    {
+        return;
+    }
+    // The giver pays now and the power crosses as items, the way a life
+    // does: two big and four small are exactly the twenty that was taken,
+    // and they arrive through the ordinary collection path rather than
+    // appearing in the receiver's counter out of nowhere.
+    AddPlayerPower(giver->initParam, -POWER_GIVE_AMOUNT);
+    state = GetLifeTransferSpawnState(receiver->initParam);
+    for (index = 0; index < 6; index++)
+    {
+        D3DXVECTOR3 spawn = giver->positionCenter;
+        // Fanned out so six items read as a handful rather than one.
+        // Fixed offsets: this runs inside the simulation and must not
+        // consume RNG.
+        spawn.x += (f32)((index % 3) - 1) * 10.0f;
+        spawn.y += (f32)((index / 3) - 1) * 8.0f;
+        g_ItemManager.SpawnItem(
+            &spawn, index < 2 ? ITEM_POWER_BIG : ITEM_POWER_SMALL,
+            state);
+    }
+    g_Gui.showPower = 2;
+    g_SoundPlayer.PlaySoundByIdx(SOUND_POWERUP, 0);
+    g_GameErrorContext.Log(
+        "info : P%d gave %d power to P%d\r\n",
+        id + 1, (int)POWER_GIVE_AMOUNT, receiver->initParam + 1);
+}
+
 static Player *SelectLifeTransferReceiver(const Player *giver)
 {
     Player *best = NULL;
@@ -475,6 +623,48 @@ static i32 SelectLowestLifeRecipient(u8 excludedPlayerId)
         }
     }
     return bestId;
+}
+
+static void DrawPowerTransferPrompt(const Player *giver)
+{
+    D3DXVECTOR3 position;
+    Float2 savedScale;
+    D3DCOLOR savedColor;
+    i32 savedGui;
+    i32 savedSelected;
+    i32 id;
+
+    if (!giver || !Netplay::IsMultiplayer())
+    {
+        return;
+    }
+    id = giver->initParam;
+    if (id < 0 || id >= TH07_MULTI_MAX_PLAYERS ||
+        !IsPowerTransferArmed(giver) ||
+        g_powerGiveTaps[id] < POWER_GIVE_PROMPT_AFTER)
+    {
+        return;
+    }
+    position = giver->positionCenter;
+    position.x -= 16.0f;
+    position.y += 16.0f;
+    position.z = 0.48f;
+    savedScale = g_AsciiManager.scale;
+    savedColor = g_AsciiManager.color;
+    savedGui = g_AsciiManager.isGui;
+    savedSelected = g_AsciiManager.isSelected;
+    g_AsciiManager.scale.x = 0.5f;
+    g_AsciiManager.scale.y = 0.5f;
+    g_AsciiManager.color = 0xffa0ffa0;
+    g_AsciiManager.isGui = 1;
+    g_AsciiManager.isSelected = 0;
+    AsciiManager::AddFormatText(&g_AsciiManager, &position, "P %d/%d",
+                                (int)g_powerGiveTaps[id],
+                                (int)POWER_GIVE_TAPS_REQUIRED);
+    g_AsciiManager.scale = savedScale;
+    g_AsciiManager.color = savedColor;
+    g_AsciiManager.isGui = savedGui;
+    g_AsciiManager.isSelected = savedSelected;
 }
 
 static void AddLifeTransferPrompt(const Player *giver, bool charging)
@@ -647,6 +837,16 @@ static void UpdateLifeTransfer(Player *giver)
     testFocus = Netplay::IsLifeTransferTestEnabled() &&
         !Netplay::IsNetworked() && giver->initParam == 0 &&
         !Netplay::IsLifeTransferTestVerified();
+    // The life transfer charges on frames where shot is released, and
+    // tapping out a power transfer releases it five times. Without this a
+    // player asking to give power would hand over a life instead.
+    if (giver->initParam >= 0 &&
+        giver->initParam < TH07_MULTI_MAX_PLAYERS &&
+        g_powerGiveTaps[giver->initParam] > 0)
+    {
+        giver->lifeGiveTimer = 0;
+        return;
+    }
     if ((giver->isFocus || testFocus) &&
         !IS_PRESSED_PLAYER(giver, TH_BUTTON_SHOOT))
     {
@@ -3326,6 +3526,7 @@ WHY:
     }
 
     UpdateLifeTransfer(arg);
+    UpdatePowerTransfer(arg);
     if (arg->playerState != PLAYER_STATE_DEAD &&
         arg->playerState != PLAYER_STATE_SPAWNING &&
         arg->playerState != PLAYER_STATE_SPIRIT)
@@ -3400,6 +3601,7 @@ u32 Player::OnDrawHighPrio(Player *arg)
         g_AnmManager->DrawNoRotation(&arg->playerSprite);
         arg->playerSprite.color.color = originalColor;
         DrawLifeTransferPrompt(arg);
+        DrawPowerTransferPrompt(arg);
         DrawStageIntroPlayerName(arg);
         if (Netplay::IsNetworked() && arg->initParam == 0)
         {

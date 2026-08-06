@@ -840,6 +840,8 @@ struct RollbackSnapshot
     u8 playerMaskPadding;
     u16 curFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
     u16 curFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
+    i32 powerGiveTaps[TH07_MULTI_MAX_PLAYERS];
+    i32 powerGiveWindow[TH07_MULTI_MAX_PLAYERS];
     u16 lastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
     u16 lastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
     u16 isEighthFrameOfHeldInput;
@@ -8409,6 +8411,10 @@ void SaveRollbackSnapshot(u32 simulationFrame)
            sizeof(g_GlobalEclVars));
     memcpy(snapshot->curFrameRawInputs, g_CurFrameRawInputs,
            sizeof(g_CurFrameRawInputs));
+    memcpy(snapshot->powerGiveTaps, g_powerGiveTaps,
+           sizeof(g_powerGiveTaps));
+    memcpy(snapshot->powerGiveWindow, g_powerGiveWindow,
+           sizeof(g_powerGiveWindow));
     memcpy(snapshot->curFrameGameInputs, g_CurFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(snapshot->lastFrameRawInputs, g_LastFrameRawInputs,
@@ -8490,6 +8496,10 @@ bool RestoreRollbackSnapshot(const RollbackSnapshot *snapshot)
     g_insaneMode = snapshot->insaneMode != 0;
     memcpy(g_CurFrameRawInputs, snapshot->curFrameRawInputs,
            sizeof(g_CurFrameRawInputs));
+    memcpy(g_powerGiveTaps, snapshot->powerGiveTaps,
+           sizeof(g_powerGiveTaps));
+    memcpy(g_powerGiveWindow, snapshot->powerGiveWindow,
+           sizeof(g_powerGiveWindow));
     memcpy(g_CurFrameGameInputs, snapshot->curFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(g_LastFrameRawInputs, snapshot->lastFrameRawInputs,
