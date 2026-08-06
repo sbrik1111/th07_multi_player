@@ -138,7 +138,13 @@ const int ROLLBACK_HISTORY_FRAMES =
 const int ROLLBACK_MAX_PREDICTION_FRAMES =
     ROLLBACK_HISTORY_FRAMES - ROLLBACK_SNAPSHOT_INTERVAL;
 // Three simultaneous bombs can exceed the old two-player ceiling of 64.
-const int ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT = 128;
+// A three-player stage reaches ninety-odd live bomb effects routinely, so
+// a limit of 128 was not headroom, it was the edge of a cliff: a snapshot
+// that cannot store them all is thrown away, and a rewind that later needs
+// that frame finds nothing and stops the session dead. At 48 bytes each
+// this array is 6 KB of a 17 MB snapshot, so the limit was never paying
+// for itself. A thousand costs 49 KB.
+const int ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT = 1024;
 // Direction/focus/shot are held from the latest confirmed sample. Bomb is an
 // edge and is therefore predicted released; a real remote bomb rewinds from
 // the keyframe just before it. SoundPlayer's existing per-frame queue
@@ -307,6 +313,13 @@ bool g_invincible = false;
 // are never exchanged: two peers may disagree about them all session.
 bool g_showStagePlayerNames = true;
 bool g_showNetDiagnostics = false;
+// netplay_trace.txt is the only record of what two peers stopped agreeing
+// about, and it is what identified the item-drop divergence. It is also a
+// file that grows next to the executable for as long as people play - a few
+// megabytes an hour - so it is a setting rather than a fact. On by default:
+// a session that desyncs without it leaves nothing to read, and the cost of
+// having it is a file nobody has to open.
+bool g_writeFrameTrace = true;
 bool g_demoDisabled = false;
 bool g_quickStartEnabled = false;
 bool g_quickStartPending = false;
@@ -537,6 +550,7 @@ u8 g_bossDeathLogged = 0;
 bool g_rollbackDeferralLogged = false;
 bool g_rollbackWindowExhaustedLogged = false;
 bool g_rollbackSnapshotMissingLogged = false;
+bool g_rollbackBombEffectOverflowLogged = false;
 bool g_simulationDivergenceLogged = false;
 // Why the detailed state comparison did or did not run. Two rounds of guessing
 // failed to explain zero comparisons in a high-latency session, so count every
@@ -841,6 +855,10 @@ void ResetEnemyTrace();
 // use this; a per-frame line would put a disk write in the frame loop.
 void NetplayTraceWriteLine(const char *line)
 {
+    if (!g_writeFrameTrace)
+    {
+        return;
+    }
     if (!g_netplayTraceFile && !g_netplayTraceFailed)
     {
         g_netplayTraceFile = fopen("netplay_trace.txt", "wb");
@@ -860,6 +878,10 @@ void NetplayTraceWriteLine(const char *line)
 // anything that can fire more than a handful of times per run.
 void NetplayTraceFileBuffered(const char *line)
 {
+    if (!g_writeFrameTrace)
+    {
+        return;
+    }
     if (!g_netplayTraceFile && !g_netplayTraceFailed)
     {
         g_netplayTraceFile = fopen("netplay_trace.txt", "wb");
@@ -2013,6 +2035,7 @@ enum
     UI_ID_SHOW_STAGE_NAMES = 128,
     UI_ID_SHOW_NET_STATS = 129,
     UI_ID_STATUS_LABEL = 130,
+    UI_ID_WRITE_TRACE = 131,
 };
 
 // Everything below the role selector is pushed down by its height. Keeping it
@@ -2020,10 +2043,11 @@ enum
 // coordinates.
 const int UI_ROLE_ROW_HEIGHT = 34;
 
-// Height of the two advanced rows. Hiding the checkboxes without closing
-// the space they occupied left a blank band in the middle of the window,
-// so everything below moves up by this much while they are hidden.
-const int UI_ADVANCED_BLOCK_HEIGHT = 52;
+// Height of the three advanced rows. Hiding the checkboxes without
+// closing the space they occupied left a blank band in the middle of the
+// window, so everything below moves up by this much while they are
+// hidden.
+const int UI_ADVANCED_BLOCK_HEIGHT = 76;
 
 const UINT CONNECTION_UI_TIMER_ID = 1;
 const UINT CONNECTION_UI_TIMER_INTERVAL_MS = 15;
@@ -2053,6 +2077,7 @@ struct ConnectionUiSelection
     bool evasiveBot;
     bool showStageNames;
     bool showNetStats;
+    bool writeTrace;
     bool cancelled;
 };
 
@@ -2069,6 +2094,7 @@ struct ConnectionUiState
     HWND evasiveBotCheck;
     HWND stageNamesCheck;
     HWND netStatsCheck;
+    HWND traceCheck;
     HWND connectButton;
     HWND startButton;
     HWND status;
@@ -2302,6 +2328,8 @@ void LoadConnectionUiConfig(ConnectionUiSelection *selection)
         GetPrivateProfileIntA("Display", "StagePlayerNames", 1, path) != 0;
     selection->showNetStats =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
+    selection->writeTrace =
+        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 1, path) != 0;
     // P2 is selected in the in-game TH06-style setup screen. Keep these
     // fields at -1 so a stale pre-UI configuration cannot bypass that step.
     selection->p2Character = -1;
@@ -2333,6 +2361,8 @@ void LoadDisplayPreferences()
         GetPrivateProfileIntA("Display", "StagePlayerNames", 1, path) != 0;
     g_showNetDiagnostics =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
+    g_writeFrameTrace =
+        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 1, path) != 0;
 }
 
 void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
@@ -2368,6 +2398,8 @@ void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
                                path);
     WritePrivateProfileStringA("Display", "NetDiagnostics",
                                selection->showNetStats ? "1" : "0", path);
+    WritePrivateProfileStringA("Diagnostics", "FrameTrace",
+                               selection->writeTrace ? "1" : "0", path);
 }
 
 void SetConnectionUiStatus(const char *text)
@@ -2416,6 +2448,8 @@ bool ReadConnectionUiFields()
         GetDlgItem(g_connectionUi.window, UI_ID_SHOW_STAGE_NAMES);
     g_connectionUi.netStatsCheck =
         GetDlgItem(g_connectionUi.window, UI_ID_SHOW_NET_STATS);
+    g_connectionUi.traceCheck =
+        GetDlgItem(g_connectionUi.window, UI_ID_WRITE_TRACE);
     if (!g_connectionUi.hostEdit || !g_connectionUi.playerNameEdit ||
         !g_connectionUi.portEdit ||
         !g_connectionUi.delayEdit || !g_connectionUi.bgmCheck ||
@@ -2507,6 +2541,12 @@ bool ReadConnectionUiFields()
             SendMessageA(g_connectionUi.netStatsCheck, BM_GETCHECK, 0,
                          0) == BST_CHECKED;
     }
+    if (g_connectionUi.traceCheck)
+    {
+        g_connectionUi.selection.writeTrace =
+            SendMessageA(g_connectionUi.traceCheck, BM_GETCHECK, 0,
+                         0) == BST_CHECKED;
+    }
     g_connectionUi.selection.playerCount =
         IsDlgButtonChecked(g_connectionUi.window,
                            UI_ID_PLAYER_COUNT_3) == BST_CHECKED
@@ -2530,6 +2570,7 @@ void SetConnectionUiNetworkFieldsEnabled(bool enabled)
     EnableWindow(g_connectionUi.evasiveBotCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.stageNamesCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.netStatsCheck, enabled ? TRUE : FALSE);
+    EnableWindow(g_connectionUi.traceCheck, enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_2),
                  enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_3),
@@ -3230,14 +3271,14 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
 {
     static const int advancedIds[] = {
         UI_ID_GUEST_EVASIVE_BOT, UI_ID_SHOW_NET_STATS,
-        UI_ID_SHOW_STAGE_NAMES
+        UI_ID_SHOW_STAGE_NAMES, UI_ID_WRITE_TRACE
     };
     // The y each control sits at while the advanced rows are shown.
     static const ConnectionUiMovedControl movedControls[] = {
-        { UI_ID_CONNECT, 416 },
-        { UI_ID_STATUS_LABEL, 456 }, { UI_ID_STATUS, 476 },
-        { UI_ID_START_GAME, 556 }, { UI_ID_START_LOCAL, 556 },
-        { UI_ID_CANCEL, 596 }
+        { UI_ID_CONNECT, 440 },
+        { UI_ID_STATUS_LABEL, 480 }, { UI_ID_STATUS, 500 },
+        { UI_ID_START_GAME, 580 }, { UI_ID_START_LOCAL, 580 },
+        { UI_ID_CANCEL, 620 }
     };
     int shift = visible ? 0 : UI_ADVANCED_BLOCK_HEIGHT;
     int index;
@@ -3277,7 +3318,7 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
     {
         SetWindowPos(window, NULL, 0, 0,
                      windowRect.right - windowRect.left,
-                     662 + UI_ROLE_ROW_HEIGHT - shift,
+                     686 + UI_ROLE_ROW_HEIGHT - shift,
                      SWP_NOMOVE | SWP_NOZORDER);
     }
     InvalidateRect(window, NULL, TRUE);
@@ -3437,6 +3478,10 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
             "BUTTON", "Show player names at stage start",
             BS_AUTOCHECKBOX, 20, 386, 370, 22, window,
             UI_ID_SHOW_STAGE_NAMES);
+        g_connectionUi.traceCheck = CreateConnectionUiControl(
+            "BUTTON", "Write netplay_trace.txt (desync diagnosis)",
+            BS_AUTOCHECKBOX, 20, 410, 370, 22, window,
+            UI_ID_WRITE_TRACE);
         SendMessageA(g_connectionUi.netStatsCheck, BM_SETCHECK,
                      g_connectionUi.selection.showNetStats ? BST_CHECKED
                                                            : BST_UNCHECKED,
@@ -3449,23 +3494,27 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
                      g_connectionUi.selection.evasiveBot ? BST_CHECKED
                                                          : BST_UNCHECKED,
                      0);
+        SendMessageA(g_connectionUi.traceCheck, BM_SETCHECK,
+                     g_connectionUi.selection.writeTrace ? BST_CHECKED
+                                                         : BST_UNCHECKED,
+                     0);
         g_connectionUi.connectButton = CreateConnectionUiControl(
-            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 416, 370, 32,
+            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 440, 370, 32,
             window, UI_ID_CONNECT);
-        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 456,
+        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 480,
                                   80, 20, window, UI_ID_STATUS_LABEL);
         g_connectionUi.status = CreateConnectionUiControl(
-            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 476, 370,
+            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 500, 370,
             72, window, UI_ID_STATUS);
         g_connectionUi.startButton = CreateConnectionUiControl(
             "BUTTON", "Start Game",
-            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 556, 160, 32, window,
+            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 580, 160, 32, window,
             UI_ID_START_GAME);
         CreateConnectionUiControl("BUTTON", "Start Game (local)",
-                                  BS_PUSHBUTTON, 220, 556, 160, 32, window,
+                                  BS_PUSHBUTTON, 220, 580, 160, 32, window,
                                   UI_ID_START_LOCAL);
         CreateConnectionUiControl("BUTTON", "Cancel", BS_PUSHBUTTON, 280,
-                                  596, 100, 28, window, UI_ID_CANCEL);
+                                  620, 100, 28, window, UI_ID_CANCEL);
         SetConnectionUiRole(
             window, g_connectionUi.selection.mode == Netplay::MODE_GUEST);
         SetConnectionUiAdvancedVisible(window, false);
@@ -3626,7 +3675,7 @@ bool RunConnectionUi(ConnectionUiSelection *selection, bool rollbackAllowed)
         WS_EX_APPWINDOW, className, "th07_multi_net - Connection",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
          CW_USEDEFAULT, CW_USEDEFAULT, 430,
-         662 + UI_ROLE_ROW_HEIGHT - UI_ADVANCED_BLOCK_HEIGHT, NULL,
+         686 + UI_ROLE_ROW_HEIGHT - UI_ADVANCED_BLOCK_HEIGHT, NULL,
          NULL, instance, NULL);
     if (!g_connectionUi.window)
     {
@@ -3789,6 +3838,7 @@ void ResetInputRings()
     g_rollbackDeferralLogged = false;
     g_rollbackWindowExhaustedLogged = false;
     g_rollbackSnapshotMissingLogged = false;
+    g_rollbackBombEffectOverflowLogged = false;
     g_simulationDivergenceLogged = false;
     g_lastLoggedControllerInput = 0;
     g_controllerInputLogCount = 0;
@@ -6697,7 +6747,11 @@ void ApplyTestBossDesync(u32 frame)
 
 // Long enough that a sample is still present when its frame is confirmed.
 const int PLAYER_TRACE_RING = DETAILED_STATE_CONFIRM_LAG * 4;
-const u32 PLAYER_TRACE_LINE_LIMIT = 400;
+// Lives, bombs, power and cherry, on the frames they change. Four hundred
+// lines ran out around frame 2500 of a fourteen-thousand frame run, which
+// made it useless for anything measured over a whole session - how many
+// bombs a bot spends, for one.
+const u32 PLAYER_TRACE_LINE_LIMIT = 4000;
 const int PLAYER_TRACE_BODY_INTERVAL = 4;
 const u32 PLAYER_TRACE_POSITION_LIMIT = 30000;
 
@@ -6904,7 +6958,7 @@ void LogPlayerBodyTrace(u32 currentFrame)
     char *cursor = line;
     int playerId;
 
-    if (!Netplay::IsNetworked() ||
+    if (!Netplay::IsNetworked() || !g_writeFrameTrace ||
         currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG ||
         g_playerTracePositionLines >= PLAYER_TRACE_POSITION_LIMIT)
     {
@@ -7004,7 +7058,8 @@ void CaptureItemTraceSample(u32 frame)
     ItemTraceSample *sample;
     i32 i;
 
-    if (!Netplay::IsNetworked() || !g_GameManager.notInMenu ||
+    if (!Netplay::IsNetworked() || !g_writeFrameTrace ||
+        !g_GameManager.notInMenu ||
         g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
     {
         return;
@@ -7095,7 +7150,8 @@ void CaptureEnemyTraceSample(u32 frame)
     EnemyTraceSample *sample;
     i32 i;
 
-    if (!Netplay::IsNetworked() || !g_GameManager.notInMenu ||
+    if (!Netplay::IsNetworked() || !g_writeFrameTrace ||
+        !g_GameManager.notInMenu ||
         g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
     {
         return;
@@ -7121,7 +7177,7 @@ void LogEnemyTrace(u32 currentFrame)
     char line[192];
     i32 i;
 
-    if (!Netplay::IsNetworked() ||
+    if (!Netplay::IsNetworked() || !g_writeFrameTrace ||
         currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG ||
         g_enemyTraceLines >= ENEMY_TRACE_LINE_LIMIT)
     {
@@ -7247,7 +7303,7 @@ void LogItemTrace(u32 currentFrame)
     char line[256];
     i32 i;
 
-    if (!Netplay::IsNetworked() ||
+    if (!Netplay::IsNetworked() || !g_writeFrameTrace ||
         currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG)
     {
         return;
@@ -8087,27 +8143,50 @@ bool IsRollbackPredictionFrame()
 bool SaveRollbackBombEffects(RollbackSnapshot *snapshot)
 {
     ChainElem *element = g_Chain.calcChain.next;
+    u32 present = 0;
 
     snapshot->bombEffectCount = 0;
     while (element)
     {
         if (IsBombEffectCalcCallback(element->callback))
         {
-            if (!element->arg ||
-                snapshot->bombEffectCount >=
-                    ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT)
+            if (!element->arg)
             {
                 return false;
             }
-            memcpy(snapshot->bombEffects[snapshot->bombEffectCount],
-                   element->arg, sizeof(BombEffects));
-            snapshot->bombEffectCount++;
+            present++;
+            if (present <= (u32)ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT)
+            {
+                memcpy(snapshot->bombEffects[snapshot->bombEffectCount],
+                       element->arg, sizeof(BombEffects));
+                snapshot->bombEffectCount++;
+            }
         }
         element = element->next;
     }
-    if (snapshot->bombEffectCount > g_rollbackMaxBombEffects)
+    // Count what was there rather than what fit. Recording the stored
+    // count made the peak in the shutdown line a measurement of this
+    // array's size instead of the game's behaviour, so a run that hit the
+    // limit reported exactly the limit and looked like a coincidence.
+    if (present > g_rollbackMaxBombEffects)
     {
-        g_rollbackMaxBombEffects = snapshot->bombEffectCount;
+        g_rollbackMaxBombEffects = present;
+    }
+    if (present > (u32)ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT)
+    {
+        // Dropping the snapshot here is what ends the session twenty
+        // minutes later, as a rewind that cannot find its keyframe. Say so
+        // at the point it happens instead of leaving the consequence to be
+        // diagnosed on its own.
+        if (!g_rollbackBombEffectOverflowLogged)
+        {
+            g_rollbackBombEffectOverflowLogged = true;
+            g_GameErrorContext.Log(
+                "error : rollback bomb effect overflow frame %lu count %lu limit %d; snapshot dropped\r\n",
+                (unsigned long)g_frame, (unsigned long)present,
+                ROLLBACK_BOMB_EFFECT_SNAPSHOT_COUNT);
+        }
+        return false;
     }
     return true;
 }
@@ -9244,13 +9323,31 @@ void ApplyPlayerLifecycleTransition(Netplay::InGameControl control)
 }
 
 // The bot sees far enough ahead to start moving around a pattern without
-// spending a bomb.  Keep the sample interval coarse enough that this remains
-// cheap on the original DX8 renderer.
+// spending a bomb. The sample interval used to be coarse to keep the cost
+// down; the threat list below pays for a finer one by scanning the bullet
+// pool once per frame instead of once per candidate path.
 const int TEST_EVASIVE_LOOKAHEAD_FRAMES = 48;
-const int TEST_EVASIVE_SAMPLE_INTERVAL = 3;
+const int TEST_EVASIVE_SAMPLE_INTERVAL = 2;
+// A bullet arriving in six frames is a problem; the same bullet forty
+// frames out is a suggestion. Scoring a path by its worst moment alone
+// treats the two alike, which is how a bot dodges a distant wall straight
+// into a near one. Clearance far ahead is credited this much per frame.
+const f32 TEST_EVASIVE_TIME_BONUS = 1.5f;
+// A bot against a wall has half the escape routes of one in the open, and
+// whatever pinned it there is usually still coming.
+const f32 TEST_EVASIVE_EDGE_MARGIN = 40.0f;
+const f32 TEST_EVASIVE_EDGE_PENALTY = 2.0f;
+// Sitting under a boss maximizes damage and minimizes the time available to
+// read what it fires. Enough vertical room to see a pattern start is worth
+// more than the damage: this is a penalty rather than a barrier, so the bot
+// still closes in when the alternative is worse.
+const f32 TEST_EVASIVE_BOSS_KEEP_DISTANCE = 144.0f;
+const f32 TEST_EVASIVE_BOSS_PENALTY = 2.5f;
+// Bullets that cannot reach the player inside the horizon are dropped once
+// per frame rather than re-tested by all eighteen candidate paths.
+const int TEST_EVASIVE_THREAT_LIMIT = 512;
+const f32 TEST_EVASIVE_THREAT_RADIUS = 288.0f;
 const int TEST_EVASIVE_TARGET_LOOKAHEAD_FRAMES = 18;
-const int TEST_EVASIVE_BOMB_TRIGGER_FRAMES = 9;
-const f32 TEST_EVASIVE_BOMB_TRIGGER_CLEARANCE = 0.5f;
 // Stay below the very top edge during ordinary movement. The bot can still
 // reach the game's point-of-collection line, but it will not pin itself to
 // the upper boundary while searching for a safe path.
@@ -9653,66 +9750,182 @@ f32 GetTestEvasiveLaserClearance(Player *player, Laser *laser,
                  outsidePerpendicular * outsidePerpendicular);
 }
 
-void EvaluateTestEvasivePath(Player *player, u16 direction, bool focus,
-                             f32 *minimumClearance, int *minimumFrame)
+// The threats worth testing, collected once a frame. Every candidate path
+// used to walk all 1024 bullet slots at every sample, which is the reason
+// the sampling had to stay coarse and the candidate set small. Culling once
+// buys both back.
+Bullet *g_testEvasiveBullets[TEST_EVASIVE_THREAT_LIMIT];
+int g_testEvasiveBulletCount = 0;
+Laser *g_testEvasiveLasers[64];
+int g_testEvasiveLaserCount = 0;
+bool g_testEvasiveHasBoss = false;
+f32 g_testEvasiveBossY = 0.0f;
+
+void BuildTestEvasiveThreatList(Player *player)
 {
-    int sampleFrame;
-    int bulletIndex;
-    int laserIndex;
-    f32 playerX;
-    f32 playerY;
-    f32 clearance;
     Bullet *bullet;
     Laser *laser;
+    int index;
+    f32 playerX;
+    f32 playerY;
 
-    if (!minimumClearance || !minimumFrame)
+    g_testEvasiveBulletCount = 0;
+    g_testEvasiveLaserCount = 0;
+    g_testEvasiveHasBoss = false;
+    if (!player)
     {
         return;
     }
-    *minimumClearance = TEST_EVASIVE_NO_THREAT;
-    *minimumFrame = TEST_EVASIVE_LOOKAHEAD_FRAMES + 1;
+    for (index = 0; index < 481; index++)
+    {
+        const Enemy &enemy = g_EnemyManager.enemies[index];
+        if (!enemy.active || !enemy.isBoss || enemy.life <= 0)
+        {
+            continue;
+        }
+        g_testEvasiveHasBoss = true;
+        g_testEvasiveBossY = enemy.position.y;
+        break;
+    }
+    playerX = player->positionCenter.x;
+    playerY = player->positionCenter.y;
+    bullet = g_BulletManager.bullets;
+    for (index = 0; index < 1024; index++, bullet++)
+    {
+        f32 travel;
+        if (bullet->state == BULLET_INACTIVE ||
+            bullet->state == BULLET_DESPAWN)
+        {
+            continue;
+        }
+        // How far it could close before the horizon runs out. A fast
+        // bullet on the far side of the screen still counts.
+        travel = (fabsf(bullet->velocity.x) + fabsf(bullet->velocity.y)) *
+            (f32)TEST_EVASIVE_LOOKAHEAD_FRAMES;
+        if (fabsf(bullet->pos.x - playerX) - travel >
+                TEST_EVASIVE_THREAT_RADIUS ||
+            fabsf(bullet->pos.y - playerY) - travel >
+                TEST_EVASIVE_THREAT_RADIUS)
+        {
+            continue;
+        }
+        if (g_testEvasiveBulletCount >= TEST_EVASIVE_THREAT_LIMIT)
+        {
+            break;
+        }
+        g_testEvasiveBullets[g_testEvasiveBulletCount++] = bullet;
+    }
+    laser = g_BulletManager.lasers;
+    for (index = 0; index < 64; index++, laser++)
+    {
+        if (!IsTestEvasiveLaserHitboxActive(laser))
+        {
+            continue;
+        }
+        g_testEvasiveLasers[g_testEvasiveLaserCount++] = laser;
+    }
+}
+
+// What a position costs beyond the bullets that can reach it: room to move,
+// and distance from whatever is generating the pattern.
+f32 GetTestEvasivePositionPenalty(f32 x, f32 y)
+{
+    f32 left = g_GameManager.playerMovementAreaTopLeftPos.x;
+    f32 top = g_GameManager.playerMovementAreaTopLeftPos.y;
+    f32 right = left + g_GameManager.playerMovementAreaSize.x;
+    f32 bottom = top + g_GameManager.playerMovementAreaSize.y;
+    f32 penalty = 0.0f;
+    f32 distance;
+    f32 bossY;
+
+    distance = x - left;
+    if (right - x < distance)
+    {
+        distance = right - x;
+    }
+    if (distance < TEST_EVASIVE_EDGE_MARGIN)
+    {
+        penalty += (TEST_EVASIVE_EDGE_MARGIN - distance) *
+            TEST_EVASIVE_EDGE_PENALTY;
+    }
+    distance = y - top;
+    if (bottom - y < distance)
+    {
+        distance = bottom - y;
+    }
+    if (distance < TEST_EVASIVE_EDGE_MARGIN)
+    {
+        penalty += (TEST_EVASIVE_EDGE_MARGIN - distance) *
+            TEST_EVASIVE_EDGE_PENALTY;
+    }
+    if (g_testEvasiveHasBoss)
+    {
+        bossY = g_testEvasiveBossY;
+        // Negative when the bot has drifted above the boss, which is
+        // where a pattern is least readable.
+        distance = y - bossY;
+        if (distance < TEST_EVASIVE_BOSS_KEEP_DISTANCE)
+        {
+            penalty += (TEST_EVASIVE_BOSS_KEEP_DISTANCE - distance) *
+                TEST_EVASIVE_BOSS_PENALTY;
+        }
+    }
+    return penalty;
+}
+
+void EvaluateTestEvasivePath(Player *player, u16 direction, bool focus,
+                             f32 *score)
+{
+    int sampleFrame;
+    int index;
+    f32 playerX;
+    f32 playerY;
+    f32 clearance;
+    f32 sampleClearance;
+    f32 weighted;
+
+    if (!score)
+    {
+        return;
+    }
+    *score = TEST_EVASIVE_NO_THREAT;
     for (sampleFrame = 0; sampleFrame <= TEST_EVASIVE_LOOKAHEAD_FRAMES;
          sampleFrame += TEST_EVASIVE_SAMPLE_INTERVAL)
     {
         GetTestEvasiveCandidatePosition(player, direction, focus, sampleFrame,
                                         &playerX, &playerY);
-        bullet = g_BulletManager.bullets;
-        for (bulletIndex = 0; bulletIndex < 1024; bulletIndex++, bullet++)
+        sampleClearance = TEST_EVASIVE_NO_THREAT;
+        for (index = 0; index < g_testEvasiveBulletCount; index++)
         {
-            if (bullet->state == BULLET_INACTIVE ||
-                bullet->state == BULLET_DESPAWN)
-            {
-                continue;
-            }
-            // Ignore bullets that cannot reach the local playfield during the
-            // short prediction horizon. This keeps the bot cheap even in a
-            // dense Stage 6 pattern.
-            if (fabsf(bullet->pos.x - player->positionCenter.x) > 360.0f &&
-                fabsf(bullet->pos.y - player->positionCenter.y) > 360.0f)
-            {
-                continue;
-            }
             clearance = GetTestEvasiveBulletClearance(
-                player, bullet, playerX, playerY, sampleFrame);
-            if (clearance < *minimumClearance)
+                player, g_testEvasiveBullets[index], playerX, playerY,
+                sampleFrame);
+            if (clearance < sampleClearance)
             {
-                *minimumClearance = clearance;
-                *minimumFrame = sampleFrame;
+                sampleClearance = clearance;
             }
         }
-
-        laser = g_BulletManager.lasers;
-        for (laserIndex = 0; laserIndex < 64; laserIndex++, laser++)
+        for (index = 0; index < g_testEvasiveLaserCount; index++)
         {
             clearance = GetTestEvasiveLaserClearance(
-                player, laser, playerX, playerY, sampleFrame);
-            if (clearance < *minimumClearance)
+                player, g_testEvasiveLasers[index], playerX, playerY,
+                sampleFrame);
+            if (clearance < sampleClearance)
             {
-                *minimumClearance = clearance;
-                *minimumFrame = sampleFrame;
+                sampleClearance = clearance;
             }
         }
+        weighted = sampleClearance +
+            (f32)sampleFrame * TEST_EVASIVE_TIME_BONUS;
+        if (weighted < *score)
+        {
+            *score = weighted;
+        }
     }
+    GetTestEvasiveCandidatePosition(player, direction, focus,
+                                    TEST_EVASIVE_TARGET_LOOKAHEAD_FRAMES,
+                                    &playerX, &playerY);
+    *score -= GetTestEvasivePositionPenalty(playerX, playerY);
 }
 
 bool GetTestEvasiveTargetX(Player *player, f32 *targetX)
@@ -9788,23 +10001,41 @@ bool GetTestEvasiveTargetX(Player *player, f32 *targetX)
     return true;
 }
 
-bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX)
+bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX,
+                               f32 *targetY)
 {
     Item *item;
     f32 bestScore;
+    f32 bestItemY;
+    f32 playerX;
     f32 playerY;
     f32 pocY;
     f32 left;
     f32 right;
+    f32 top;
+    f32 bottom;
     int itemIndex;
     bool found;
+    bool atMaxPower;
+    bool vacuum;
 
-    if (!player || !player->shooterData || !targetX)
+    if (!player || !player->shooterData || !targetX || !targetY)
     {
         return false;
     }
 
+    // Above the point of collection the game vacuums everything up, but
+    // only for a player who has earned it. Below full power the bot has to
+    // go and touch each item, which is a different movement problem: chase
+    // the item, not the line. Aiming at the line regardless is why a bot
+    // at low power would sit at the top while its P items fell past it.
+    atMaxPower = (i32)GetPlayerPower(player->initParam) >= 128;
+    vacuum = atMaxPower || g_GameManager.difficulty >= DIFF_EXTRA ||
+        player->hasBorder == BORDER_ACTIVE;
+
     bestScore = -1000000000.0f;
+    bestItemY = 0.0f;
+    playerX = player->positionCenter.x;
     playerY = player->positionCenter.y;
     pocY = player->shooterData->pocY;
     found = false;
@@ -9822,26 +10053,34 @@ bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX)
             continue;
         }
 
-        verticalDistance = fabsf(item->currentPosition.y - pocY);
-        horizontalDistance =
-            fabsf(player->positionCenter.x - item->currentPosition.x);
+        verticalDistance = vacuum
+            ? fabsf(item->currentPosition.y - pocY)
+            : fabsf(item->currentPosition.y - playerY);
+        horizontalDistance = fabsf(playerX - item->currentPosition.x);
         priority = 0.0f;
+        // Lives first, then power, and only then everything else. Power is
+        // what the ship shoots with, so an early P outranks any number of
+        // point items; a small P was ranked with them and got ignored.
+        // Once the shot is maxed out a P is a score item and ranks as one.
         switch (item->itemType)
         {
         case ITEM_LIFE:
-            priority = 1000.0f;
-            break;
-        case ITEM_BOMB:
-            priority = 900.0f;
+            priority = 4000.0f;
             break;
         case ITEM_FULL_POWER:
-            priority = 800.0f;
+            priority = atMaxPower ? 200.0f : 3200.0f;
             break;
         case ITEM_POWER_BIG:
-            priority = 700.0f;
+            priority = atMaxPower ? 200.0f : 3000.0f;
+            break;
+        case ITEM_POWER_SMALL:
+            priority = atMaxPower ? 200.0f : 2800.0f;
+            break;
+        case ITEM_BOMB:
+            priority = 1600.0f;
             break;
         default:
-            priority = 100.0f;
+            priority = 200.0f;
             break;
         }
         score = priority - verticalDistance * 1.5f -
@@ -9850,6 +10089,7 @@ bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX)
         {
             bestScore = score;
             *targetX = item->currentPosition.x;
+            bestItemY = item->currentPosition.y;
             found = true;
         }
     }
@@ -9859,7 +10099,9 @@ bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX)
         return false;
     }
     left = g_GameManager.playerMovementAreaTopLeftPos.x;
+    top = g_GameManager.playerMovementAreaTopLeftPos.y;
     right = left + g_GameManager.playerMovementAreaSize.x;
+    bottom = top + g_GameManager.playerMovementAreaSize.y;
     if (*targetX < left)
     {
         *targetX = left;
@@ -9868,24 +10110,31 @@ bool GetTestEvasiveItemTargetX(Player *player, f32 *targetX)
     {
         *targetX = right;
     }
+    *targetY = vacuum ? pocY - 8.0f : bestItemY;
+    if (*targetY < top)
+    {
+        *targetY = top;
+    }
+    else if (*targetY > bottom)
+    {
+        *targetY = bottom;
+    }
     return true;
 }
 
 f32 GetTestEvasiveTargetError(Player *player, u16 direction, bool focus,
-                              f32 targetX, bool collectItems)
+                              f32 targetX, f32 targetY, bool useTargetY)
 {
     f32 candidateX;
     f32 candidateY;
-    f32 targetY;
     f32 error;
 
     GetTestEvasiveCandidatePosition(player, direction, focus,
                                     TEST_EVASIVE_TARGET_LOOKAHEAD_FRAMES,
                                     &candidateX, &candidateY);
     error = fabsf(candidateX - targetX);
-    if (collectItems && player->shooterData)
+    if (useTargetY)
     {
-        targetY = player->shooterData->pocY - 8.0f;
         error += fabsf(candidateY - targetY) * 0.75f;
     }
     return error;
@@ -9904,24 +10153,19 @@ u16 ChooseTestEvasiveInput(Player *player, u32 frame, u32 lane,
         TH_BUTTON_UP | TH_BUTTON_RIGHT,
         TH_BUTTON_DOWN | TH_BUTTON_LEFT,
         TH_BUTTON_DOWN | TH_BUTTON_RIGHT};
-    f32 idleClearance;
-    int idleFrame;
-    bool focus;
-    f32 bestClearance;
+    f32 bestScore;
     int bestIndex;
-    int bestFrame;
     int preferredIndex;
     int index;
-    f32 candidateClearance;
-    int candidateFrame;
-    f32 candidateClearances[9];
-    int candidateFrames[9];
+    f32 candidateScores[18];
     f32 targetX;
+    f32 targetY;
     f32 targetError;
     f32 bestTargetError;
     f32 targetSafetyLoss;
     bool hasTarget;
     bool collectItems;
+    bool useTargetY;
     int targetIndex;
     u32 preferredValue;
 
@@ -9938,35 +10182,38 @@ u16 ChooseTestEvasiveInput(Player *player, u32 frame, u32 lane,
         return 0;
     }
 
-    EvaluateTestEvasivePath(player, 0, false, &idleClearance, &idleFrame);
-    // Fast movement is useful when the playfield is clear; switch to focused
-    // movement earlier near a predicted bullet so the bot can make smaller
-    // corrections instead of waiting until the hitbox is almost occupied.
-    focus = idleClearance < 96.0f ||
-        (idleFrame <= 12 && idleClearance < 128.0f);
-    bestClearance = -1000000.0f;
+    BuildTestEvasiveThreatList(player);
+
+    // Both speeds are evaluated for every direction. Deciding focus once,
+    // from the idle path, committed the bot to a step size before it knew
+    // where it was going - and a gap that is reachable at full speed is
+    // often not reachable focused, and the other way round for a gap that
+    // needs a small correction.
+    for (index = 0; index < 18; index++)
+    {
+        EvaluateTestEvasivePath(player, directions[index % 9], index >= 9,
+                                &candidateScores[index]);
+    }
+
+    bestScore = -1000000.0f;
     bestIndex = 0;
-    bestFrame = TEST_EVASIVE_LOOKAHEAD_FRAMES + 1;
     preferredValue = GetTestRandomInputValue(frame / 45, lane,
                                               0x6a09e667);
-    preferredIndex = (int)(preferredValue % 9);
-    for (index = 0; index < 9; index++)
+    preferredIndex = (int)(preferredValue % 18);
+    for (index = 0; index < 18; index++)
     {
-        EvaluateTestEvasivePath(player, directions[index], focus,
-                                &candidateClearance, &candidateFrame);
-        candidateClearances[index] = candidateClearance;
-        candidateFrames[index] = candidateFrame;
-        if (candidateClearance > bestClearance + 1.0f ||
-            (fabsf(candidateClearance - bestClearance) <= 1.0f &&
+        if (candidateScores[index] > bestScore + 1.0f ||
+            (fabsf(candidateScores[index] - bestScore) <= 1.0f &&
              index == preferredIndex))
         {
-            bestClearance = candidateClearance;
+            bestScore = candidateScores[index];
             bestIndex = index;
-            bestFrame = candidateFrame;
         }
     }
 
-    collectItems = GetTestEvasiveItemTargetX(player, &targetX);
+    targetY = 0.0f;
+    useTargetY = false;
+    collectItems = GetTestEvasiveItemTargetX(player, &targetX, &targetY);
     if (!collectItems)
     {
         hasTarget = GetTestEvasiveTargetX(player, &targetX);
@@ -9974,20 +10221,21 @@ u16 ChooseTestEvasiveInput(Player *player, u32 frame, u32 lane,
     else
     {
         // Item recovery takes priority over lining up shots. Once the item
-        // stream reaches the point-of-collection line, enemy/boss alignment
-        // resumes on the following frame.
+        // stream is collected, enemy/boss alignment resumes on the
+        // following frame.
         hasTarget = true;
+        useTargetY = true;
     }
     if (hasTarget)
     {
         // In a clear pattern, allow the bot to choose the path that lines up
         // with the next enemy or boss. Once bullets are close, only paths
         // nearly as safe as the best path are eligible for target alignment.
-        if (bestClearance > 128.0f)
+        if (bestScore > 128.0f)
         {
             targetSafetyLoss = 96.0f;
         }
-        else if (bestClearance > 32.0f)
+        else if (bestScore > 32.0f)
         {
             targetSafetyLoss = 24.0f;
         }
@@ -9997,15 +10245,15 @@ u16 ChooseTestEvasiveInput(Player *player, u32 frame, u32 lane,
         }
         bestTargetError = TEST_EVASIVE_NO_THREAT;
         targetIndex = -1;
-        for (index = 0; index < 9; index++)
+        for (index = 0; index < 18; index++)
         {
-            if (candidateClearances[index] + targetSafetyLoss <
-                bestClearance)
+            if (candidateScores[index] + targetSafetyLoss < bestScore)
             {
                 continue;
             }
             targetError = GetTestEvasiveTargetError(
-                player, directions[index], focus, targetX, collectItems);
+                player, directions[index % 9], index >= 9, targetX,
+                targetY, useTargetY);
             if (targetIndex < 0 || targetError < bestTargetError - 1.0f ||
                 (fabsf(targetError - bestTargetError) <= 1.0f &&
                  index == preferredIndex))
@@ -10017,26 +10265,37 @@ u16 ChooseTestEvasiveInput(Player *player, u32 frame, u32 lane,
         if (targetIndex >= 0)
         {
             bestIndex = targetIndex;
-            bestClearance = candidateClearances[bestIndex];
-            bestFrame = candidateFrames[bestIndex];
         }
     }
 
     if (useFocus)
     {
-        *useFocus = focus;
+        *useFocus = bestIndex >= 9;
     }
+    // A bomb spent before the hit lands is a bomb spent on a hit that
+    // might never have landed, and the bot was spending them on threats it
+    // would have dodged. TH07 holds a death pending for
+    // initialRespawnTimer frames and cancels it outright if a bomb goes
+    // off inside that window, so there is nothing to guess at: wait for
+    // the hit, then bomb out of it. Being wrong about a threat that never
+    // arrives now costs nothing at all.
+    //
+    // Held for every frame of the window rather than pulsed. The window is
+    // short and an input that arrives a frame late has missed it, while a
+    // held button still spends exactly one bomb: the game guards the edge
+    // itself through bombInfo.isInUse.
+    //
+    // A ship with its border up does not need this. A hit there breaks the
+    // border instead of pending a death, and the game refuses the bomb
+    // anyway while the border's invulnerability is running.
     if (useBomb && !player->bombInfo.isInUse &&
-        player->playerState == PLAYER_STATE_ALIVE &&
-        player->respawnTimer != 0 && player->hasBorder == BORDER_NONE &&
-        GetPlayerBombs((u8)lane) > 0 &&
-        bestFrame <= TEST_EVASIVE_BOMB_TRIGGER_FRAMES &&
-        bestClearance <= TEST_EVASIVE_BOMB_TRIGGER_CLEARANCE &&
-        (frame + lane * 3) % 10 == 0)
+        player->playerState == PLAYER_STATE_DEAD &&
+        player->respawnTimer > 0 && player->hasBorder == BORDER_NONE &&
+        GetPlayerBombs((u8)lane) > 0)
     {
         *useBomb = true;
     }
-    return directions[bestIndex];
+    return directions[bestIndex % 9];
 }
 
 void ApplyTestEvasiveInputForLane(u16 *input, u32 frame, u32 lane)
@@ -11648,6 +11907,7 @@ bool Netplay::Initialize(const char *commandLine)
         g_bgmEnabled = uiSelection.bgmEnabled;
         g_showStagePlayerNames = uiSelection.showStageNames;
         g_showNetDiagnostics = uiSelection.showNetStats;
+        g_writeFrameTrace = uiSelection.writeTrace;
         g_seEnabled = uiSelection.seEnabled;
         requestedPlayerCount = uiSelection.playerCount;
         g_rollbackEnabled = uiSelection.rollback &&
@@ -12218,6 +12478,11 @@ bool Netplay::ShouldShowStagePlayerNames()
 bool Netplay::ShouldShowNetDiagnostics()
 {
     return g_showNetDiagnostics;
+}
+
+bool Netplay::ShouldWriteFrameTrace()
+{
+    return g_writeFrameTrace;
 }
 
 const char *Netplay::GetPlayerName(u8 playerId)
