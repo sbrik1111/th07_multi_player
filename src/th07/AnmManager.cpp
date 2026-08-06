@@ -36,7 +36,7 @@ AnmManager::AnmManager()
 {
     memset(this, 0, sizeof(AnmManager));
 
-    for (i32 i = 0; i < 2560; i++)
+    for (i32 i = 0; i < 2816; i++)
     {
         this->sprites[i].sourceFileIndex = -1;
     }
@@ -297,7 +297,7 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx,
         surfaceDesc.Format != D3DFMT_A1R5G5B5)
     {
         // STRING: TH07 0x00495cb8
-        g_GameErrorContext.Fatal("error : �C���[�W�����������Ă��܂���\r\n");
+        g_GameErrorContext.Fatal("error : イメージがαを持っていません\r\n");
         goto err;
     }
 
@@ -396,7 +396,7 @@ i32 AnmManager::LoadAnms(i32 anmIdx, const char *path, i32 spriteIdxOffset)
     if (!entry)
     {
         // STRING: TH07 0x00495c7c
-        g_GameErrorContext.Fatal("�A�j�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
+        g_GameErrorContext.Fatal("アニメが読み込めません。データが失われてるか壊れています\r\n");
         return ZUN_ERROR;
     }
     while (true)
@@ -437,13 +437,13 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
     id = 0;
     if (!rawEntry)
     {
-        g_GameErrorContext.Fatal("�A�j�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
+        g_GameErrorContext.Fatal("アニメが読み込めません。データが失われてるか壊れています\r\n");
         return ZUN_ERROR;
     }
-    if (textureIdx >= 50)
+    if (textureIdx >= ANM_FILE_SLOT_COUNT)
     {
         // STRING: TH07 0x00495c5c
-        g_GameErrorContext.Fatal("�e�N�X�`���i�[�悪����܂���\r\n");
+        g_GameErrorContext.Fatal("テクスチャ格納先が足りません\r\n");
         return ZUN_ERROR;
     }
     ReleaseAnm(textureIdx);
@@ -451,7 +451,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
     if (data->version != 2)
     {
         // STRING: TH07 0x00495c3c
-        g_GameErrorContext.Fatal("�A�j���̃o�[�W�������Ⴂ�܂�\r\n");
+        g_GameErrorContext.Fatal("アニメのバージョンが違います\r\n");
         return ZUN_ERROR;
     }
     data->textureIdx = textureIdx;
@@ -470,7 +470,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
                 ZUN_SUCCESS)
             {
                 // STRING: TH07 0x00495bf8
-                g_GameErrorContext.Fatal("�e�N�X�`�� %s ���ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n", name);
+                g_GameErrorContext.Fatal("テクスチャ %s が読み込めません。データが失われてるか壊れています\r\n", name);
                 return ZUN_ERROR;
             }
         }
@@ -480,7 +480,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
             if (LoadTextureAlphaChannel(data->textureIdx, name, data->format,
                                         data->color_key) != ZUN_SUCCESS)
             {
-                g_GameErrorContext.Fatal("�e�N�X�`�� %s ���ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n", name);
+                g_GameErrorContext.Fatal("テクスチャ %s が読み込めません。データが失われてるか壊れています\r\n", name);
                 return ZUN_ERROR;
             }
         }
@@ -493,7 +493,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
                 data->format) != ZUN_SUCCESS)
         {
             // STRING: TH07 0x00495bb8
-            g_GameErrorContext.Fatal("�e�N�X�`�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
+            g_GameErrorContext.Fatal("テクスチャが読み込めません。データが失われてるか壊れています\r\n");
             return ZUN_ERROR;
         }
     }
@@ -523,20 +523,20 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
         {
             id = rawSprite->id;
         }
-        if (rawSprite->id + spriteIdxOffset >= 2560)
+        if (rawSprite->id + spriteIdxOffset >= 2816)
         {
             // STRING: TH07 0x00495b80
-            g_GameErrorContext.Fatal("�X�v���C�g���i�[�ł��܂���B�e�[�u�����s�����Ă��܂�\r\n");
+            g_GameErrorContext.Fatal("スプライトが格納できません。テーブルが不足しています\r\n");
             return ZUN_ERROR;
         }
         LoadSprite(rawSprite->id + spriteIdxOffset, &loadedSprite);
     }
     for (i = 0; i < data->numScripts; i++, curSprite += 2)
     {
-        if (*curSprite + spriteIdxOffset >= 2560)
+        if (*curSprite + spriteIdxOffset >= 2816)
         {
             // STRING: TH07 0x00495b4c
-            g_GameErrorContext.Fatal("�A�j�����i�[�ł��܂���B�e�[�u�����s�����Ă��܂�\r\n");
+            g_GameErrorContext.Fatal("アニメが格納できません。テーブルが不足しています\r\n");
             return ZUN_ERROR;
         }
         if (id < *curSprite)
@@ -563,7 +563,7 @@ void AnmManager::ReleaseAnm(i32 anmIdx)
     i32 spriteIdxOffset;
     i32 *spriteIdx;
 
-    if (anmIdx < 0 || (u32)anmIdx >= 50)
+    if (anmIdx < 0 || (u32)anmIdx >= ANM_FILE_SLOT_COUNT)
     {
         return;
     }
@@ -2404,7 +2404,7 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
     if (!data)
     {
         // STRING: TH07 0x00495b30
-        g_GameErrorContext.Fatal("%s���ǂݍ��߂Ȃ��ł��B\r\n", path);
+        g_GameErrorContext.Fatal("%sが読み込めないです。\r\n", path);
         return ZUN_ERROR;
     }
     if (g_Supervisor.d3dDevice->CreateImageSurface(

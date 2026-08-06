@@ -6,6 +6,7 @@
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
+#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "Supervisor.hpp"
@@ -40,8 +41,11 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
 
-    g_LastFrameGameInput = g_CurFrameGameInput;
-    g_CurFrameGameInput = g_CurFrameRawInput;
+    for (i32 playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        g_LastFrameGameInputs[playerId] = g_CurFrameGameInputs[playerId];
+        g_CurFrameGameInputs[playerId] = g_CurFrameRawInputs[playerId];
+    }
     if (g_GameManager.defaultCfg->slowMode)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -116,6 +120,11 @@ u32 ReplayManager::OnUpdateDemoHighPrio(ReplayManager *arg)
     i32 idk = 0;
     g_LastFrameGameInput = g_CurFrameGameInput;
     g_CurFrameGameInput = arg->replayInputs->frameNum;
+    for (i32 playerId = 1; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        g_LastFrameGameInputs[playerId] = g_CurFrameGameInputs[playerId];
+        g_CurFrameGameInputs[playerId] = 0;
+    }
     arg->replayInputs = arg->replayInputs + 1;
     g_IsEighthFrameOfHeldInput = 0;
     if (g_LastFrameGameInput == g_CurFrameGameInput)
@@ -407,9 +416,11 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
                               g_GameManager.globals->cherryStart;
     g_GameManager.cherryPlus = replayData->cherryPlus +
                                g_GameManager.globals->cherryStart;
-    if (g_GameManager.cherryPlus >= g_GameManager.globals->cherryStart + 50000)
+    if (g_GameManager.cherryPlus >=
+        g_GameManager.globals->cherryStart + GetSharedBorderThreshold())
     {
-        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + 50000;
+        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart +
+            GetSharedBorderThreshold();
         g_Player.ActivateBorder();
     }
     *g_GameManager.defaultCfg = arg->data->data.cfg;
@@ -464,8 +475,12 @@ ZunResult ReplayManager::DeletedCallback(ReplayManager *arg)
 // FUNCTION: TH07 0x00443aa0
 ZunResult ReplayManager::RegisterChain(i32 isDemo, const char *replayFilename)
 {
-    g_LastFrameGameInput = 0;
-    g_CurFrameGameInput = 0;
+    i32 playerId;
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        g_LastFrameGameInputs[playerId] = 0;
+        g_CurFrameGameInputs[playerId] = 0;
+    }
     if (!g_ReplayManager)
     {
         ReplayManager *mgr = new ReplayManager();
@@ -568,6 +583,11 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
     DWORD bytesWritten;
     ReplayManager *mgr;
     i32 i;
+
+    if (Netplay::IsMultiplayer() || Netplay::NoSave())
+    {
+        return;
+    }
 
     if (g_ReplayManager)
     {
@@ -738,6 +758,11 @@ void ReplayManager::SaveReplay2(const char *filename)
     DWORD bytesWritten;
     ReplayManager *mgr;
     i32 i;
+
+    if (Netplay::IsMultiplayer() || Netplay::NoSave())
+    {
+        return;
+    }
 
     if (g_ReplayManager)
     {

@@ -28,6 +28,7 @@ LINK_PATH = VC_PATH / "bin" / "link.exe"
 RC_PATH = VC_PATH / "bin" / "rc.exe"
 
 TH07_SOURCES = [
+    "Netplay.cpp",
     "AnmVm.cpp",
     "AsciiManager.cpp",
     "Stage.cpp",
@@ -40,6 +41,7 @@ TH07_SOURCES = [
     "BulletManager.cpp",
     "Gui.cpp",
     "GameManager.cpp",
+    "MultiplayerResources.cpp",
     "Chain.cpp",
     "Controller.cpp",
     "FileSystem.cpp",
@@ -50,6 +52,7 @@ TH07_SOURCES = [
     "ItemManager.cpp",
     "main.cpp",
     "GameWindow.cpp",
+    "LowLatency.cpp",
     "MidiOutput.cpp",
     "Supervisor.cpp",
     "MusicRoom.cpp",
@@ -198,6 +201,7 @@ if args.no_matching:
 lflags_th07 = lflags_base + ["/LTCG"]
 
 libs_th07 = libs_base + [
+    "ws2_32.lib",
     "dsound.lib",
     "d3d8.lib",
     "d3dx8.lib",
@@ -270,6 +274,18 @@ with open("build.ninja", "w") as f:
         elif src in TH07_SMALL:
             cflags_to_use = "$cflags_th07_small"
 
+        # Keep the decompiled implementations available as explicit
+        # fallbacks while LowLatency.cpp supplies the public wrappers. This
+        # avoids runtime code patching, which can trigger security software.
+        if src == "GameWindow.cpp":
+            cflags_to_use += (
+                " /DTH07_COMPILE_ORIGINAL_RENDER /DRender=OriginalRender"
+            )
+        elif src == "Controller.cpp":
+            cflags_to_use += (
+                " /DTH07_COMPILE_ORIGINAL_INPUT /DGetInput=OriginalGetInput"
+            )
+
         f.write(f"build {obj_path}: cxx {src_path}\n")
         f.write(f"  in_cflags = {cflags_to_use}\n")
         f.write(f"  pdb = {pdb_path}\n")
@@ -288,7 +304,7 @@ with open("build.ninja", "w") as f:
         f.write("build resources.res: rc resources.rc\n\n")
         th07_objects.append("resources.res")
 
-    f.write(f"build th07.exe: link {' '.join(th07_objects)}\n")
+    f.write(f"build th07_multi_net.exe: link {' '.join(th07_objects)}\n")
     f.write(f"  in_lflags = $lflags_th07\n")
     f.write(f"  in_libs = $libs_th07\n")
     f.write(f"  order_arg = /order:@{conv_path(RESOURCE_DIR / 'order.txt')}\n\n")

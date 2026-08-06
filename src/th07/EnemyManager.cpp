@@ -5,6 +5,7 @@
 #include "EclManager.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
+#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -686,17 +687,33 @@ void Enemy::CheckBulletPlayerCollision(D3DXVECTOR3 *bulletCenter,
                                        D3DXVECTOR3 *bulletSize)
 {
     D3DXVECTOR3 grazeSize;
+    i32 playerId;
+    bool hitPlayer = false;
 
     grazeSize = *bulletSize / 0.7f;
     if (this->isProjectile &&
         this->timer.HasTicked() &&
         this->timer.current % 6 == 0)
     {
-        g_Player.CheckGraze(bulletCenter, &grazeSize);
+        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+        {
+            if (IsPlayerSlotActive((u8)playerId))
+            {
+                g_Players[playerId].CheckGraze(bulletCenter, &grazeSize);
+            }
+        }
     }
     grazeSize = *bulletSize / 1.5f;
-    if (g_Player.CalcKillboxCollision(bulletCenter, &grazeSize) == 1 &&
-        this->canDie &&
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        if (IsPlayerSlotActive((u8)playerId) &&
+            g_Players[playerId].CalcKillboxCollision(
+                bulletCenter, &grazeSize) == 1)
+        {
+            hitPlayer = true;
+        }
+    }
+    if (hitPlayer && this->canDie &&
         (!this->isBoss && !this->isProjectile))
     {
         this->life = this->life - 10;
@@ -725,9 +742,14 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
     f32 angle;
     i32 i;
     i32 damage;
+    i32 playerDamage[TH07_MULTI_MAX_PLAYERS];
+    i32 playerCollision[TH07_MULTI_MAX_PLAYERS];
+    i32 playerId;
+    i32 damageOwnerId;
     i32 collisionOut;
     i32 stageFactor;
     D3DXVECTOR3 enemyDiff;
+    Player *targetingPlayer;
 
     collisionOut = 0;
     stageFactor = g_GameManager.currentStage >= 5 ? 10 : g_GameManager.currentStage * 2;
@@ -887,23 +909,56 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
             enemy->lastDamage = 0;
             if (enemy->canDie && enemy->isHittable)
             {
-                damage = g_Player.CalcDamageToEnemy(
-                    &enemy->position, &enemy->hitboxSize, &collisionOut);
-                if (enemy->grazeSize.x > 0.0f)
+                damage = 0;
+                collisionOut = 0;
+                damageOwnerId = 0;
+                for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS;
+                     playerId++)
                 {
-                    grazeDamage = g_Player.CalcDamageToEnemy(
-                        &enemy->position, &enemy->grazeSize, &collisionOut);
-                    if (collisionOut == 0)
+                    playerDamage[playerId] = 0;
+                    playerCollision[playerId] = 0;
+                    if (!IsPlayerSlotActive((u8)playerId))
                     {
-                        damage = (i32)((f32)damage + (f32)grazeDamage / 2.5f);
+                        continue;
+                    }
+                    playerDamage[playerId] =
+                        g_Players[playerId].CalcDamageToEnemy(
+                            &enemy->position, &enemy->hitboxSize,
+                            &playerCollision[playerId]);
+                    if (enemy->grazeSize.x > 0.0f)
+                    {
+                        grazeDamage =
+                            g_Players[playerId].CalcDamageToEnemy(
+                                &enemy->position, &enemy->grazeSize,
+                                &playerCollision[playerId]);
+                        if (playerCollision[playerId] == 0)
+                        {
+                            playerDamage[playerId] = (i32)(
+                                (f32)playerDamage[playerId] +
+                                (f32)grazeDamage / 2.5f);
+                        }
+                    }
+                    damage += playerDamage[playerId];
+                    if (playerCollision[playerId] != 0)
+                    {
+                        collisionOut = playerCollision[playerId];
+                    }
+                    // Strictly-greater leaves an exact tie with the lower
+                    // slot, making cherry attribution deterministic.
+                    if (playerDamage[playerId] >
+                        playerDamage[damageOwnerId])
+                    {
+                        damageOwnerId = playerId;
                     }
                 }
                 if (damage > 0)
                 {
-                    if ((enemy->isBoss || !g_Player.isFocus) &&
-                        g_Player.bombInfo.isInUse == 0)
+                    if ((enemy->isBoss ||
+                         !g_Players[damageOwnerId].isFocus) &&
+                        g_Players[damageOwnerId].bombInfo.isInUse == 0)
                     {
-                        if (enemy->isBoss && !g_Player.isFocus)
+                        if (enemy->isBoss &&
+                            !g_Players[damageOwnerId].isFocus)
                         {
                             cherryGain = damage / (10 - stageFactor / 3) * 10;
                         }
@@ -915,14 +970,17 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                         {
                             cherryGain = 70;
                         }
-                        if (cherryGain == 0 && (g_Player.isFocus == 0 ||
+                        if (cherryGain == 0 &&
+                            (g_Players[damageOwnerId].isFocus == 0 ||
                                                 (enemy->timer.GetCurrent() & 1) != 0))
                         {
                             cherryGain = 10;
                         }
 
                         // ABSOLUTELY no reason for this to be a switch statement
-                        switch (g_GameManager.shotTypeAndCharacter)
+                        switch (Netplay::GetPlayerCharacter(
+                                    (u8)damageOwnerId) * 2 +
+                                Netplay::GetPlayerShot((u8)damageOwnerId))
                         {
                         default:
                             break;
@@ -946,7 +1004,11 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                         }
                         if (cherryGain != 0)
                         {
-                            g_GameManager.AddCherryPlus(cherryGain);
+                            // Attribute enemy-damage cherry to the lane that
+                            // dealt the larger share so P2 can fill its own
+                            // Shinra border gauge during co-op play.
+                            g_GameManager.AddCherryPlusForPlayer(
+                                cherryGain, (u8)damageOwnerId);
                         }
                     }
                     if (damage >= 70)
@@ -996,53 +1058,89 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                                 damage = 0;
                             }
                         }
+                        // Scale final boss damage from the current active
+                        // player count: 1P=1, 2P=.75, 3P=2/3.
+                        if (enemy->isBoss)
+                        {
+                            damage = (i32)((f32)damage *
+                                GetMultiplayerBossDamageMultiplier());
+                        }
                         enemy->life -= damage;
                         enemy->lastDamage = damage;
                     }
                     playedDamageSound = 1;
                 }
-                if (enemy->isBoss)
+                for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS;
+                     playerId++)
                 {
-                    diffToPlayer = g_Player.positionOfLastEnemyHit - g_Player.positionCenter;
-                    enemyDiff = enemy->position - g_Player.positionCenter;
-
-                    if (!g_Player.targetingEnemy || fabsf(diffToPlayer.x) > fabsf(enemyDiff.x))
+                    if (!IsPlayerSlotActive((u8)playerId))
                     {
-                        g_Player.positionOfLastEnemyHit = enemy->position;
+                        continue;
                     }
-
-                    if (g_GameManager.character == CHAR_SAKUYA)
+                    targetingPlayer = &g_Players[playerId];
+                    if (enemy->isBoss)
                     {
-                        diffToPlayer = g_Player.sakuyaTargetPosition - g_Player.positionCenter;
-                        angle = atan2f(enemy->position.y - g_Player.positionCenter.y,
-                                       enemy->position.x - g_Player.positionCenter.x);
-
-                        if (angle >= -2.0943952f && angle <= -1.0471976f &&
-                            (!g_Player.targetingEnemy || fabsf(diffToPlayer.x) > fabsf(enemyDiff.x)))
+                        diffToPlayer =
+                            targetingPlayer->positionOfLastEnemyHit -
+                            targetingPlayer->positionCenter;
+                        enemyDiff = enemy->position -
+                            targetingPlayer->positionCenter;
+                        if (!targetingPlayer->targetingEnemy ||
+                            fabsf(diffToPlayer.x) > fabsf(enemyDiff.x))
                         {
-                            g_Player.sakuyaTargetPosition = enemy->position;
-                            g_Player.targetingEnemy = 1;
+                            targetingPlayer->positionOfLastEnemyHit =
+                                enemy->position;
+                        }
+                        if (Netplay::GetPlayerCharacter((u8)playerId) ==
+                            CHAR_SAKUYA)
+                        {
+                            diffToPlayer =
+                                targetingPlayer->sakuyaTargetPosition -
+                                targetingPlayer->positionCenter;
+                            angle = atan2f(
+                                enemy->position.y -
+                                    targetingPlayer->positionCenter.y,
+                                enemy->position.x -
+                                    targetingPlayer->positionCenter.x);
+                            if (angle >= -2.0943952f &&
+                                angle <= -1.0471976f &&
+                                (!targetingPlayer->targetingEnemy ||
+                                 fabsf(diffToPlayer.x) >
+                                     fabsf(enemyDiff.x)))
+                            {
+                                targetingPlayer->sakuyaTargetPosition =
+                                    enemy->position;
+                                targetingPlayer->targetingEnemy = 1;
+                            }
+                        }
+                        else
+                        {
+                            targetingPlayer->targetingEnemy = 1;
                         }
                     }
-                    else
+                    if (!targetingPlayer->targetingEnemy)
                     {
-                        g_Player.targetingEnemy = 1;
-                    }
-                }
-                if (!g_Player.targetingEnemy)
-                {
-                    if (g_Player.positionOfLastEnemyHit.y < enemy->position.y)
-                    {
-                        g_Player.positionOfLastEnemyHit = enemy->position;
-                    }
-                    if (g_GameManager.character == CHAR_SAKUYA &&
-                        g_Player.sakuyaTargetPosition.y < -900.0f)
-                    {
-                        angle = atan2f(enemy->position.y - g_Player.positionCenter.y,
-                                       enemy->position.x - g_Player.positionCenter.x);
-                        if (angle >= -2.0943952f && angle <= -1.0471976f)
+                        if (targetingPlayer->positionOfLastEnemyHit.y <
+                            enemy->position.y)
                         {
-                            g_Player.sakuyaTargetPosition = enemy->position;
+                            targetingPlayer->positionOfLastEnemyHit =
+                                enemy->position;
+                        }
+                        if (Netplay::GetPlayerCharacter((u8)playerId) ==
+                                CHAR_SAKUYA &&
+                            targetingPlayer->sakuyaTargetPosition.y < -900.0f)
+                        {
+                            angle = atan2f(
+                                enemy->position.y -
+                                    targetingPlayer->positionCenter.y,
+                                enemy->position.x -
+                                    targetingPlayer->positionCenter.x);
+                            if (angle >= -2.0943952f &&
+                                angle <= -1.0471976f)
+                            {
+                                targetingPlayer->sakuyaTargetPosition =
+                                    enemy->position;
+                            }
                         }
                     }
                 }
@@ -1092,14 +1190,19 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                 if (enemy->itemDrop >= 0)
                 {
                     g_EffectManager.SpawnParticles(enemy->deathAnm2 + 4, &enemy->position, 3, 0xffffffff);
-                    g_ItemManager.SpawnItem(&enemy->position, enemy->itemDrop, collisionOut);
+                    g_ItemManager.SpawnEnemyDrop(&enemy->position,
+                                                 enemy->itemDrop,
+                                                 collisionOut);
                 }
                 else if (enemy->itemDrop == -1)
                 {
                     if ((i32)arg->randomItemSpawnIdx % 3 == 0)
                     {
                         g_EffectManager.SpawnParticles(enemy->deathAnm2 + 4, &enemy->position, 6, 0xffffffff);
-                        g_ItemManager.SpawnItem(&enemy->position, g_ItemDropTable[arg->randomItemTableIdx], collisionOut);
+                        g_ItemManager.SpawnEnemyDrop(
+                            &enemy->position,
+                            g_ItemDropTable[arg->randomItemTableIdx],
+                            collisionOut);
                         arg->randomItemTableIdx++;
                         if (arg->randomItemTableIdx >= 32)
                         {

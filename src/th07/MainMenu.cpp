@@ -10,6 +10,7 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "Netplay.hpp"
 #include "ReplayManager.hpp"
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
@@ -180,6 +181,17 @@ void InitializeTimingVars(Supervisor *arg)
     arg->timingBadCount = 0;
 }
 
+u32 StartSelectedGame(i32 stageBeforeIncrement)
+{
+    g_GameManager.currentStage = stageBeforeIncrement;
+    g_GameManager.SetReplay(0);
+    g_Supervisor.curState = 2;
+    g_Supervisor.StopAudio();
+    while (g_SoundPlayer.ProcessQueues())
+        ;
+    return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
+}
+
 // FUNCTION: TH07 0x00455435
 void MainMenu::SetGameState(GameState gameState)
 {
@@ -310,6 +322,28 @@ u32 MainMenu::OnUpdatePreInput()
                                             g_MainMenuStrings[i]);
         }
     case 1: {
+        // The first 30 startup calculations run before the first draw. Keep the
+        // request pending until that draw initializes the shared sprite batch.
+        if (g_AnmManager->vertexBufferCurPtr != NULL &&
+            g_AnmManager->vertexBufferStartPtr != NULL &&
+            Netplay::ConsumeQuickStart())
+        {
+            g_GameManager.practice = Netplay::IsQuickStartPractice();
+            g_GameManager.demo = 0;
+            g_GameManager.difficulty = Netplay::GetQuickStartDifficulty();
+            g_GameManager.character = Netplay::GetQuickStartCharacter();
+            g_GameManager.shotType = Netplay::GetQuickStartShot();
+            return StartSelectedGame(Netplay::GetQuickStartStage() - 1);
+        }
+        // A networked session uses the connection launcher and the controls
+        // agreed at connect time, so the original options entry does not belong
+        // in that flow. Local play has neither, and its players still need the
+        // key config. The gate is IsNetworked rather than IsMultiplayer, which
+        // is also true for local co-op and was hiding the entry there too.
+        if (Netplay::IsNetworked() && this->cursor == 6)
+        {
+            this->cursor = 7;
+        }
         i = MoveCursorVertical(8);
         if (i != 0)
         {
@@ -327,8 +361,11 @@ u32 MainMenu::OnUpdatePreInput()
                 &this->vmHead[this->cursor + 1],
                 (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
         }
-        this->demoFramesCount++;
-        if (g_CurFrameRawInput != 0)
+        if (!Netplay::IsDemoDisabled())
+        {
+            this->demoFramesCount++;
+        }
+        if (g_CurFrameRawInput != 0 || Netplay::IsDemoDisabled())
         {
             this->demoFramesCount = 0;
         }
@@ -382,13 +419,19 @@ u32 MainMenu::OnUpdatePreInput()
         }
         if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
         {
+            if (Netplay::IsNetworked() && this->cursor == 6)
+            {
+                this->cursor = 7;
+                this->selected = -1;
+                break;
+            }
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
             g_SoundPlayer.ProcessQueues();
             switch (this->cursor)
             {
             case 0:
                 g_GameManager.practice = 0;
-                this->cursor = g_Supervisor.cfg.defaultDifficulty;
+                this->cursor = Netplay::GetInitialDifficultyCursor();
                 if (this->cursor >= 4)
                 {
                     this->cursor = 2;
@@ -404,7 +447,7 @@ u32 MainMenu::OnUpdatePreInput()
                 return CHAIN_CALLBACK_RESULT_CONTINUE;
             case 2:
                 g_GameManager.practice = 1;
-                this->cursor = g_Supervisor.cfg.defaultDifficulty;
+                this->cursor = Netplay::GetInitialDifficultyCursor();
                 if (this->cursor >= 4)
                 {
                     this->cursor = 2;
@@ -524,6 +567,14 @@ u32 MainMenu::OnUpdatePreInput()
 u32 MainMenu::OnUpdateOptionsMenu()
 {
     i32 i;
+
+    if (Netplay::IsNetworked())
+    {
+        // Guard against an options transition racing the network startup.
+        this->cursor = 7;
+        SetGameState(STATE_PRE_INPUT);
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
 
     switch (this->menuSubState)
     {
@@ -1165,7 +1216,7 @@ u32 MainMenu::OnUpdateSelectDifficulty()
             {
                 return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
             }
-            this->cursor = g_Supervisor.cfg.defaultDifficulty;
+            this->cursor = Netplay::GetInitialDifficultyCursor();
             if (this->gameState != STATE_EXTRA_SELECT_DIFFICULTY)
             {
                 g_AnmManager->SetInterruptActiveVms(this->vmHead, this->vmCount, 7);
@@ -1815,18 +1866,9 @@ u32 MainMenu::OnUpdateSelectShotType()
                 g_GameManager.difficulty = g_Supervisor.cfg.defaultDifficulty;
                 if (g_GameManager.difficulty < DIFF_EXTRA)
                 {
-                    g_GameManager.currentStage = 0;
+                    return StartSelectedGame(0);
                 }
-                else
-                {
-                    g_GameManager.currentStage = g_GameManager.difficulty + DIFF_HARD;
-                }
-                g_Supervisor.curState = 2;
-                g_GameManager.SetReplay(0);
-                g_Supervisor.StopAudio();
-                while (g_SoundPlayer.ProcessQueues())
-                    ;
-                return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
+                return StartSelectedGame(g_GameManager.difficulty + DIFF_HARD);
             }
             this->cursor = 0;
             SetGameState(STATE_SELECT_PRACTICE_STAGE);
@@ -1933,6 +1975,10 @@ u32 MainMenu::OnUpdateSelectPracticeStage()
         local_8 =
             g_GameManager.clrd[g_GameManager.character * 2 + g_GameManager.shotType]
                 .difficultyClearedWithoutRetries[g_Supervisor.cfg.defaultDifficulty];
+        if (Netplay::ShouldForceContentUnlocks())
+        {
+            local_8 = 99;
+        }
         if (local_8 < 0)
         {
             local_8 = 1;
@@ -2411,6 +2457,10 @@ i32 MainMenu::DrawPracticeMenu()
     local_10 =
         g_GameManager.clrd[g_GameManager.character * 2 + g_GameManager.shotType]
             .difficultyClearedWithoutRetries[g_Supervisor.cfg.defaultDifficulty];
+    if (Netplay::ShouldForceContentUnlocks())
+    {
+        local_10 = 99;
+    }
 
     // ZUN bloat: this is always false, since difficultyClearedWithoutRetries is unsigned
     if (local_10 < 0)
@@ -2460,30 +2510,30 @@ i32 MainMenu::MoveCursorVertical(i32 max)
     }
     if (WAS_PRESSED_RAW_AND_IS_EIGHTH(TH_BUTTON_UP))
     {
-        this->cursor--;
+        do
+        {
+            this->cursor--;
+            if (this->cursor < 0)
+            {
+                this->cursor = max - 1;
+            }
+        } while (max == 8 && Netplay::IsNetworked() &&
+                 this->cursor == 6);
         g_SoundPlayer.PlaySoundByIdx(SOUND_MOVE_MENU, 0);
-        if (this->cursor < 0)
-        {
-            this->cursor = max - 1;
-        }
-        if (this->cursor >= max)
-        {
-            this->cursor = 0;
-        }
         return -1;
     }
     if (WAS_PRESSED_RAW_AND_IS_EIGHTH(TH_BUTTON_DOWN))
     {
-        this->cursor++;
+        do
+        {
+            this->cursor++;
+            if (this->cursor >= max)
+            {
+                this->cursor = 0;
+            }
+        } while (max == 8 && Netplay::IsNetworked() &&
+                 this->cursor == 6);
         g_SoundPlayer.PlaySoundByIdx(SOUND_MOVE_MENU, 0);
-        if (this->cursor < 0)
-        {
-            this->cursor = max - 1;
-        }
-        if (this->cursor >= max)
-        {
-            this->cursor = 0;
-        }
         return 1;
     }
     return 0;

@@ -115,6 +115,13 @@ struct AnmRawEntry
     AnmRawScript scripts[10];
 };
 
+// Slots available for loaded ANM files. LoadAnms consumes consecutive
+// entries for a file's child chain, so ids must be spaced clear of the
+// previous file's children. Raised past the original 50 to make room for
+// a third player's face block; LoadAnm and ReleaseAnm bound-check against
+// this rather than a literal.
+#define ANM_FILE_SLOT_COUNT 56
+
 struct AnmEntry
 {
     AnmRawEntry *raw;
@@ -361,15 +368,19 @@ struct AnmManager
     u32 flushesThisFrame;
     Float2 offset;
     D3DXMATRIX matrix;
-    struct AnmLoadedSprite sprites[2560];
+    struct AnmLoadedSprite sprites[2816];
     struct AnmVm vm;
     struct IDirect3DTexture8 *textures[264];
     void *imageDataArray[256];
     char *textureNames[264];
     i32 loadedSpriteCount;
-    struct AnmRawInstr *scripts[2560];
-    i32 spriteIndices[2560];
-    struct AnmEntry anmFiles[50];
+    struct AnmRawInstr *scripts[2816];
+    i32 spriteIndices[2816];
+    // LoadAnms consumes consecutive entries for a file's child chain, so a
+    // new file id has to start clear of the previous one's children. The
+    // original 50 left no gap wide enough for a third face, and squeezing
+    // one in at 41 landed inside FACE2's chain and corrupted it.
+    struct AnmEntry anmFiles[ANM_FILE_SLOT_COUNT];
     struct IDirect3DSurface8 *surfaces[32];
     struct IDirect3DSurface8 *surfacesBis[32];
     struct ZunImageInfo surfaceSourceInfo[32];
@@ -398,5 +409,8 @@ struct AnmManager
     i32 screenshotDstWidth;
     i32 screenshotDstHeight;
 };
-C_ASSERT(sizeof(AnmManager) == 0x17e560);
+// Grown past the original layout by the wider sprite table and the extra
+// anmFiles entries a third player's face needs. This build is already
+// non-matching; the assert exists to catch unintended layout drift.
+C_ASSERT(sizeof(AnmManager) == 0x182da8);
 extern AnmManager *g_AnmManager;

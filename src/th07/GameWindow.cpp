@@ -15,6 +15,7 @@ typedef __w64 long SHANDLE_PTR; // i dont know anymore bro
 #include "Controller.hpp"
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
+#include "Netplay.hpp"
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -36,6 +37,15 @@ f64 g_LastFrameTime;
 
 // GLOBAL: TH07 0x0135e208
 LARGE_INTEGER g_LastPerfCounter;
+
+static bool IsWindowedMode()
+{
+    if (Netplay::ForceFullscreen())
+    {
+        return false;
+    }
+    return g_Supervisor.cfg.windowed || Netplay::ForceWindowed();
+}
 
 // winmain should probably be here
 
@@ -65,7 +75,7 @@ LRESULT __stdcall GameWindow::WindowProc(HWND hWnd, u32 uMsg, WPARAM wParam,
         }
         break;
     case WM_SETCURSOR:
-        if (!g_Supervisor.cfg.windowed)
+        if (!IsWindowedMode())
         {
             if (g_GameWindow.isAppInactive)
             {
@@ -182,7 +192,7 @@ RenderResult GameWindow::Render()
         this->curFrame++;
     }
 
-    if (g_Supervisor.cfg.windowed || g_Supervisor.VsyncEnabled())
+    if (IsWindowedMode() || g_Supervisor.VsyncEnabled())
     {
         if (this->curFrame != 0)
         {
@@ -241,7 +251,7 @@ RenderResult GameWindow::Render()
         }
     }
 
-    if (!g_Supervisor.cfg.windowed && !g_Supervisor.VsyncEnabled())
+    if (!IsWindowedMode() && !g_Supervisor.VsyncEnabled())
     {
         if ((i32)g_Supervisor.cfg.frameskipConfig >= (i32)this->curFrame)
         {
@@ -278,6 +288,8 @@ i32 GameWindow::CreateGameWindow(HINSTANCE hInstance)
     WNDCLASSA base_class;
     i32 width;
     i32 height;
+    RECT windowRect;
+    DWORD windowStyle;
 
     memset(&base_class, 0, sizeof(WNDCLASSA));
     base_class.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
@@ -289,7 +301,7 @@ i32 GameWindow::CreateGameWindow(HINSTANCE hInstance)
     // STRING: TH07 0x00497bd0
     base_class.lpszClassName = "BASE";
     RegisterClassA(&base_class);
-    if (!g_Supervisor.cfg.windowed)
+    if (!IsWindowedMode())
     {
         width = 640;
         height = 480;
@@ -301,12 +313,20 @@ i32 GameWindow::CreateGameWindow(HINSTANCE hInstance)
     }
     else
     {
-        width = GetSystemMetrics(SM_CXFIXEDFRAME) * 2 + 640;
-        height = 480 + GetSystemMetrics(SM_CYFIXEDFRAME) * 2 + GetSystemMetrics(SM_CYCAPTION);
+        width = Netplay::GetWindowClientWidth();
+        height = Netplay::GetWindowClientHeight();
+        windowStyle = WS_VISIBLE | WS_CAPTION | WS_SYSMENU |
+            WS_MINIMIZEBOX;
+        windowRect.left = 0;
+        windowRect.top = 0;
+        windowRect.right = width;
+        windowRect.bottom = height;
+        AdjustWindowRectEx(&windowRect, windowStyle, FALSE, 0);
         g_GameWindow.window = CreateWindowExA(
             0, "BASE", "“Œ•û—dX–²@` Perfect Cherry Blossom. ver 1.00b",
-            WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX,
-            CW_USEDEFAULT, CW_USEDEFAULT, width, height, NULL, NULL,
+            windowStyle, CW_USEDEFAULT, CW_USEDEFAULT,
+            windowRect.right - windowRect.left,
+            windowRect.bottom - windowRect.top, NULL, NULL,
             hInstance, NULL);
     }
     g_Supervisor.hwndGameWindow = g_GameWindow.window;
@@ -342,7 +362,7 @@ i32 GameWindow::InitD3dRendering()
     usingD3dHal = true;
     memset(&presentParams, 0, sizeof(D3DPRESENT_PARAMETERS));
     g_Supervisor.d3dIface->GetAdapterDisplayMode(0, &displayMode);
-    if (!g_Supervisor.cfg.windowed)
+    if (!IsWindowedMode())
     {
         if (g_Supervisor.cfg.use16BitTextures == 1)
         {

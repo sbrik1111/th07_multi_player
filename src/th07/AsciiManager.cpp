@@ -1,6 +1,7 @@
 #include "AsciiManager.hpp"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "AnmIdx.hpp"
 #include "AnmManager.hpp"
@@ -86,10 +87,17 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
     }
     else if (g_GameManager.isInPauseMenu)
     {
+        // Gui::DrawGameScene normally redraws the static HUD only while its
+        // background animation is active.  The pause path stops the later
+        // calculation chains, so keep one draw scheduled each frame; this
+        // also clears the compact P1/P2 resource rows before their icons are
+        // queued again after a long session.
+        g_Supervisor.renderSkipFrames = 1;
         arg->pauseMenu.OnUpdate();
     }
     if (g_GameManager.isInRetryMenu)
     {
+        g_Supervisor.renderSkipFrames = 1;
         arg->retryMenu.OnUpdate();
     }
     arg->UpdateScripts();
@@ -118,6 +126,20 @@ u32 AsciiManager::OnDrawMenus(AsciiManager *arg)
     if (arg->vm.anmFileIdx != 0)
     {
         g_AnmManager->DrawNoRotation(&arg->vm);
+    }
+    if (g_GameManager.isInPauseMenu || g_GameManager.isInRetryMenu)
+    {
+        // PauseMenu/RetryMenu temporarily switch the viewport to the arcade
+        // playfield. Flush those menu sprites while that clip is active, then
+        // restore the full game viewport for ScreenEffect and the next HUD
+        // frame. Leaving the playfield viewport active clips the right HUD
+        // after a long network session when a pause is opened.
+        g_AnmManager->Flush();
+        g_Supervisor.viewport.X = 0;
+        g_Supervisor.viewport.Y = 0;
+        g_Supervisor.viewport.Width = 640;
+        g_Supervisor.viewport.Height = 480;
+        g_Supervisor.d3dDevice->SetViewport(&g_Supervisor.viewport);
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
@@ -240,6 +262,13 @@ void AsciiManager::CutChain()
 // FUNCTION: TH07 0x00401f40
 void AsciiManager::AddString(D3DXVECTOR3 *position, const char *text)
 {
+    // P2 lives and bombs are drawn with the same HUD icons as TH06multi. The
+    // old diagnostic string is still produced by the original Player draw
+    // callback, so consume it here instead of putting text over the HUD.
+    if (strncmp(text, "P2 L", 4) == 0)
+    {
+        return;
+    }
     if (this->numStrings >= 256)
     {
         return;
@@ -254,8 +283,19 @@ void AsciiManager::AddString(D3DXVECTOR3 *position, const char *text)
     strcpy(curString->text, text);
     *(D3DXVECTOR3 *)&curString->position = *position;
     curString->color = this->color;
-    curString->scale.x = this->scale.x;
-    curString->scale.y = this->scale.y;
+    // The network diagnostic is drawn at the very top of the playfield. It
+    // can contain RTT, delay, and a recovery status, so keep it compact and
+    // inside the playfield instead of letting it overlap the score/HUD.
+    if (strncmp(text, "NET ", 4) == 0 && position->y <= 40.0f)
+    {
+        curString->scale.x = this->scale.x * 0.72f;
+        curString->scale.y = this->scale.y * 0.72f;
+    }
+    else
+    {
+        curString->scale.x = this->scale.x;
+        curString->scale.y = this->scale.y;
+    }
     curString->isGui = this->isGui;
 
     if (g_Supervisor.cfg.loaded | g_Supervisor.cfg.disableTextureBlend)
@@ -471,7 +511,12 @@ i32 PauseMenu::OnUpdate()
 {
     u32 i;
 
-    if (WAS_PRESSED_RAW(TH_BUTTON_MENU) && this->curState != 4)
+    // A network peer can enter the shared pause menu on the same frame that
+    // the raw menu edge is first visible here.  curState == 0 is the
+    // uninitialized menu state; treating that edge as an immediate close
+    // skips sprite setup and leaves only the blue background on one peer.
+    if (WAS_PRESSED_RAW(TH_BUTTON_MENU) && this->curState != 0 &&
+        this->curState != 4)
     {
         g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
         this->curState = 4;
@@ -996,6 +1041,13 @@ i32 RetryMenu::OnUpdate()
             g_GameManager.globals->pointItemsCollectedForExtend = 0;
             g_GameManager.globals->currentPower = 0.0f;
             g_GameManager.RegenerateGameIntegrityCsum();
+            for (i = 1; i < TH07_MULTI_MAX_PLAYERS; i++)
+            {
+                if (IsPlayerSlotActive((u8)i))
+                {
+                    ResetMultiplayerPlayerResources((u8)i);
+                }
+            }
             g_GameManager.globals->extendsFromPointItems = 0;
             g_GameManager.globals->nextNeededPointItemsForExtend = 50;
             g_GameManager.cherry = g_GameManager.globals->cherryStart;
@@ -1253,7 +1305,7 @@ void AsciiManager::DrawPopups()
 
         cherry = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
 
-        if (g_Player.hasBorder)
+        if (IsSharedBorderActive())
         {
             this->cherryDigit.color.bytes.r = 255;
             divisor = cherry % 4000;
@@ -1262,9 +1314,11 @@ void AsciiManager::DrawPopups()
                 divisor = 4000 - divisor;
             }
             this->cherryDigit.color.bytes.g =
-                cherry * 192 / 50000 + divisor * 64 / 2000;
+                cherry * 192 / GetSharedBorderThreshold() +
+                divisor * 64 / 2000;
             this->cherryDigit.color.bytes.b =
-                cherry * 192 / 50000 + divisor * 64 / 2000;
+                cherry * 192 / GetSharedBorderThreshold() +
+                divisor * 64 / 2000;
             this->cherryDigit.scale.x = 1.41f;
             this->cherryDigit.scale.y = 1.41f;
             xInc = 10;
@@ -1298,7 +1352,7 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.scale.x = 1.0f;
         this->cherryDigit.scale.y = 1.0f;
 
-        if (g_Player.hasBorder == BORDER_ACTIVE)
+        if (IsSharedBorderActive())
         {
             this->cherryBorderActive.pos = this->cherryGauge.pos;
             this->cherryBorderActive.pos.x += 24.0f;

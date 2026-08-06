@@ -4,6 +4,7 @@
 #include "Chain.hpp"
 #include "EffectManager.hpp"
 #include "GameManager.hpp"
+#include "Multiplayer.hpp"
 #include "inttypes.hpp"
 
 extern const char *g_ShooterTable[6];
@@ -17,7 +18,11 @@ typedef enum PlayerState
     PLAYER_STATE_SPAWNING = 1,
     PLAYER_STATE_DEAD = 2,
     PLAYER_STATE_INVULNERABLE = 3,
-    PLAYER_STATE_BORDER = 4
+    PLAYER_STATE_BORDER = 4,
+    // Multiplayer-only state: this player has no lives left and drifts until
+    // the other player spends a life to bring them back.
+    PLAYER_STATE_SPIRIT = 5,
+    PLAYER_STATE_ELIMINATED = 6
 } PlayerState;
 
 typedef enum PlayerDirection
@@ -294,8 +299,11 @@ struct Player
     ZunTimer fireBulletTimer;
     ZunTimer invulnerabilityTimer;
     ZunTimer borderTimer;
-    i32 unused_16a18;
-    i32 unused_16a1c;
+    i32 lifeGiveTimer;
+    // Receiver slot + 1 while charging a multiplayer life transfer. Zero
+    // means no receiver. Keeping it inside Player makes rollback restore the
+    // target-change reset rule deterministically without changing the layout.
+    i32 lifeGiveTargetToken;
     PlayerBombInfo bombInfo;
     D3DXVECTOR3 bombStartPos;
     f32 optionAngle;
@@ -308,7 +316,38 @@ struct Player
     struct ShtData *shooterDataFocus;
 };
 C_ASSERT(sizeof(Player) == 0xb7e78);
-extern Player g_Player;
+extern Player g_Players[TH07_MULTI_MAX_PLAYERS];
+extern bool g_PlayerActive[TH07_MULTI_MAX_PLAYERS];
+// Diagnostic: how much each player raised cherryMax during the current stage,
+// split by source. cherryMax feeds the stage clear bonus raw, and it was
+// reaching its 9,999,990 ceiling within two stages. Attributing the growth is
+// the only way to tell "three players doing the normal thing" apart from one
+// player running away.
+extern i32 g_cherryMaxGrazeGrowth[TH07_MULTI_MAX_PLAYERS];
+extern i32 g_cherryMaxBreakGrowth[TH07_MULTI_MAX_PLAYERS];
+
+// Compatibility names keep the original decompilation readable while the
+// multiplayer-specific code moves to slot-indexed loops.
+#define g_Player (g_Players[0])
+#define g_Player2 (g_Players[1])
+#define g_Player3 (g_Players[2])
+#define g_Player2Active (g_PlayerActive[1])
+#define g_Player3Active (g_PlayerActive[2])
+
+Player *GetPlayerById(u8 playerId);
+const Player *GetPlayerByIdConst(u8 playerId);
+bool IsPlayerSlotActive(u8 playerId);
+u8 GetActivePlayerMask();
+i32 GetActivePlayerCount();
+bool IsAnyActivePlayerBombing();
+bool VerifyThreePlayerLifeTransferSelectionRules();
+
+Player *GetClosestActivePlayer(D3DXVECTOR3 *position);
+u8 GetPlayerOverlapAlpha(const Player *player);
+bool IsSharedBorderActive();
+void ActivateSharedBorder();
+i32 GetPlayerAnmScript(const Player *player, i32 script);
+i32 GetPlayerEffectSlot(const Player *player, i32 p1Slot);
 
 typedef i32 (*ShtFunc1)(Player *, PlayerBullet *, i32, struct ShtEntry *);
 extern ShtFunc1 g_ShtFireFuncs[6];

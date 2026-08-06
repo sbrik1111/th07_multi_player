@@ -10,6 +10,7 @@
 #include "EnemyManager.hpp"
 #include "GameErrorContext.hpp"
 #include "Gui.hpp"
+#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -32,6 +33,11 @@ i32 g_RankArray[6][3] = {
 // ZUN name: Stg
 // GLOBAL: TH07 0x00626270
 GameManager g_GameManager;
+
+// Diagnostic only: cherryMax was observed outside its legal range in a
+// three-player run, which the ceiling in IncreaseCherryMax should make
+// impossible. Reported once so the log cannot be flooded.
+static bool g_cherryRangeBreachLogged = false;
 
 // GLOBAL: TH07 0x0062f8b4
 ChainElem g_GameManagerCalcChain;
@@ -339,6 +345,17 @@ u32 GameManager::OnUpdate(GameManager *arg)
             g_GameManager.csumFloat = -9999.0f;
         }
     }
+    // Local TH07 configurations are intentionally independent so each PC can
+    // keep its own controller mapping. The original slowdown option is not
+    // input configuration, though: it skips the rest of the calc chain when
+    // the local bullet count is high. If only one peer enabled it, network
+    // frames advanced while that peer skipped gameplay and the two worlds
+    // eventually diverged completely.
+    if (Netplay::IsMultiplayer())
+    {
+        g_GameManager.defaultCfg->slowMode = 0;
+        g_GameManager.slowModeSlowActive = 0;
+    }
     if (g_GameManager.defaultCfg->slowMode)
     {
         g_GameManager.slowModeSlowActive = 0;
@@ -493,7 +510,7 @@ ZunResult ResultScreen::ParseScores()
     if (!scoreDat)
     {
         // STRING: TH07 0x00498090
-        g_GameErrorContext.Log("error : ƒXƒRƒAƒtƒ@ƒCƒ‹‚Ì“Ç‚ÝŽæ‚è‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½Xï¿½Rï¿½Aï¿½tï¿½@ï¿½Cï¿½ï¿½ï¿½Ì“Ç‚ÝŽï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
@@ -556,6 +573,25 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         arg->globals = new ZunGlobals;
         InitializeRngAndCsum();
         *arg->defaultCfg = g_Supervisor.cfg;
+        if (Netplay::IsMultiplayer())
+        {
+            u8 localLifeCount = arg->defaultCfg->lifeCount;
+            u8 localSlowMode = arg->defaultCfg->slowMode;
+
+            // Gameplay-affecting options must be identical on both peers.
+            // Keep keyboard/controller mapping and shot-slow preferences
+            // local, but use PCB's default two starting lives and never skip
+            // simulation frames. Practice/Extra overrides below remain the
+            // same deterministic rules on both PCs.
+            arg->defaultCfg->lifeCount = 2;
+            arg->defaultCfg->slowMode = 0;
+            g_GameErrorContext.Log(
+                "info : multiplayer deterministic config local_lives %u shared_lives %u local_slow %u shared_slow %u\r\n",
+                (unsigned)localLifeCount,
+                (unsigned)arg->defaultCfg->lifeCount,
+                (unsigned)localSlowMode,
+                (unsigned)arg->defaultCfg->slowMode);
+        }
         ZunMemory::Free(arg->tmpBuffer);
         arg->powerItemCountForScore = 0;
         arg->cherry = arg->globals->cherryStart;
@@ -570,7 +606,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         }
         if (Player::RegisterChain(0) != ZUN_SUCCESS)
         {
-            g_GameErrorContext.Log("error : ƒvƒŒƒCƒ„[‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+            g_GameErrorContext.Log("error : ï¿½vï¿½ï¿½ï¿½Cï¿½ï¿½ï¿½[ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
             return ZUN_ERROR;
         }
         if (!g_GameManager.replay)
@@ -729,7 +765,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         if (Player::RegisterChain(0) != ZUN_SUCCESS)
         {
             // STRING: TH07 0x00498064
-            g_GameErrorContext.Log("error : ƒvƒŒƒCƒ„[‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+            g_GameErrorContext.Log("error : ï¿½vï¿½ï¿½ï¿½Cï¿½ï¿½ï¿½[ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
             return ZUN_ERROR;
         }
     }
@@ -783,14 +819,14 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     if (Stage::RegisterChain(arg->currentStage) != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00498038
-        g_GameErrorContext.Log("error : ”wŒiƒf[ƒ^‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½wï¿½iï¿½fï¿½[ï¿½^ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
     if (BulletManager::RegisterChain("data/etama.anm") != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00498010
-        g_GameErrorContext.Log("error : “G’e‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½Gï¿½eï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
@@ -799,28 +835,28 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
             g_EnemyAnmStageFiles[arg->currentStage].anmPath2) != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00497f4c
-        g_GameErrorContext.Log("error : “G‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½Gï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
     if (g_EclManager.Load(g_EclPaths[arg->currentStage]) != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00497e84
-        g_GameErrorContext.Log("error : “G“ª”]‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½Gï¿½ï¿½ï¿½]ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
     if (EffectManager::RegisterChain() != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00497e58
-        g_GameErrorContext.Log("error : ƒGƒtƒFƒNƒg‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : ï¿½Gï¿½tï¿½Fï¿½Nï¿½gï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
     if (Gui::RegisterChain() != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00497e30
-        g_GameErrorContext.Log("error : 2D•\Ž¦‚Ì‰Šú‰»‚ÉŽ¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : 2Dï¿½\ï¿½ï¿½ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÉŽï¿½ï¿½sï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½\r\n");
         return ZUN_ERROR;
     }
 
@@ -963,25 +999,7 @@ void GameManager::DecreaseSubrank(i32 amount)
 // FUNCTION: TH07 0x0042f5a2
 void GameManager::AddCherryPlus(i32 amount)
 {
-    i32 oldCherry = this->cherry;
-    this->cherry = this->cherry + amount;
-    if (this->cherry > this->cherryMax)
-    {
-        this->cherry = this->cherryMax;
-    }
-    if (0 < amount && g_Player.hasBorder == BORDER_NONE)
-    {
-        this->cherryPlus = this->cherryPlus + amount;
-        if (this->cherryPlus >= this->globals->cherryStart + 50000)
-        {
-            this->cherryPlus = this->globals->cherryStart + 50000;
-            g_Player.ActivateBorder();
-        }
-    }
-    if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
-    {
-        g_Gui.ShowFullPowerMode(this->cherry - this->globals->cherryStart, 3);
-    }
+    AddCherryPlusForPlayer(amount, 0);
 }
 
 // FUNCTION: TH07 0x0042f69f
@@ -1018,11 +1036,28 @@ void GameManager::IncreaseCherryMax(i32 amount)
     {
         this->cherryMax = this->globals->cherryStart + 9999990;
     }
+    // Reports the first time cherryMax leaves its legal range. The ceiling
+    // above is the only guard in this function, so anything outside
+    // [cherryStart, cherryStart + 9999990] arrived through a different path.
+    if (!g_cherryRangeBreachLogged &&
+        (this->cherryMax < this->globals->cherryStart ||
+         this->cherryMax > this->globals->cherryStart + 9999990))
+    {
+        g_cherryRangeBreachLogged = true;
+        g_GameErrorContext.Log(
+            "info : cherry max out of range amount %d start %d max %d cherry %d plus %d\r\n",
+            amount, this->globals->cherryStart, this->cherryMax, this->cherry,
+            this->cherryPlus);
+    }
 }
 
 // FUNCTION: TH07 0x0042f7df
 i32 GameManager::HasReachedMaxClears(i32 shotType)
 {
+    if (Netplay::ShouldForceContentUnlocks())
+    {
+        return 1;
+    }
     return this->clrd[shotType].difficultyClearedWithRetries[0] != 99 &&
                    this->clrd[shotType].difficultyClearedWithRetries[1] != 99 &&
                    this->clrd[shotType].difficultyClearedWithRetries[2] != 99 &&
@@ -1034,6 +1069,10 @@ i32 GameManager::HasReachedMaxClears(i32 shotType)
 // FUNCTION: TH07 0x0042f853
 i32 GameManager::HasUnlockedPhantom(i32 shotType)
 {
+    if (Netplay::ShouldForceContentUnlocks())
+    {
+        return 1;
+    }
     i32 local_8 = 0;
     for (i32 i = 0; i < 141; i++)
     {
@@ -1053,6 +1092,10 @@ i32 GameManager::HasUnlockedPhantom(i32 shotType)
 // FUNCTION: TH07 0x0042f8de
 i32 GameManager::HasReachedMaxClearsAllShotTypes()
 {
+    if (Netplay::ShouldForceContentUnlocks())
+    {
+        return 1;
+    }
     return HasReachedMaxClears(0) == 0 && HasReachedMaxClears(1) == 0 &&
                    HasReachedMaxClears(2) == 0 && HasReachedMaxClears(3) == 0 &&
                    HasReachedMaxClears(4) == 0 && HasReachedMaxClears(5) == 0
@@ -1067,6 +1110,11 @@ i32 GameManager::HasUnlockedPhantomAndMaxClears()
     i32 j;
     i32 i;
     i32 spellCardsCaptured;
+
+    if (Netplay::ShouldForceContentUnlocks())
+    {
+        return 1;
+    }
 
     spellCardsCaptured = 0;
     for (i = 0; i < 141; i++)

@@ -37,6 +37,8 @@ enum TouhouButton
 
 #define IS_PRESSED_RAW(key) ((g_CurFrameRawInput & (key)) != 0)
 #define IS_PRESSED_GAME(key) ((g_CurFrameGameInput & (key)) != 0)
+#define IS_PRESSED_PLAYER(player, key)                                      \
+    (((g_CurFrameGameInputs[(player)->initParam] & (key)) != 0))
 #define WAS_PRESSED_RAW(key) (IS_PRESSED_RAW(key) && ((g_CurFrameRawInput & (key)) != (g_LastFrameRawInput & (key))))
 #define WAS_PRESSED_GAME(key) (IS_PRESSED_GAME(key) && ((g_CurFrameGameInput & (key)) != (g_LastFrameGameInput & (key))))
 #define IS_EIGHTH(key) (((g_CurFrameRawInput & (key)) != 0) && (g_IsEighthFrameOfHeldInput != 0))
@@ -46,7 +48,11 @@ namespace Controller
 {
 u16 GetControllerInput(u16 buttons);
 u8 *GetControllerState();
+#ifndef TH07_COMPILE_ORIGINAL_INPUT
 u16 GetInput();
+#endif
+u16 OriginalGetInput();
+u16 GetInput2();
 u16 GetJoystickCaps();
 void ResetKeyboard();
 u32 SetButtonFromControllerInputs(u16 *outButtons, i16 controllerButtonToTest,

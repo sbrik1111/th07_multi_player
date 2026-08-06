@@ -1,6 +1,7 @@
 #include "EffectManager.hpp"
 
 #include "AnmManager.hpp"
+#include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -211,11 +212,32 @@ i32 EffectManager::UpdateGather60Frames(Effect *effect)
 // FUNCTION: TH07 0x0041abe0
 i32 EffectManager::UpdateAttachToPlayer(Effect *effect)
 {
+    static bool focusLogged[TH07_MULTI_MAX_PLAYERS] = {false, false, false};
+    i32 playerId;
     if ((i32)!effect->vm.currentInstruction)
     {
         return false;
     }
 
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        Player *player = &g_Players[playerId];
+        if (!IsPlayerSlotActive((u8)playerId) ||
+            (player->effect != effect && player->focusEffect != effect &&
+             player->borderEffect != effect))
+        {
+            continue;
+        }
+        effect->pos1 = player->positionCenter;
+        if (player->focusEffect == effect && !focusLogged[playerId])
+        {
+            focusLogged[playerId] = true;
+            g_GameErrorContext.Log(
+                "info : P%d focus effect verified slot %d\r\n",
+                playerId + 1, (int)(effect - g_EffectManager.effects));
+        }
+        return true;
+    }
     effect->pos1 = g_Player.positionCenter;
     return true;
 }
@@ -562,7 +584,7 @@ Effect *EffectManager::SpawnParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
     }
 
-    return i >= 400 ? &this->effects[408] : effect;
+    return i >= 400 ? &this->effects[413] : effect;
 }
 
 #pragma var_order(effect, i)
@@ -627,7 +649,7 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
     }
 
-    return i >= 400 ? &this->effects[408] : effect;
+    return i >= 400 ? &this->effects[413] : effect;
 }
 
 // FUNCTION: TH07 0x0041c610
@@ -676,7 +698,9 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     arg->layer1.next = NULL;
     arg->layer2.next = NULL;
     arg->layer3.next = NULL;
-    for (i = 0; i < 408; i++, effect++)
+    // Process the particle pool plus all 13 fixed P1/P2/P3 player slots.
+    // effects[413] remains an allocation-failure sentinel.
+    for (i = 0; i < 413; i++, effect++)
     {
         if (!effect->inUseFlag)
         {
@@ -734,10 +758,31 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     }
 }
 
+static void ApplyPlayerFocusOverlapAlpha(Effect *effect)
+{
+    i32 playerId;
+    for (playerId = 1; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        if (IsPlayerSlotActive((u8)playerId) &&
+            effect == g_Players[playerId].focusEffect)
+        {
+            u8 alpha = GetPlayerOverlapAlpha(&g_Players[playerId]);
+            if (alpha < (u8)(effect->vm.color.color >> 24))
+            {
+                effect->vm.color.color =
+                    (effect->vm.color.color & 0x00ffffff) |
+                    ((u32)alpha << 24);
+            }
+            return;
+        }
+    }
+}
+
 // FUNCTION: TH07 0x0041ca10
 u32 EffectManager::OnDraw(EffectManager *arg)
 {
     Effect *effect;
+    u32 originalColor;
 
     effect = arg->layer0.next;
     while (effect)
@@ -745,14 +790,20 @@ u32 EffectManager::OnDraw(EffectManager *arg)
         effect->vm.pos = effect->pos1;
         effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+        originalColor = effect->vm.color.color;
+        ApplyPlayerFocusOverlapAlpha(effect);
         g_AnmManager->Draw(&effect->vm);
+        effect->vm.color.color = originalColor;
         effect = effect->next;
     }
     effect = arg->layer2.next;
     while (effect)
     {
         effect->vm.pos = effect->pos1;
+        originalColor = effect->vm.color.color;
+        ApplyPlayerFocusOverlapAlpha(effect);
         g_AnmManager->DrawBillboard(&effect->vm);
+        effect->vm.color.color = originalColor;
         effect = effect->next;
     }
     effect = arg->layer3.next;
@@ -761,7 +812,10 @@ u32 EffectManager::OnDraw(EffectManager *arg)
         effect->vm.pos = effect->pos1;
         effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+        originalColor = effect->vm.color.color;
+        ApplyPlayerFocusOverlapAlpha(effect);
         g_AnmManager->Draw(&effect->vm);
+        effect->vm.color.color = originalColor;
         effect = effect->next;
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;

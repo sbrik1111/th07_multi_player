@@ -31,6 +31,10 @@ u16 Controller::GetJoystickCaps()
         return 1;
     }
     joyGetDevCapsA(0, &g_JoystickCaps, 0x194);
+    g_GameErrorContext.Log(
+        "info : controller detected name '%s' buttons %u axes %u\r\n",
+        g_JoystickCaps.szPname, (unsigned)g_JoystickCaps.wNumButtons,
+        (unsigned)g_JoystickCaps.wNumAxes);
     return 0;
 }
 
@@ -405,6 +409,24 @@ u16 Controller::GetInput()
         buttons |= KEY_PRESSED(DIK_R, TH_BUTTON_RESET);
     }
     return GetControllerInput(buttons);
+}
+
+// Local co-op keyboard. Network peers use the normal P1 mapping on each
+// machine, so this mapping is only consumed by --local mode.
+u16 Controller::GetInput2()
+{
+    u16 buttons = 0;
+#define ASYNC_KEY_PRESSED(vk, button) \
+    (((GetAsyncKeyState(vk) & 0x8000) != 0) ? (button) : 0)
+    buttons |= ASYNC_KEY_PRESSED('I', TH_BUTTON_UP);
+    buttons |= ASYNC_KEY_PRESSED('K', TH_BUTTON_DOWN);
+    buttons |= ASYNC_KEY_PRESSED('J', TH_BUTTON_LEFT);
+    buttons |= ASYNC_KEY_PRESSED('L', TH_BUTTON_RIGHT);
+    buttons |= ASYNC_KEY_PRESSED('F', TH_BUTTON_SHOOT);
+    buttons |= ASYNC_KEY_PRESSED('G', TH_BUTTON_BOMB);
+    buttons |= ASYNC_KEY_PRESSED('D', TH_BUTTON_FOCUS);
+#undef ASYNC_KEY_PRESSED
+    return buttons;
 }
 
 // FUNCTION: TH07 0x004312c0
