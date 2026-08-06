@@ -84,5 +84,11 @@ section to mod_config.ini next to the executable:
   DwmFlush = 0         experimental queue bound; slower on the tested PCs
 Every value above is the default, so omitting the section changes nothing.
 
+A networked session writes netplay_trace.txt next to the executable: a few
+megabytes an hour, and the only record of what two PCs stopped agreeing about
+if a session desyncs. Untick "Write netplay_trace.txt" under Advanced settings
+to stop it, or set FrameTrace = 0 in a [Diagnostics] section of
+mod_config.ini. A session that desyncs with it off leaves nothing to read.
+
 Do not redistribute th07.dat or thbgm.dat. They are required runtime data,
 but must come from the user's own legitimate game installation.

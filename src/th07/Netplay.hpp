@@ -173,6 +173,7 @@ const char *GetPlayerName(u8 playerId);
 // affect what is drawn, so peers need not agree on them.
 bool ShouldShowStagePlayerNames();
 bool ShouldShowNetDiagnostics();
+bool ShouldWriteFrameTrace();
 // Draw P2's life/bomb icon rows in the original HUD sprite batch. Gui calls
 // this next to P1's rows so both sets use the same render state.
 void DrawPlayer2ResourceIcons();
