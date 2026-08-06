@@ -13,6 +13,10 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
+**v0.1.5** adds a power transfer. Overlap a partner and tap shot eight times to
+send them twenty power; it crosses the screen as power items that home to them,
+the way a transferred life does.
+
 **v0.1.4** turns every `Advanced settings` switch off by default. The
 player-name labels and `netplay_trace.txt` were both on, so a fresh install drew
 names over the ships and wrote a growing file next to the executable without
@@ -150,6 +154,10 @@ diagnostics setting.
 - **Life transfer**: overlap two ships within 20 pixels, then release shot and
   hold focus for 90 frames. A life item homes to the other player; a player
   who is out of lives is revived directly
+- **Power transfer**: overlap two ships within 20 pixels and tap shot eight
+  times. Twenty power crosses as power items that home to the other player. A
+  counter appears over the ship from the fourth tap. It only offers itself when
+  the giver has twenty to spare and the partner is short of full power
 - **Unlocks** for Extra, Phantasm, every character and every practice stage are
   forced in memory so that differing `score.dat` progress cannot change the
   synchronized menu structure. Nothing is written back to the save

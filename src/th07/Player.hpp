@@ -337,6 +337,19 @@ extern i32 g_cherryMaxBreakGrowth[TH07_MULTI_MAX_PLAYERS];
 Player *GetPlayerById(u8 playerId);
 const Player *GetPlayerByIdConst(u8 playerId);
 bool IsPlayerSlotActive(u8 playerId);
+// Five bomb taps while overlapping a partner hand over power. The counter
+// and its window live outside Player because Player's layout is fixed by a
+// size assertion; the rollback snapshot carries them explicitly instead.
+const i32 POWER_GIVE_TAPS_REQUIRED = 8;
+const i32 POWER_GIVE_TAP_WINDOW = 24;
+const i32 POWER_GIVE_AMOUNT = 20;
+// Ordinary shooting produces press edges all the time. Showing the count
+// from the first one would put a counter over the ship whenever two
+// players happened to be close, so it waits until the taps look
+// deliberate.
+const i32 POWER_GIVE_PROMPT_AFTER = 4;
+extern i32 g_powerGiveTaps[TH07_MULTI_MAX_PLAYERS];
+extern i32 g_powerGiveWindow[TH07_MULTI_MAX_PLAYERS];
 u8 GetActivePlayerMask();
 i32 GetActivePlayerCount();
 bool IsAnyActivePlayerBombing();
