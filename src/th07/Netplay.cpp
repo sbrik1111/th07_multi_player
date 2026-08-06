@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <float.h>
 
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
@@ -832,6 +833,8 @@ bool IsRollbackSnapshotFrame(u32 simulationFrame)
 void SetStatus(const char *text);
 void GetConnectionUiConfigPath(char *path, int pathSize);
 void ResetPlayerLifecycleTrace();
+void ResetItemTrace();
+void ResetEnemyTrace();
 
 // Writes one line to both the error context and netplay_trace.txt, flushing
 // so the line is on disk before the next frame. Only low-rate diagnostics
@@ -3773,6 +3776,8 @@ void ResetInputRings()
     }
     g_bossPendingSampleFrame = INVALID_FRAME;
     ResetPlayerLifecycleTrace();
+    ResetItemTrace();
+    ResetEnemyTrace();
     g_bossPendingBossCount = 0;
     g_bossPendingLifeSum = 0;
     g_bossPendingLife0 = -1;
@@ -6899,7 +6904,7 @@ void LogPlayerBodyTrace(u32 currentFrame)
     char *cursor = line;
     int playerId;
 
-    if (g_testSeconds <= 0 ||
+    if (!Netplay::IsNetworked() ||
         currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG ||
         g_playerTracePositionLines >= PLAYER_TRACE_POSITION_LIMIT)
     {
@@ -6938,6 +6943,376 @@ void LogPlayerBodyTrace(u32 currentFrame)
     NetplayTraceFileBuffered(line);
 }
 
+// Which item changed, and when.
+//
+// The item section is the one that diverges in practice, and its hash is a
+// fold over every live entry, so it reports that the two pools differ
+// without saying which entry or how. Spawn, disappearance and a change of
+// type or state are the differences that a position diff would not explain,
+// and one of them is already a suspect: SpawnItem turns a Power drop into
+// Cherry when the round-robin owner is at maximum, a decision that reads
+// player power and consumes no RNG. That is precisely a difference that
+// leaves the RNG, bullets and enemies in step, which is what the reported
+// divergence looks like.
+const int ITEM_TRACE_RING = DETAILED_STATE_CONFIRM_LAG * 4;
+const int ITEM_TRACE_CAPACITY = 1101;
+const u32 ITEM_TRACE_LINE_LIMIT = 20000;
+const int ITEM_TRACE_POSITION_INTERVAL = 30;
+const u32 ITEM_TRACE_POSITION_LIMIT = 40000;
+
+struct ItemTraceEntry
+{
+    u8 inUse;
+    u8 itemType;
+    u8 state;
+    u8 autoCollect;
+    u32 x;
+    u32 y;
+};
+
+struct ItemTraceSample
+{
+    u32 frame;
+    i32 stageFrame;
+    i32 nextIndex;
+    i32 activeItemCount;
+    ItemTraceEntry entries[ITEM_TRACE_CAPACITY];
+};
+
+ItemTraceSample g_itemTraceRing[ITEM_TRACE_RING];
+ItemTraceSample g_itemTraceLast;
+bool g_itemTraceHasLast = false;
+u32 g_itemTraceLines = 0;
+u32 g_itemTracePositionLines = 0;
+
+void ResetItemTrace()
+{
+    int index;
+    for (index = 0; index < ITEM_TRACE_RING; index++)
+    {
+        g_itemTraceRing[index].frame = INVALID_FRAME;
+    }
+    g_itemTraceHasLast = false;
+    g_itemTraceLines = 0;
+    g_itemTracePositionLines = 0;
+}
+
+// Captured where the player sample is, so a replayed frame overwrites the
+// prediction it made the first time through.
+void CaptureItemTraceSample(u32 frame)
+{
+    ItemTraceSample *sample;
+    i32 i;
+
+    if (!Netplay::IsNetworked() || !g_GameManager.notInMenu ||
+        g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
+    {
+        return;
+    }
+    sample = &g_itemTraceRing[frame % (u32)ITEM_TRACE_RING];
+    sample->frame = frame;
+    sample->stageFrame = (i32)g_GameManager.framesThisStage;
+    sample->nextIndex = g_ItemManager.nextIndex;
+    sample->activeItemCount = g_ItemManager.activeItemCount;
+    for (i = 0; i < ITEM_TRACE_CAPACITY; i++)
+    {
+        const Item &item = g_ItemManager.items[i];
+        ItemTraceEntry *entry = &sample->entries[i];
+        entry->inUse = (u8)(item.isInUse ? 1 : 0);
+        entry->itemType = (u8)item.itemType;
+        entry->state = (u8)item.state;
+        entry->autoCollect = (u8)item.autoCollect;
+        entry->x = item.isInUse
+            ? StateFloatBits(item.currentPosition.x) : 0;
+        entry->y = item.isInUse
+            ? StateFloatBits(item.currentPosition.y) : 0;
+    }
+}
+
+// One line per entry that changed between two confirmed frames. Only the
+// confirmed frame is emitted, for the same reason the player trace does it:
+// a predicted frame reports transitions the next rollback takes back, and
+// the whole value of the trace is that a line present on one peer and
+// absent on another means something.
+u32 g_lastLoggedFpuControlWord = 0xffffffff;
+u32 g_fpuControlWordPins = 0;
+
+// The graphics driver, not this code, decides how the simulation rounds.
+// GameWindow creates the Direct3D device without D3DCREATE_FPU_PRESERVE, so
+// Direct3D sets the x87 precision control - to single precision on all three
+// machines measured here - and sets it again on every Reset, which is what a
+// device lost to an alt-tab or a mode change produces. Two things follow that
+// a lockstep simulation cannot tolerate: three peers with three drivers may
+// round differently while agreeing on every input, and one peer that resets
+// mid-session may start rounding differently from itself. The values that
+// would show it first are the ones that accumulate a fraction per frame - an
+// item's fall speed grows by 0.03 a frame, which is not representable at
+// either precision.
+//
+// So the word is pinned every frame instead of being left to whoever touched
+// it last. It is pinned to single precision rather than to the CRT default,
+// because that is what the game has been running at: asking Direct3D to
+// preserve the default would change the arithmetic of every existing
+// session. The observed value is still logged whenever it changes, so a
+// driver that was moving it does not become invisible now that it is
+// corrected.
+const int ENEMY_TRACE_CAPACITY = 481;
+const u32 ENEMY_TRACE_LINE_LIMIT = 20000;
+
+struct EnemyTraceEntry
+{
+    u8 active;
+    i32 life;
+    u32 x;
+    u32 y;
+};
+
+struct EnemyTraceSample
+{
+    u32 frame;
+    i32 stageFrame;
+    EnemyTraceEntry entries[ENEMY_TRACE_CAPACITY];
+};
+
+EnemyTraceSample g_enemyTraceRing[ITEM_TRACE_RING];
+EnemyTraceSample g_enemyTraceLast;
+bool g_enemyTraceHasLast = false;
+u32 g_enemyTraceLines = 0;
+
+void ResetEnemyTrace()
+{
+    int index;
+    for (index = 0; index < ITEM_TRACE_RING; index++)
+    {
+        g_enemyTraceRing[index].frame = INVALID_FRAME;
+    }
+    g_enemyTraceHasLast = false;
+    g_enemyTraceLines = 0;
+}
+
+void CaptureEnemyTraceSample(u32 frame)
+{
+    EnemyTraceSample *sample;
+    i32 i;
+
+    if (!Netplay::IsNetworked() || !g_GameManager.notInMenu ||
+        g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
+    {
+        return;
+    }
+    sample = &g_enemyTraceRing[frame % (u32)ITEM_TRACE_RING];
+    sample->frame = frame;
+    sample->stageFrame = (i32)g_GameManager.framesThisStage;
+    for (i = 0; i < ENEMY_TRACE_CAPACITY; i++)
+    {
+        const Enemy &enemy = g_EnemyManager.enemies[i];
+        EnemyTraceEntry *entry = &sample->entries[i];
+        entry->active = (u8)(enemy.active ? 1 : 0);
+        entry->life = enemy.active ? enemy.life : 0;
+        entry->x = enemy.active ? StateFloatBits(enemy.position.x) : 0;
+        entry->y = enemy.active ? StateFloatBits(enemy.position.y) : 0;
+    }
+}
+
+void LogEnemyTrace(u32 currentFrame)
+{
+    EnemyTraceSample *sample;
+    u32 frame;
+    char line[192];
+    i32 i;
+
+    if (!Netplay::IsNetworked() ||
+        currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG ||
+        g_enemyTraceLines >= ENEMY_TRACE_LINE_LIMIT)
+    {
+        return;
+    }
+    frame = currentFrame - (u32)DETAILED_STATE_CONFIRM_LAG;
+    sample = &g_enemyTraceRing[frame % (u32)ITEM_TRACE_RING];
+    if (sample->frame != frame)
+    {
+        return;
+    }
+    if (!g_enemyTraceHasLast)
+    {
+        g_enemyTraceLast = *sample;
+        g_enemyTraceHasLast = true;
+        return;
+    }
+    for (i = 0; i < ENEMY_TRACE_CAPACITY; i++)
+    {
+        const EnemyTraceEntry *now = &sample->entries[i];
+        const EnemyTraceEntry *was = &g_enemyTraceLast.entries[i];
+        const char *event;
+        if (g_enemyTraceLines >= ENEMY_TRACE_LINE_LIMIT)
+        {
+            break;
+        }
+        if (now->active == was->active && now->life == was->life)
+        {
+            continue;
+        }
+        if (now->active && !was->active)
+        {
+            event = "spawn";
+        }
+        else if (!now->active && was->active)
+        {
+            event = "gone";
+        }
+        else
+        {
+            event = "hit";
+        }
+        sprintf(line,
+                "info : enemy %s frame %lu stage %ld idx %ld"
+                " life %ld/%ld p %08lx,%08lx was %08lx,%08lx\r\n",
+                event, (unsigned long)frame,
+                (long)sample->stageFrame, (long)i,
+                (long)was->life, (long)now->life,
+                (unsigned long)now->x, (unsigned long)now->y,
+                (unsigned long)was->x, (unsigned long)was->y);
+        NetplayTraceFileBuffered(line);
+        g_enemyTraceLines++;
+    }
+    g_enemyTraceLast = *sample;
+}
+
+void EnforceFpuControlWord(u32 frame)
+{
+    u32 control;
+
+    if (!Netplay::IsNetworked())
+    {
+        return;
+    }
+    control = (u32)_control87(0, 0);
+    if (control != g_lastLoggedFpuControlWord)
+    {
+        g_lastLoggedFpuControlWord = control;
+        g_GameErrorContext.Log(
+            "info : fpu control word %08lx frame %lu pins %lu\r\n",
+            (unsigned long)control, (unsigned long)frame,
+            (unsigned long)g_fpuControlWordPins);
+    }
+    if ((control & (_MCW_PC | _MCW_RC)) != (_PC_24 | _RC_NEAR))
+    {
+        _control87(_PC_24 | _RC_NEAR, _MCW_PC | _MCW_RC);
+        g_fpuControlWordPins++;
+        g_lastLoggedFpuControlWord = (u32)_control87(0, 0);
+        g_GameErrorContext.Log(
+            "info : fpu control word pinned to %08lx from %08lx frame %lu\r\n",
+            (unsigned long)g_lastLoggedFpuControlWord,
+            (unsigned long)control, (unsigned long)frame);
+    }
+}
+
+void LogItemPositionTrace(u32 frame, const ItemTraceSample *sample)
+{
+    char line[160];
+    i32 i;
+
+    if (frame % (u32)ITEM_TRACE_POSITION_INTERVAL != 0 ||
+        g_itemTracePositionLines >= ITEM_TRACE_POSITION_LIMIT)
+    {
+        return;
+    }
+    for (i = 0; i < ITEM_TRACE_CAPACITY; i++)
+    {
+        const ItemTraceEntry *entry = &sample->entries[i];
+        if (!entry->inUse)
+        {
+            continue;
+        }
+        sprintf(line,
+                "info : item pos frame %lu stage %ld idx %ld t%d s%d a%d"
+                " p %08lx,%08lx\r\n",
+                (unsigned long)frame, (long)sample->stageFrame,
+                (long)i, (int)entry->itemType,
+                (int)entry->state, (int)entry->autoCollect,
+                (unsigned long)entry->x, (unsigned long)entry->y);
+        NetplayTraceFileBuffered(line);
+        g_itemTracePositionLines++;
+        if (g_itemTracePositionLines >= ITEM_TRACE_POSITION_LIMIT)
+        {
+            return;
+        }
+    }
+}
+
+void LogItemTrace(u32 currentFrame)
+{
+    ItemTraceSample *sample;
+    u32 frame;
+    char line[256];
+    i32 i;
+
+    if (!Netplay::IsNetworked() ||
+        currentFrame < (u32)DETAILED_STATE_CONFIRM_LAG)
+    {
+        return;
+    }
+    frame = currentFrame - (u32)DETAILED_STATE_CONFIRM_LAG;
+    sample = &g_itemTraceRing[frame % (u32)ITEM_TRACE_RING];
+    if (sample->frame != frame)
+    {
+        return;
+    }
+    LogItemPositionTrace(frame, sample);
+    if (!g_itemTraceHasLast)
+    {
+        g_itemTraceLast = *sample;
+        g_itemTraceHasLast = true;
+        return;
+    }
+    for (i = 0; i < ITEM_TRACE_CAPACITY; i++)
+    {
+        const ItemTraceEntry *now = &sample->entries[i];
+        const ItemTraceEntry *was = &g_itemTraceLast.entries[i];
+        const char *event;
+        if (g_itemTraceLines >= ITEM_TRACE_LINE_LIMIT)
+        {
+            break;
+        }
+        if (now->inUse == was->inUse && now->itemType == was->itemType &&
+            now->state == was->state &&
+            now->autoCollect == was->autoCollect)
+        {
+            continue;
+        }
+        if (now->inUse && !was->inUse)
+        {
+            event = "spawn";
+        }
+        else if (!now->inUse && was->inUse)
+        {
+            event = "gone";
+        }
+        else
+        {
+            event = "change";
+        }
+        sprintf(line,
+                "info : item %s frame %lu stage %ld idx %ld"
+                " t%d/%d s%d/%d a%d/%d"
+                " p %08lx,%08lx next %ld count %ld\r\n",
+                event, (unsigned long)frame,
+                (long)sample->stageFrame, (long)i,
+                (int)was->itemType, (int)now->itemType,
+                (int)was->state, (int)now->state,
+                (int)was->autoCollect, (int)now->autoCollect,
+                (unsigned long)now->x, (unsigned long)now->y,
+                (long)sample->nextIndex, (long)sample->activeItemCount);
+        NetplayTraceFileBuffered(line);
+        g_itemTraceLines++;
+        if (g_itemTraceLines >= ITEM_TRACE_LINE_LIMIT)
+        {
+            break;
+        }
+    }
+    g_itemTraceLast = *sample;
+}
+
 void RefreshDetailedStateHashesForSlot(int slot, u32 frame)
 {
     if (slot < 0 || slot >= INPUT_RING_SIZE)
@@ -6950,6 +7325,8 @@ void RefreshDetailedStateHashesForSlot(int slot, u32 frame)
     ApplyTestBossDesync(frame);
     CaptureBossSample(frame);
     CapturePlayerLifecycleSample(frame);
+    CaptureItemTraceSample(frame);
+    CaptureEnemyTraceSample(frame);
     if (!ShouldSampleDetailedState(frame))
     {
         g_localPlayerHash[slot] = 0;
@@ -12987,6 +13364,9 @@ bool Netplay::SynchronizeInputs(
         LogBossLifeTrace(currentFrame);
         LogPlayerLifecycleTrace(currentFrame);
         LogPlayerBodyTrace(currentFrame);
+        LogItemTrace(currentFrame);
+        LogEnemyTrace(currentFrame);
+        EnforceFpuControlWord(currentFrame);
         if (g_testRngMismatchEnabled && g_mode == MODE_HOST &&
             !g_testRngMismatchInjected && currentFrame == 120)
         {

@@ -75,6 +75,23 @@ f32 GetMultiplayerBossDamageMultiplier()
     return 1.0f;
 }
 
+i32 GetMultiplayerRankPenalty(i32 amount)
+{
+    // Rank is one shared value, but deaths and bombs are per player, so three
+    // players feed it three times as many penalties as the difficulty curve
+    // was tuned for and the patterns thin out. Dividing each penalty by the
+    // player count restores the single-player rate of decay: the same amount
+    // of rank is lost per unit of play, no matter how many ships are losing
+    // it. What goes up - the timed IncreaseSubrank - is already shared, so it
+    // is left alone.
+    i32 activeCount = GetActivePlayerCount();
+    if (activeCount <= 1)
+    {
+        return amount;
+    }
+    return amount / activeCount;
+}
+
 void ApplyActivePlayerCountParameters(i32 previousCount, i32 newCount)
 {
     i32 cherryRange;

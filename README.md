@@ -138,10 +138,16 @@ Dependencies: uv, ninja, and wine on Linux.
 - **The title screen and the ending run very slowly in three player
   sessions.** Both are outside the synchronized gameplay loop, and the extra
   peer makes them noticeably worse
-- **A session can still desync.** Most reports turned out to be a faulty
-  detector and were fixed, but a real divergence remains: peers stop agreeing
-  and their games drift apart with no recovery. It is not reliably
-  reproducible. If it happens, everyone should leave and rematch
+- **A session can desync.** Two causes have been found and fixed. The first was
+  a faulty detector that reported divergences between peers that agreed. The
+  second was real: the peers disagreed about *which* enemies drop items. That
+  choice is made by a pair of counters rather than by the random number
+  generator, so a session could run with its ships, its enemies and its random
+  stream in perfect lockstep while the items on screen were different - a
+  divergence with nothing upstream of it to find. Neither fix guarantees there
+  is not a third. If a session does drift apart, everyone should leave and
+  rematch; `netplay_trace.txt`, written next to the executable, records what
+  the peers stopped agreeing about
 
 ## Data and rights
 

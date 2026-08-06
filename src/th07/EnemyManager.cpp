@@ -1597,6 +1597,35 @@ ZunResult EnemyManager::AddedCallback(EnemyManager *arg)
 
     arg->randomItemSpawnIdx = g_Rng.GetRandomU16InRange(3);
     arg->randomItemTableIdx = g_Rng.GetRandomU16InRange(8);
+    // Which enemies drop, and what they drop, is decided by these two
+    // counters and nothing else: the test is randomItemSpawnIdx % 3 and the
+    // item is g_ItemDropTable[randomItemTableIdx]. Neither consumes RNG, so
+    // two peers that seed them differently drop from different enemies for
+    // the rest of the stage while their RNG streams, their enemies and their
+    // ships stay in perfect lockstep - a divergence with nothing upstream of
+    // it to find.
+    //
+    // Measured on three machines: the guests seeded 0 and 2, the host 2 and
+    // 4. Every enemy died on the same frame at the same coordinates on all
+    // three, and from the first kill onwards the guests dropped from the
+    // 1st, 4th, 7th and 10th while the host dropped from the 2nd, 5th, 8th
+    // and 11th, one step apart in the table as well.
+    //
+    // g_Rng is the wrong source at this point. This runs at chain
+    // registration, on the stage boundary, and a networked session
+    // resynchronizes the RNG on those boundaries: a draw taken just before
+    // the resync lands is not the draw the other peers took, and these two
+    // values outlive the stream that produced them. The draws are kept so
+    // the stream advances exactly as it did before, and only the values are
+    // replaced - by the session seed, which every peer received from the
+    // host at connect and which no resync touches.
+    if (Netplay::IsNetworked())
+    {
+        u32 stageSeed = (u32)Netplay::GetInitialRngSeed(0) * 2654435761u +
+            (u32)g_GameManager.currentStage * 2246822519u;
+        arg->randomItemSpawnIdx = (u16)((stageSeed >> 13) % 3);
+        arg->randomItemTableIdx = (u16)((stageSeed >> 19) % 8);
+    }
     arg->spellcardInfo.isActive = 0;
 
     D3DXVECTOR3 vec = D3DXVECTOR3(-999.0f, -999.0f, -999.0f);
