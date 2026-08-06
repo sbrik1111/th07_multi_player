@@ -9,6 +9,29 @@ for the multiplayer design.
 The original game data (`th07.dat` and `thbgm.dat`) is not included. Supply it
 from your own legitimate copy of the game.
 
+## Current status
+
+Three-player netplay has been confirmed working in testing.
+
+**v0.1.2** fixes a serious item-drop synchronization issue related to item
+randomization, which could cause different items to appear between players.
+This is still an experimental release, so other desyncs may remain.
+
+## Known issues
+
+- **Player-name labels may display incorrectly at the start of a stage.**
+- **The screen breaks up while paused.** The pause menu draws over a frame the
+  network code may not have finished, and the result can be torn or partly
+  stale until play resumes
+- **The title screen and the ending run very slowly in three player
+  sessions.** Both are outside the synchronized gameplay loop, and the extra
+  peer makes them noticeably worse
+- **A session can still desync.** v0.1.2 fixes the known item-drop
+  synchronization issue, but this does not guarantee that every possible cause
+  has been found. If a session drifts apart, everyone should leave and rematch.
+  `netplay_trace.txt`, written next to the executable, records what the peers
+  stopped agreeing about
+
 ## What it does
 
 - **Two or three player netplay** over UDP. The host is P1, the guests are P2
@@ -129,25 +152,6 @@ Dependencies: uv, ninja, and wine on Linux.
 - Everyone must run the **same `th07_multi_net.exe` and the same game data**
 - Latency or packet loss beyond the 24 frame history stalls the game while it
   waits for the missing input
-
-## Known issues
-
-- **The screen breaks up while paused.** The pause menu draws over a frame the
-  network code may not have finished, and the result can be torn or partly
-  stale until play resumes
-- **The title screen and the ending run very slowly in three player
-  sessions.** Both are outside the synchronized gameplay loop, and the extra
-  peer makes them noticeably worse
-- **A session can desync.** Two causes have been found and fixed. The first was
-  a faulty detector that reported divergences between peers that agreed. The
-  second was real: the peers disagreed about *which* enemies drop items. That
-  choice is made by a pair of counters rather than by the random number
-  generator, so a session could run with its ships, its enemies and its random
-  stream in perfect lockstep while the items on screen were different - a
-  divergence with nothing upstream of it to find. Neither fix guarantees there
-  is not a third. If a session does drift apart, everyone should leave and
-  rematch; `netplay_trace.txt`, written next to the executable, records what
-  the peers stopped agreeing about
 
 ## Data and rights
 
