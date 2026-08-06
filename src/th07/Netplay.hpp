@@ -174,6 +174,9 @@ const char *GetPlayerName(u8 playerId);
 bool ShouldShowStagePlayerNames();
 bool ShouldShowNetDiagnostics();
 bool ShouldWriteFrameTrace();
+// Appends one line to netplay_trace.txt. For diagnostics that outlive the
+// 8 KiB error context, from modules that cannot see the writer directly.
+void WriteTraceLine(const char *line);
 // Draw P2's life/bomb icon rows in the original HUD sprite batch. Gui calls
 // this next to P1's rows so both sets use the same render state.
 void DrawPlayer2ResourceIcons();

@@ -10,6 +10,7 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
+#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -111,6 +112,53 @@ ZunResult EclManager::CallEclSub(EnemyEclContext *ctx, i16 subId)
     return ZUN_SUCCESS;
 }
 
+i32 g_eclTraceLastBossSub = -1;
+i32 g_eclTraceLastShotFrame = -1;
+u32 g_eclTraceLines = 0;
+
+void TraceBossEclSub(Enemy *enemy, i32 subId, const char *how)
+{
+    char line[160];
+    if (!enemy || !enemy->isBoss || g_eclTraceLines >= 4000)
+    {
+        return;
+    }
+    if (subId == g_eclTraceLastBossSub)
+    {
+        return;
+    }
+    g_eclTraceLastBossSub = subId;
+    g_eclTraceLines++;
+    sprintf(line,
+            "info : ecl boss sub %ld via %s stage_frame %ld life %ld"
+            " shot %d\r\n",
+            (long)subId, how,
+            (long)g_GameManager.framesThisStage,
+            (long)enemy->life,
+            (int)g_GameManager.shotTypeAndCharacter);
+    Netplay::WriteTraceLine(line);
+}
+
+void TraceShotTypeRead(Enemy *enemy)
+{
+    char line[160];
+    i32 frame = (i32)g_GameManager.framesThisStage;
+    if (frame == g_eclTraceLastShotFrame || g_eclTraceLines >= 4000)
+    {
+        return;
+    }
+    g_eclTraceLastShotFrame = frame;
+    g_eclTraceLines++;
+    sprintf(line,
+            "info : ecl shottype read stage_frame %ld sub %ld boss %d"
+            " value %d\r\n",
+            (long)frame,
+            enemy ? (long)enemy->currentContext.subId : -1L,
+            enemy && enemy->isBoss ? 1 : 0,
+            (int)g_GameManager.shotTypeAndCharacter);
+    Netplay::WriteTraceLine(line);
+}
+
 // FUNCTION: TH07 0x0040e5b0
 i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
 {
@@ -149,6 +197,7 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case VAR_LIFE:
         return enemy->life;
     case VAR_PLAYER_SHOTTYPE:
+        TraceShotTypeRead(enemy);
         return g_GameManager.shotTypeAndCharacter;
     case VAR_LOCAL_FLOAT2_1:
         return enemy->currentContext.eclContextArgs.floatVars2[0];
@@ -360,6 +409,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case VAR_LIFE:
         return (f32)enemy->life;
     case VAR_PLAYER_SHOTTYPE:
+        TraceShotTypeRead(enemy);
         return (f32)g_GameManager.shotTypeAndCharacter;
     case VAR_ITEMDROP:
         return (f32)enemy->itemDrop;
@@ -681,6 +731,19 @@ void EclManager::BeginSpellcard(Enemy *enemy, EclRawInstr *instr)
     g_EnemyManager.spellcardInfo.isCapturing = 1;
     g_EnemyManager.spellcardInfo.spellcardIdx =
         instr->args[0].us[1];
+    {
+        char line[176];
+        sprintf(line,
+                "info : ecl spell declared index %d sub %ld boss_id %ld"
+                " life %ld max %ld stage_frame %ld shot %d\r\n",
+                (int)g_EnemyManager.spellcardInfo.spellcardIdx,
+                (long)enemy->currentContext.subId,
+                (long)enemy->bossId,
+                (long)enemy->life, (long)enemy->maxLife,
+                (long)g_GameManager.framesThisStage,
+                (int)g_GameManager.shotTypeAndCharacter);
+        Netplay::WriteTraceLine(line);
+    }
     g_EnemyManager.spellcardInfo.captureScore =
         g_SpellcardScore[g_EnemyManager.spellcardInfo.spellcardIdx];
     g_EnemyManager.spellcardInfo.grazeBonusScore = 0;
@@ -1171,6 +1234,7 @@ restart:
                     enemy->savedContextStack[enemy->stackDepth] = enemy->currentContext;
                 }
                 g_EclManager.CallEclSub(&enemy->currentContext, (i16)local_8);
+                TraceBossEclSub(enemy, local_8, "call");
                 enemy->currentContext.eclContextArgs.globalVars = g_GlobalEclVars;
                 if (!enemy->noStackRet && enemy->stackDepth < 15)
                 {
@@ -1681,6 +1745,9 @@ restart:
                 }
                 g_EclManager.CallEclSub(&enemy->currentContext,
                                         enemy->interrupts[enemy->runInterrupt]);
+                TraceBossEclSub(enemy,
+                                enemy->interrupts[enemy->runInterrupt],
+                                "interrupt");
                 if (enemy->stackDepth < 15)
                 {
                     enemy->stackDepth = enemy->stackDepth + 1;

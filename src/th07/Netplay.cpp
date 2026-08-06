@@ -53,6 +53,7 @@ const u16 NETPLAY_FLAG_TEST_DAMAGE_EVENTS = 1024;
 // through the GUI, but old CLI Host/Guest pairs must continue to start
 // immediately after WELCOME.
 const u16 NETPLAY_FLAG_CONNECTION_UI = 2048;
+const u16 NETPLAY_FLAG_PIN_FPU = 4096;
 const int DEFAULT_PORT = 35000;
 // One frame is enough for the normal Tailscale/LAN path and removes one
 // full 60 Hz frame of input latency from the old default. Users can still
@@ -311,7 +312,10 @@ bool g_winsockStarted = false;
 bool g_invincible = false;
 // Per-PC display preferences. Neither changes simulation state, so they
 // are never exchanged: two peers may disagree about them all session.
-bool g_showStagePlayerNames = true;
+// Every launcher switch starts off. An advanced section that arrives with
+// something already enabled is one the player has to go and read before
+// they know what their game is doing.
+bool g_showStagePlayerNames = false;
 bool g_showNetDiagnostics = false;
 // netplay_trace.txt is the only record of what two peers stopped agreeing
 // about, and it is what identified the item-drop divergence. It is also a
@@ -319,7 +323,23 @@ bool g_showNetDiagnostics = false;
 // megabytes an hour - so it is a setting rather than a fact. On by default:
 // a session that desyncs without it leaves nothing to read, and the cost of
 // having it is a file nobody has to open.
-bool g_writeFrameTrace = true;
+// Off unless someone asks for it. It is the only record of what two peers
+// stopped agreeing about, but it is also a file that grows next to the
+// executable for as long as people play, and most sessions never need it.
+// A test run turns it on regardless - the harness reads it.
+bool g_writeFrameTrace = false;
+// Whether to hold the x87 control word to a fixed value every frame.
+// Direct3D sets it when it creates the device and again on every reset, so
+// pinning it is what stops two machines - or one machine either side of an
+// alt-tab - from rounding differently. Off by default: on every machine
+// measured the word was already the value it would be pinned to, so the
+// pin never fired, and an unmeasured per-frame cost in the frame loop is
+// worth more than a correction that never happens.
+//
+// Host-authoritative, unlike the other launcher switches. Peers that
+// disagree about how to round floats are the exact failure it exists to
+// prevent, so the host's answer is the one that counts.
+bool g_pinFpuControlWord = false;
 bool g_demoDisabled = false;
 bool g_quickStartEnabled = false;
 bool g_quickStartPending = false;
@@ -2036,6 +2056,7 @@ enum
     UI_ID_SHOW_NET_STATS = 129,
     UI_ID_STATUS_LABEL = 130,
     UI_ID_WRITE_TRACE = 131,
+    UI_ID_PIN_FPU = 132,
 };
 
 // Everything below the role selector is pushed down by its height. Keeping it
@@ -2043,11 +2064,10 @@ enum
 // coordinates.
 const int UI_ROLE_ROW_HEIGHT = 34;
 
-// Height of the three advanced rows. Hiding the checkboxes without
-// closing the space they occupied left a blank band in the middle of the
-// window, so everything below moves up by this much while they are
-// hidden.
-const int UI_ADVANCED_BLOCK_HEIGHT = 76;
+// Height of the four advanced rows. Hiding the checkboxes without closing
+// the space they occupied left a blank band in the middle of the window,
+// so everything below moves up by this much while they are hidden.
+const int UI_ADVANCED_BLOCK_HEIGHT = 100;
 
 const UINT CONNECTION_UI_TIMER_ID = 1;
 const UINT CONNECTION_UI_TIMER_INTERVAL_MS = 15;
@@ -2078,6 +2098,7 @@ struct ConnectionUiSelection
     bool showStageNames;
     bool showNetStats;
     bool writeTrace;
+    bool pinFpu;
     bool cancelled;
 };
 
@@ -2095,6 +2116,7 @@ struct ConnectionUiState
     HWND stageNamesCheck;
     HWND netStatsCheck;
     HWND traceCheck;
+    HWND pinFpuCheck;
     HWND connectButton;
     HWND startButton;
     HWND status;
@@ -2325,11 +2347,13 @@ void LoadConnectionUiConfig(ConnectionUiSelection *selection)
     selection->evasiveBot =
         GetPrivateProfileIntA("Connection", "GuestEvasiveBot", 0, path) != 0;
     selection->showStageNames =
-        GetPrivateProfileIntA("Display", "StagePlayerNames", 1, path) != 0;
+        GetPrivateProfileIntA("Display", "StagePlayerNames", 0, path) != 0;
     selection->showNetStats =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
     selection->writeTrace =
-        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 1, path) != 0;
+        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 0, path) != 0;
+    selection->pinFpu =
+        GetPrivateProfileIntA("Diagnostics", "PinFpu", 0, path) != 0;
     // P2 is selected in the in-game TH06-style setup screen. Keep these
     // fields at -1 so a stale pre-UI configuration cannot bypass that step.
     selection->p2Character = -1;
@@ -2358,11 +2382,13 @@ void LoadDisplayPreferences()
     char path[MAX_PATH];
     GetConnectionUiConfigPath(path, sizeof(path));
     g_showStagePlayerNames =
-        GetPrivateProfileIntA("Display", "StagePlayerNames", 1, path) != 0;
+        GetPrivateProfileIntA("Display", "StagePlayerNames", 0, path) != 0;
     g_showNetDiagnostics =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
     g_writeFrameTrace =
-        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 1, path) != 0;
+        GetPrivateProfileIntA("Diagnostics", "FrameTrace", 0, path) != 0;
+    g_pinFpuControlWord =
+        GetPrivateProfileIntA("Diagnostics", "PinFpu", 0, path) != 0;
 }
 
 void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
@@ -2400,6 +2426,8 @@ void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
                                selection->showNetStats ? "1" : "0", path);
     WritePrivateProfileStringA("Diagnostics", "FrameTrace",
                                selection->writeTrace ? "1" : "0", path);
+    WritePrivateProfileStringA("Diagnostics", "PinFpu",
+                               selection->pinFpu ? "1" : "0", path);
 }
 
 void SetConnectionUiStatus(const char *text)
@@ -2450,6 +2478,8 @@ bool ReadConnectionUiFields()
         GetDlgItem(g_connectionUi.window, UI_ID_SHOW_NET_STATS);
     g_connectionUi.traceCheck =
         GetDlgItem(g_connectionUi.window, UI_ID_WRITE_TRACE);
+    g_connectionUi.pinFpuCheck =
+        GetDlgItem(g_connectionUi.window, UI_ID_PIN_FPU);
     if (!g_connectionUi.hostEdit || !g_connectionUi.playerNameEdit ||
         !g_connectionUi.portEdit ||
         !g_connectionUi.delayEdit || !g_connectionUi.bgmCheck ||
@@ -2547,6 +2577,12 @@ bool ReadConnectionUiFields()
             SendMessageA(g_connectionUi.traceCheck, BM_GETCHECK, 0,
                          0) == BST_CHECKED;
     }
+    if (g_connectionUi.pinFpuCheck)
+    {
+        g_connectionUi.selection.pinFpu =
+            SendMessageA(g_connectionUi.pinFpuCheck, BM_GETCHECK, 0,
+                         0) == BST_CHECKED;
+    }
     g_connectionUi.selection.playerCount =
         IsDlgButtonChecked(g_connectionUi.window,
                            UI_ID_PLAYER_COUNT_3) == BST_CHECKED
@@ -2571,6 +2607,7 @@ void SetConnectionUiNetworkFieldsEnabled(bool enabled)
     EnableWindow(g_connectionUi.stageNamesCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.netStatsCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.traceCheck, enabled ? TRUE : FALSE);
+    EnableWindow(g_connectionUi.pinFpuCheck, enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_2),
                  enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_3),
@@ -3271,14 +3308,14 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
 {
     static const int advancedIds[] = {
         UI_ID_GUEST_EVASIVE_BOT, UI_ID_SHOW_NET_STATS,
-        UI_ID_SHOW_STAGE_NAMES, UI_ID_WRITE_TRACE
+        UI_ID_SHOW_STAGE_NAMES, UI_ID_WRITE_TRACE, UI_ID_PIN_FPU
     };
     // The y each control sits at while the advanced rows are shown.
     static const ConnectionUiMovedControl movedControls[] = {
-        { UI_ID_CONNECT, 440 },
-        { UI_ID_STATUS_LABEL, 480 }, { UI_ID_STATUS, 500 },
-        { UI_ID_START_GAME, 580 }, { UI_ID_START_LOCAL, 580 },
-        { UI_ID_CANCEL, 620 }
+        { UI_ID_CONNECT, 464 },
+        { UI_ID_STATUS_LABEL, 504 }, { UI_ID_STATUS, 524 },
+        { UI_ID_START_GAME, 604 }, { UI_ID_START_LOCAL, 604 },
+        { UI_ID_CANCEL, 644 }
     };
     int shift = visible ? 0 : UI_ADVANCED_BLOCK_HEIGHT;
     int index;
@@ -3318,7 +3355,7 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
     {
         SetWindowPos(window, NULL, 0, 0,
                      windowRect.right - windowRect.left,
-                     686 + UI_ROLE_ROW_HEIGHT - shift,
+                     710 + UI_ROLE_ROW_HEIGHT - shift,
                      SWP_NOMOVE | SWP_NOZORDER);
     }
     InvalidateRect(window, NULL, TRUE);
@@ -3482,6 +3519,10 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
             "BUTTON", "Write netplay_trace.txt (desync diagnosis)",
             BS_AUTOCHECKBOX, 20, 410, 370, 22, window,
             UI_ID_WRITE_TRACE);
+        g_connectionUi.pinFpuCheck = CreateConnectionUiControl(
+            "BUTTON", "Pin FPU control word (host decides)",
+            BS_AUTOCHECKBOX, 20, 434, 370, 22, window,
+            UI_ID_PIN_FPU);
         SendMessageA(g_connectionUi.netStatsCheck, BM_SETCHECK,
                      g_connectionUi.selection.showNetStats ? BST_CHECKED
                                                            : BST_UNCHECKED,
@@ -3498,23 +3539,27 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
                      g_connectionUi.selection.writeTrace ? BST_CHECKED
                                                          : BST_UNCHECKED,
                      0);
+        SendMessageA(g_connectionUi.pinFpuCheck, BM_SETCHECK,
+                     g_connectionUi.selection.pinFpu ? BST_CHECKED
+                                                     : BST_UNCHECKED,
+                     0);
         g_connectionUi.connectButton = CreateConnectionUiControl(
-            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 440, 370, 32,
+            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 464, 370, 32,
             window, UI_ID_CONNECT);
-        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 480,
+        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 504,
                                   80, 20, window, UI_ID_STATUS_LABEL);
         g_connectionUi.status = CreateConnectionUiControl(
-            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 500, 370,
+            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 524, 370,
             72, window, UI_ID_STATUS);
         g_connectionUi.startButton = CreateConnectionUiControl(
             "BUTTON", "Start Game",
-            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 580, 160, 32, window,
+            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 604, 160, 32, window,
             UI_ID_START_GAME);
         CreateConnectionUiControl("BUTTON", "Start Game (local)",
-                                  BS_PUSHBUTTON, 220, 580, 160, 32, window,
+                                  BS_PUSHBUTTON, 220, 604, 160, 32, window,
                                   UI_ID_START_LOCAL);
         CreateConnectionUiControl("BUTTON", "Cancel", BS_PUSHBUTTON, 280,
-                                  620, 100, 28, window, UI_ID_CANCEL);
+                                  644, 100, 28, window, UI_ID_CANCEL);
         SetConnectionUiRole(
             window, g_connectionUi.selection.mode == Netplay::MODE_GUEST);
         SetConnectionUiAdvancedVisible(window, false);
@@ -3675,7 +3720,7 @@ bool RunConnectionUi(ConnectionUiSelection *selection, bool rollbackAllowed)
         WS_EX_APPWINDOW, className, "th07_multi_net - Connection",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
          CW_USEDEFAULT, CW_USEDEFAULT, 430,
-         686 + UI_ROLE_ROW_HEIGHT - UI_ADVANCED_BLOCK_HEIGHT, NULL,
+         710 + UI_ROLE_ROW_HEIGHT - UI_ADVANCED_BLOCK_HEIGHT, NULL,
          NULL, instance, NULL);
     if (!g_connectionUi.window)
     {
@@ -5135,6 +5180,7 @@ void ApplyHostOptions(const NetPacket &packet, bool armQuickStart)
         "info : controller suppression local %d effective %d mode %d\r\n",
         g_localIgnoreControllerInput ? 1 : 0,
         g_ignoreControllerInput ? 1 : 0, (int)g_mode);
+    g_pinFpuControlWord = (packet.flags & NETPLAY_FLAG_PIN_FPU) != 0;
     g_rollbackEnabled = (packet.flags & NETPLAY_FLAG_ROLLBACK) != 0;
     g_rollbackEverEnabled = g_rollbackEverEnabled || g_rollbackEnabled;
     // Scripted damage changes simulation state, so it is Host-authoritative
@@ -7251,7 +7297,8 @@ void EnforceFpuControlWord(u32 frame)
             (unsigned long)control, (unsigned long)frame,
             (unsigned long)g_fpuControlWordPins);
     }
-    if ((control & (_MCW_PC | _MCW_RC)) != (_PC_24 | _RC_NEAR))
+    if (g_pinFpuControlWord &&
+        (control & (_MCW_PC | _MCW_RC)) != (_PC_24 | _RC_NEAR))
     {
         _control87(_PC_24 | _RC_NEAR, _MCW_PC | _MCW_RC);
         g_fpuControlWordPins++;
@@ -7511,11 +7558,21 @@ void LogSpellLifecycle(u32 frame)
     g_lastLoggedSpellActive = active;
     g_lastLoggedSpellState = state;
     g_lastLoggedSpellIndex = index;
-    g_GameErrorContext.Log(
-        "info : spell lifecycle frame %lu active %d stage_state %d index %d boss0 %d boss0_life %d\r\n",
-        (unsigned long)frame, active, state, index,
-        GetEnemyPoolIndex(g_EnemyManager.bosses[0]),
-        g_EnemyManager.bosses[0] ? g_EnemyManager.bosses[0]->life : -1);
+    {
+        char line[192];
+        sprintf(line,
+                "info : spell lifecycle frame %lu active %d stage_state %d"
+                " index %d boss0 %d boss0_life %d shot %d\r\n",
+                (unsigned long)frame, active, state, index,
+                GetEnemyPoolIndex(g_EnemyManager.bosses[0]),
+                g_EnemyManager.bosses[0] ? g_EnemyManager.bosses[0]->life : -1,
+                (int)g_GameManager.shotTypeAndCharacter);
+        g_GameErrorContext.Log("%s", line);
+        // The error context holds 8 KiB, and a stage of ordinary
+        // diagnostics evicts this long before the boss arrives - which is
+        // when it matters. The trace file has no such limit.
+        NetplayTraceFileBuffered(line);
+    }
 }
 
 // Samples boss HP so the three peer logs can be diffed directly. Unlike the
@@ -11502,6 +11559,11 @@ bool Netplay::Initialize(const char *commandLine)
     // before the players start the match.
     g_demoDisabled = useConnectionUi || isTestPreset ||
         HasOption(commandLine, "--no-demo");
+    // The trace is off by default now, and the test harness reads it: it
+    // counts deaths, diffs items and enemies, and follows a boss through a
+    // stage. A preset run turns it on whatever the configuration says.
+    g_writeFrameTrace = g_writeFrameTrace || isTestPreset ||
+        g_testSeconds > 0;
     g_autoShoot = isTestPreset || HasOption(commandLine, "--auto-shoot");
     g_autoSkip = isTestPreset || HasOption(commandLine, "--auto-skip");
     g_autoBomb = isFullRunTest || HasOption(commandLine, "--auto-bomb");
@@ -11908,6 +11970,7 @@ bool Netplay::Initialize(const char *commandLine)
         g_showStagePlayerNames = uiSelection.showStageNames;
         g_showNetDiagnostics = uiSelection.showNetStats;
         g_writeFrameTrace = uiSelection.writeTrace;
+        g_pinFpuControlWord = uiSelection.pinFpu;
         g_seEnabled = uiSelection.seEnabled;
         requestedPlayerCount = uiSelection.playerCount;
         g_rollbackEnabled = uiSelection.rollback &&
@@ -12483,6 +12546,11 @@ bool Netplay::ShouldShowNetDiagnostics()
 bool Netplay::ShouldWriteFrameTrace()
 {
     return g_writeFrameTrace;
+}
+
+void Netplay::WriteTraceLine(const char *line)
+{
+    NetplayTraceFileBuffered(line);
 }
 
 const char *Netplay::GetPlayerName(u8 playerId)
