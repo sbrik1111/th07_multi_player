@@ -1,68 +1,159 @@
-# th07
+# th07_multi_player
 
-<img src="resources/progress.svg" alt="th07.exe: Implemented: 100%. Accuracy: 99.38%" width="50%">
-<img src="resources/custom/progress.svg" alt="custom.exe: Implemented: 100%. Accuracy: 100%" width="50%">
+An experimental modification that lets **two or three people play Touhou 7 ~
+Perfect Cherry Blossom together**. Built on the decompilation at
+[some100/th07](https://github.com/some100/th07), with
+[RUEEE/th06_multi_net](https://github.com/RUEEE/th06_multi_net) as a reference
+for the multiplayer design.
 
-A work-in-progress reimplementation/decompilation of 東方妖々夢　～ Perfect Cherry Blossom 1.00b (md5: 0126afce1e805370d36c3482445e98da) by Team Shanghai Alice.
+The original game data (`th07.dat` and `thbgm.dat`) is not included. Supply it
+from your own legitimate copy of the game.
 
-This repository builds two executables, th07.exe (the main game) and custom.exe (the configuration tool).
+## What it does
 
-The game should be fully playable, given it is 100% implemented. The vast majority of functions are either functionally or completely matched with the original, but there are still a few (mostly constructors) that are not currently matching. The behavior of the program should be functionally identical to the original binary, but there may be bugs or differences not present within the original. Perfect functional accuracy is an eventual goal.
+- **Two or three player netplay** over UDP. The host is P1, the guests are P2
+  and P3; guest-to-guest input is relayed through the host
+- **Local two player** on one keyboard
+- Each player picks their **own character and shot type**
+- Lives, bombs and power are per player; cherry and score are shared
+- Life transfer between players, and revival of a player who is out of lives
+- **Predictive rollback** so movement is not held back by the round trip
+  (on by default, zero added delay)
 
-This branch is for a matching decompilation only. It will not compile on any platform other than 32-bit Windows with the MSVC 2002 toolchain. For a desktop cross-platform port of the game, you can use the [portable branch](https://github.com/some100/th07/tree/portable) instead. Also, see the [reallyportable branch](https://github.com/some100/th07/tree/reallyportable) for an even more portable version (including iOS/Android support, macOS support, and web builds).
+## Playing
+
+1. Copy `th07.dat` and `thbgm.dat` next to `th07_multi_net.exe`
+2. Everyone double-clicks `th07_multi_net.exe`, which opens the connection
+   launcher
+3. Choose Host or Guest under `Connect as`. Guests enter the host's IP address
+4. Press the button below it (`Start hosting` or `Connect to host`)
+5. When `cur state` lists the other players and `Start Game` lights up, anyone
+   can press it; one message starts every PC
+6. In game, choose a character and shot for P1, then P2, then P3
+
+`Start Game (local)` in the same launcher starts a two player game on one PC.
+
+The host has to allow its UDP port through Windows Firewall. Playing over the
+internet also needs a port forward on the host's router.
+
+## Controls
+
+In netplay each PC uses its own keyboard or pad with the original key layout,
+guests included.
+
+| Action | Key |
+| --- | --- |
+| Move | Arrow keys or numpad |
+| Shot | `Z` |
+| Bomb | `X` |
+| Focus | `Shift` |
+| Skip dialogue | `Ctrl` |
+| Menu | `Esc` |
+
+Pads use each PC's own `th07.cfg`, so configure them before matching. While
+the window is not focused the keyboard is ignored and only the pad is read.
+
+Local two player shares one keyboard, so the second player uses a different
+set. The `[KeyBind]` section of `mod_config.ini` can change it.
+
+| Action | Key |
+| --- | --- |
+| Move | `I` / `J` / `K` / `L` |
+| Shot | `F` |
+| Bomb | `G` |
+| Focus | `D` |
+
+There is no keyboard mapping for a third local player.
+
+## Launcher settings
+
+`Advanced settings` holds three switches. All three are per-PC preferences;
+players do not have to agree on them.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| Guest evasive bot (test) | off | Hands the guest's ship to a bullet-dodging bot |
+| Net diagnostics | off | Draws `NET H RTT 25ms D0` at the top of the playfield |
+| Show player names at stage start | on | Each player's name over their ship for the first four seconds of a stage |
+
+A lost or recovering connection is always reported regardless of the
+diagnostics setting.
+
+## What changes in multiplayer
+
+- **Boss health** scales with the player count: 1x for one player, 0.75x for
+  two, 2/3 for three
+- **Enemy drops** produce one life or bomb item per active player, and anyone
+  may collect any of them
+- **Power items** convert every other one to cherry once any player is at full
+  power; the rest stay as power
+- **Point item extends** are granted to everyone when the threshold is reached
+- **Life transfer**: overlap two ships within 20 pixels, then release shot and
+  hold focus for 90 frames. A life item homes to the other player; a player
+  who is out of lives is revived directly
+- **Unlocks** for Extra, Phantasm, every character and every practice stage are
+  forced in memory so that differing `score.dat` progress cannot change the
+  synchronized menu structure. Nothing is written back to the save
+- The **difficulty cursor** always starts at Normal
+- Replay saving is disabled during multiplayer
+
+## Predictive rollback
+
+Predictive rollback continues using the last confirmed remote input until the actual input arrives. If the prediction differs, the game rewinds to the affected frame and replays the simulation using a 24-frame history.
+
+A 24-frame history is required for three-player sessions because input exchanged between guests must pass through two network links.
+
 
 ## Building
 
-This project requires the original th07.exe 1.00b executable for extracting the icon. Copy it to the resources directory of the repository. If building custom.exe, you will also need to place the original executable in resources/custom.exe to extract icons as well.
-
-### Dependencies
-
-- uv
-- ninja
-- wine (Linux only)
-    - Note: extracting the MSVC msi is completely broken on older versions of wine. If you face an issue with extracting, try using the latest devel version of wine.
-
-Run the python script in the root directory of the repo with uv:
-
-```
-uv run scripts/build.py
-```
-
-The resulting build can be found at `build/th07.exe`.
-
-This executable _will_ crash after some time (specifically after 3999 Supervisor cycles). It'll fail the integrity check due to the executable not (yet?) being completely byte accurate (including checksum) to the original. In that case, you can try building a nonmatching build instead, which will disable this integrity check:
+A 32-bit Windows build with MSVC 2002.
 
 ```
 uv run scripts/build.py --no-matching
 ```
 
-If you don't have the original executable, you can still build the program without the icon.
+The result is `build/th07_multi_net.exe`. Placing the original `th07.exe` in
+`resources/` lets the build take its icon; without it, add `--no-icon`.
 
-```
-uv run scripts/build.py --no-icon
-```
+`--no-matching` is required. The multiplayer executable is deliberately not
+byte-identical to the original, so a matching build stops after a while on the
+integrity check.
 
-You can also build the custom.exe configuration tool that comes with the original game.
+Dependencies: uv, ninja, and wine on Linux.
 
-```
-uv run scripts/build.py --with-custom
-```
+## Limitations
 
-This will build both PCB and its configuration tool.
+- Experimental. There is no NAT traversal and no encryption
+- A NAT rebind after matching cannot be recovered from
+- Intended for playing with people you trust, not for a public server
+- Everyone must run the **same `th07_multi_net.exe` and the same game data**
+- Latency or packet loss beyond the 24 frame history stalls the game while it
+  waits for the missing input
 
-## Todo
+## Known issues
 
-- Improve accuracy and documentation
-- Get a better build system than whatever this is
+- **The screen breaks up while paused.** The pause menu draws over a frame the
+  network code may not have finished, and the result can be torn or partly
+  stale until play resumes
+- **The title screen and the ending run very slowly in three player
+  sessions.** Both are outside the synchronized gameplay loop, and the extra
+  peer makes them noticeably worse
+- **A session can still desync.** Most reports turned out to be a faulty
+  detector and were fixed, but a real divergence remains: peers stop agreeing
+  and their games drift apart with no recovery. It is not reliably
+  reproducible. If it happens, everyone should leave and rematch
 
-## Contributing
+## Data and rights
 
-See the [CONTRIBUTING.md](./CONTRIBUTING.md).
+Do not redistribute `th07.dat` or `thbgm.dat`. They are required to run, but
+each player supplies them from their own copy of the game.
+
+Rights over the decompiled portion follow
+[some100/th07](https://github.com/some100/th07).
 
 ## Credits
 
-- The earlier [decompilation for th06](https://github.com/GensokyoClub/th06), used as a source of shared types, function names, file names, source organization, basically everything. Because EoSD and PCB are so similar architecturally, the pre-existing th06 decompilation could be used as a direct reference for reverse engineering th07.
-
-- The [decompilation for th08](https://github.com/GensokyoClub/th08) for the complete and actually readable LZSS implementation. Basically nothing changed from th07 to th08 at least in this regard, so it made it much simpler.
-
-- EstexNT for porting the [var_order pragma](https://gist.github.com/EstexNT/e98a1384b906a3eedaaa3eeb7e58cd9d) to MSVC 7, which is used extensively throughout this project.
+- [some100/th07](https://github.com/some100/th07) for the decompilation this
+  is built on
+- [RUEEE/th06_multi_net](https://github.com/RUEEE/th06_multi_net) for the
+  multiplayer design it follows

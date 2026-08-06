@@ -25,7 +25,10 @@ struct GameWindow
     static i32 InitD3dInterface();
     static i32 InitD3dRendering();
     static void Present();
+#ifndef TH07_COMPILE_ORIGINAL_RENDER
     RenderResult Render();
+#endif
+    RenderResult OriginalRender();
     static void ResetRenderState();
     static i32 ResolveIt(const char *shortcutPath, char *dstPath, i32 maxPathLen);
     static void SetWindowActive(HWND window);

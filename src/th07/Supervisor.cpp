@@ -14,6 +14,7 @@
 #include "MainMenu.hpp"
 #include "MidiOutput.hpp"
 #include "MusicRoom.hpp"
+#include "Netplay.hpp"
 #include "ResultScreen.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -25,17 +26,12 @@
 // GLOBAL: TH07 0x0049ee40
 ControllerMapping g_ControllerMapping = {0, 1, 2, 4, -1, -1, -1, -1, 3};
 
-// GLOBAL: TH07 0x004b9e4c
-u16 g_CurFrameRawInput;
-
-// GLOBAL: TH07 0x004b9e50
-u16 g_CurFrameGameInput;
-
-// GLOBAL: TH07 0x004b9e54
-u16 g_LastFrameRawInput;
-
-// GLOBAL: TH07 0x004b9e58
-u16 g_LastFrameGameInput;
+// P1 occupies slot zero; multiplayer sidecar lanes occupy slots one and two.
+// Each lane remains a 16-bit TH07 input word.
+u16 g_CurFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
+u16 g_CurFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
+u16 g_LastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
+u16 g_LastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
 
 // GLOBAL: TH07 0x004b9e5c
 u16 g_IsEighthFrameOfHeldInput;
@@ -125,7 +121,7 @@ void Supervisor::CheckTiming()
                 this->timingSpikeAccumulator = 0;
             }
             // STRING: TH07 0x00497244
-            Supervisor::DebugPrint2("alq ƒ`ƒFƒbƒN %f / %f = %f\r\n", timeDiff, perfDiff,
+            Supervisor::DebugPrint2("alq CHECK___ %f / %f = %f\r\n", timeDiff, perfDiff,
                                     timeDiff / perfDiff);
         }
         else if (this->timingErrorCount != 0)
@@ -154,6 +150,40 @@ void AnmManager::ReleaseVertexBuffer()
 // FUNCTION: TH07 0x00437c70
 u32 Supervisor::OnUpdate(Supervisor *arg)
 {
+    u16 localInputs[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
+    u16 synchronizedInputs[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
+    int playerId;
+
+    if (Netplay::ShouldCaptureLocalInput())
+    {
+        localInputs[0] = Controller::GetInput();
+        if (Netplay::GetMode() == Netplay::MODE_LOCAL)
+        {
+            localInputs[1] = Controller::GetInput2();
+        }
+    }
+    if (g_GameManager.notInMenu && !g_GameManager.replay)
+    {
+        int localLaneCount = Netplay::GetMode() == Netplay::MODE_LOCAL
+            ? Netplay::GetPlayerCount() : 1;
+        for (playerId = 0; playerId < localLaneCount; playerId++)
+        {
+            if (Netplay::IsAutoShootEnabled())
+            {
+                localInputs[playerId] |= TH_BUTTON_SHOOT;
+            }
+            if (Netplay::IsAutoSkipEnabled())
+            {
+                localInputs[playerId] |= TH_BUTTON_SKIP;
+            }
+        }
+    }
+    if (!Netplay::SynchronizeInputs(localInputs, g_Rng.seed,
+                                    synchronizedInputs))
+    {
+        return CHAIN_CALLBACK_RESULT_BREAK;
+    }
+
     g_AnmManager->SetVertexShader(255);
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetTexture(NULL);
@@ -172,8 +202,11 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     if (!g_GameManager.slowModeSlowActive)
     {
-        g_LastFrameRawInput = g_CurFrameRawInput;
-        g_CurFrameRawInput = Controller::GetInput();
+        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+        {
+            g_LastFrameRawInputs[playerId] = g_CurFrameRawInputs[playerId];
+            g_CurFrameRawInputs[playerId] = synchronizedInputs[playerId];
+        }
         g_IsEighthFrameOfHeldInput = 0;
         if (g_LastFrameRawInput == g_CurFrameRawInput)
         {
@@ -197,7 +230,10 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     else
     {
-        g_CurFrameRawInput |= Controller::GetInput();
+        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+        {
+            g_CurFrameRawInputs[playerId] |= synchronizedInputs[playerId];
+        }
     }
     if (arg->wantedState != arg->curState)
     {
@@ -386,8 +422,12 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
             }
             break;
         }
-        g_CurFrameRawInput = g_LastFrameRawInput =
-            g_IsEighthFrameOfHeldInput = 0;
+        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+        {
+            g_CurFrameRawInputs[playerId] = 0;
+            g_LastFrameRawInputs[playerId] = 0;
+        }
+        g_IsEighthFrameOfHeldInput = 0;
     }
     arg->wantedState = arg->curState;
     arg->calcCount = arg->calcCount + 1;
@@ -466,7 +506,7 @@ ZunResult Supervisor::SetupDInput()
     {
         this->directInput = NULL;
         // STRING: TH07 0x00497208
-        g_GameErrorContext.Log("DirectInput ‚ªg—p‚Å‚«‚Ü‚¹‚ñ\r\n");
+        g_GameErrorContext.Log("DirectInput ãŒä½¿ç”¨ã§ãã¾ã›ã‚“\r\n");
         return ZUN_ERROR;
     }
     else
@@ -475,7 +515,7 @@ ZunResult Supervisor::SetupDInput()
                                                    &this->keyboard, NULL)))
         {
             SAFE_RELEASE(this->directInput);
-            g_GameErrorContext.Log("DirectInput ‚ªg—p‚Å‚«‚Ü‚¹‚ñ\r\n");
+            g_GameErrorContext.Log("DirectInput ãŒä½¿ç”¨ã§ãã¾ã›ã‚“\r\n");
             return ZUN_ERROR;
         }
         else
@@ -485,7 +525,7 @@ ZunResult Supervisor::SetupDInput()
                 SAFE_RELEASE(this->keyboard);
                 SAFE_RELEASE(this->directInput);
                 // STRING: TH07 0x004971d8
-                g_GameErrorContext.Log("DirectInput SetDataFormat ‚ªg—p‚Å‚«‚Ü‚¹‚ñ\r\n");
+                g_GameErrorContext.Log("DirectInput SetDataFormat ãŒä½¿ç”¨ã§ãã¾ã›ã‚“\r\n");
                 return ZUN_ERROR;
             }
             else
@@ -497,14 +537,14 @@ ZunResult Supervisor::SetupDInput()
                     SAFE_RELEASE(this->keyboard);
                     SAFE_RELEASE(this->directInput);
                     // STRING: TH07 0x004971a4
-                    g_GameErrorContext.Log("DirectInput SetCooperativeLevel ‚ªg—p‚Å‚«‚Ü‚¹‚ñ\r\n");
+                    g_GameErrorContext.Log("DirectInput SetCooperativeLevel ãŒä½¿ç”¨ã§ãã¾ã›ã‚“\r\n");
                     return ZUN_ERROR;
                 }
                 else
                 {
                     this->keyboard->Acquire();
                     // STRING: TH07 0x0049717c
-                    g_GameErrorContext.Log("DirectInput ‚Í³í‚É‰Šú‰»‚³‚ê‚Ü‚µ‚½\r\n");
+                    g_GameErrorContext.Log("DirectInput ã¯æ­£å¸¸ã«åˆæœŸåŒ–ã•ã‚Œã¾ã—ãŸ\r\n");
                     this->directInput->EnumDevices(4, EnumGameControllersCb, NULL, 1);
                     if (this->controller)
                     {
@@ -514,7 +554,7 @@ ZunResult Supervisor::SetupDInput()
                         this->controller->GetCapabilities(&g_Supervisor.controllerCaps);
                         this->controller->EnumObjects(ControllerCallback, NULL, 0);
                         // STRING: TH07 0x0049715c
-                        g_GameErrorContext.Log("—LŒø‚Èƒpƒbƒh‚ğ”­Œ©‚µ‚Ü‚µ‚½\r\n");
+                        g_GameErrorContext.Log("æœ‰åŠ¹ãªãƒ‘ãƒƒãƒ‰ã‚’ç™ºè¦‹ã—ã¾ã—ãŸ\r\n");
                     }
                     return ZUN_SUCCESS;
                 }
@@ -538,14 +578,14 @@ ZunResult Supervisor::LoadGameData()
         if (!g_Supervisor.version)
         {
             // STRING: TH07 0x00497118
-            g_GameErrorContext.Fatal("error : ƒf[ƒ^‚Ìƒo[ƒWƒ‡ƒ“‚ªˆá‚¢‚Ü‚·\r\n");
+            g_GameErrorContext.Fatal("error : ãƒ‡ãƒ¼ã‚¿ã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ãŒé•ã„ã¾ã™\r\n");
             return ZUN_ERROR;
         }
     }
     else
     {
         // STRING: TH07 0x004970f0
-        g_GameErrorContext.Fatal("error : ƒf[ƒ^ƒtƒ@ƒCƒ‹‚ª‘¶İ‚µ‚Ü‚¹‚ñ\r\n");
+        g_GameErrorContext.Fatal("error : ãƒ‡ãƒ¼ã‚¿ãƒ•ã‚¡ã‚¤ãƒ«ãŒå­˜åœ¨ã—ã¾ã›ã‚“\r\n");
         return ZUN_ERROR;
     }
     return ZUN_SUCCESS;
@@ -630,14 +670,14 @@ i32 Supervisor::CheckVSync()
 
         if (fpsSum > 160.0f)
         {
-            g_GameErrorContext.Log("‚’¼“¯Šú‚ªæ‚ê‚Ä‚È‚¢‚©AƒŠƒtƒŒƒbƒVƒ…ƒŒ[ƒg‚ª‚‚·‚¬‚Ü‚·\r\n");
-            g_GameErrorContext.Log("‹­§‚U‚OƒtƒŒ[ƒ€ƒ‚[ƒh‚Å“®ì‚µ‚Ü‚·\r\n");
+            g_GameErrorContext.Log("å‚ç›´åŒæœŸãŒå–ã‚Œã¦ãªã„ã‹ã€ãƒªãƒ•ãƒ¬ãƒƒã‚·ãƒ¥ãƒ¬ãƒ¼ãƒˆãŒé«˜ã™ãã¾ã™\r\n");
+            g_GameErrorContext.Log("å¼·åˆ¶ï¼–ï¼ãƒ•ãƒ¬ãƒ¼ãƒ ãƒ¢ãƒ¼ãƒ‰ã§å‹•ä½œã—ã¾ã™\r\n");
             g_Supervisor.vsyncEnabled = 1;
         }
         else if (fpsSum >= 65.0f)
         {
-            g_GameErrorContext.Log("‚’¼“¯Šú‚ªæ‚ê‚Ä‚È‚¢‚©AƒŠƒtƒŒƒbƒVƒ…ƒŒ[ƒg‚ª‚‚·‚¬‚Ü‚·B\r\n");
-            g_GameErrorContext.Log("‹­§‚U‚OƒtƒŒ[ƒ€ƒ‚[ƒh‚Å“®ì‚µ‚Ü‚·\r\n");
+            g_GameErrorContext.Log("å‚ç›´åŒæœŸãŒå–ã‚Œã¦ãªã„ã‹ã€ãƒªãƒ•ãƒ¬ãƒƒã‚·ãƒ¥ãƒ¬ãƒ¼ãƒˆãŒé«˜ã™ãã¾ã™ã€‚\r\n");
+            g_GameErrorContext.Log("å¼·åˆ¶ï¼–ï¼ãƒ•ãƒ¬ãƒ¼ãƒ ãƒ¢ãƒ¼ãƒ‰ã§å‹•ä½œã—ã¾ã™\r\n");
             g_Supervisor.vsyncEnabled = 1;
             return -2;
         }
@@ -650,6 +690,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
 {
     ScoreDat *scoreDat;
     i32 i;
+    u16 initialRngSeed;
 
     QueryPerformanceFrequency(&arg->perfFrequency);
     g_Supervisor.d3dDevice->BeginScene();
@@ -701,7 +742,11 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     arg->isInEnding = 0;
     arg->renderSkipFrames = 0;
     arg->lastTotalPlayTimeUpdate = timeGetTime();
-    g_Rng.SetSeed(arg->lastTotalPlayTimeUpdate);
+    initialRngSeed = (u16)arg->lastTotalPlayTimeUpdate;
+    initialRngSeed = Netplay::GetInitialRngSeed(initialRngSeed);
+    g_Rng.seedBackup = initialRngSeed;
+    g_Rng.generationCount = 0;
+    g_Rng.SetSeed(initialRngSeed);
     arg->SetupDInput();
     if (!arg->midiOutput)
     {
@@ -722,7 +767,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     if (AsciiManager::RegisterChain() != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00496ff0
-        g_GameErrorContext.Log("error : •¶š‚Ì‰Šú‰»‚É¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : æ–‡å­—ã®åˆæœŸåŒ–ã«å¤±æ•—ã—ã¾ã—ãŸ\r\n");
         return ZUN_ERROR;
     }
 
@@ -732,7 +777,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     if (g_SoundPlayer.LoadFmt("bgm/thbgm.fmt"))
     {
         // STRING: TH07 0x00496fb8
-        g_GameErrorContext.Log("error : BGM ‚Ì‰Šú‰»‚É¸”s‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("error : BGM ã®åˆæœŸåŒ–ã«å¤±æ•—ã—ã¾ã—ãŸ\r\n");
         return ZUN_ERROR;
     }
 
@@ -1086,14 +1131,14 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
     {
     case D3DFMT_R5G6B5:
         // STRING: TH07 0x00496f80
-        g_GameErrorContext.Log("16bit ‚Íæ‚è‚ß‚È‚¢\r\n");
+        g_GameErrorContext.Log("16bit ã¯å–ã‚Šè¾¼ã‚ãªã„\r\n");
         break;
     case D3DFMT_X8R8G8B8:
         local_1c = (BITMAPINFO *)ZunMemory::Alloc2(sizeof(BITMAPINFO));
         if (!local_1c)
         {
             // STRING: TH07 0x00496f60
-            g_GameErrorContext.Log("snapShotScreen : Šm•Û‚µ‚­‚è\r\n");
+            g_GameErrorContext.Log("snapShotScreen : ç¢ºä¿ã—ãã‚Š\r\n");
             break;
         }
 
@@ -1102,7 +1147,7 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
         local_18 = malloc(local_24 * 480);
         if (!local_18)
         {
-            g_GameErrorContext.Log("snapShotScreen : Šm•Û‚µ‚­‚è\r\n");
+            g_GameErrorContext.Log("snapShotScreen : ç¢ºä¿ã—ãã‚Š\r\n");
             break;
         }
 
@@ -1172,7 +1217,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
     if (!configFile)
     {
         // STRING: TH07 0x00496f14
-        g_GameErrorContext.Log("ƒRƒ“ƒtƒBƒOƒf[ƒ^‚ªŒ©‚Â‚©‚ç‚È‚¢‚Ì‚Å‰Šú‰»‚µ‚Ü‚µ‚½\r\n");
+        g_GameErrorContext.Log("ã‚³ãƒ³ãƒ•ã‚£ã‚°ãƒ‡ãƒ¼ã‚¿ãŒè¦‹ã¤ã‹ã‚‰ãªã„ã®ã§åˆæœŸåŒ–ã—ã¾ã—ãŸ\r\n");
     init:
         g_Supervisor.cfg.lifeCount = 2;
         g_Supervisor.cfg.bombCount = 3;
@@ -1189,7 +1234,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
                 bgm2Data[2] != 0x700)
             {
                 // STRING: TH07 0x00496ee4
-                g_GameErrorContext.Fatal("BGM ƒf[ƒ^‚Ìƒo[ƒWƒ‡ƒ“‚ªˆá‚¢‚Ü‚·\r\n");
+                g_GameErrorContext.Fatal("BGM ãƒ‡ãƒ¼ã‚¿ã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ãŒé•ã„ã¾ã™\r\n");
                 return ZUN_ERROR;
             }
             g_Supervisor.cfg.musicMode = MUSIC_WAV;
@@ -1198,7 +1243,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         {
             g_Supervisor.cfg.musicMode = MUSIC_MIDI;
             // STRING: TH07 0x00496ebc
-            Supervisor::DebugPrint2("wave ƒf[ƒ^‚ª–³‚¢‚Ì‚ÅAmidi ‚É‚µ‚Ü‚·\r\n");
+            Supervisor::DebugPrint2("wave ãƒ‡ãƒ¼ã‚¿ãŒç„¡ã„ã®ã§ã€midi ã«ã—ã¾ã™\r\n");
         }
         g_Supervisor.cfg.playSounds = 1;
         g_Supervisor.cfg.defaultDifficulty = (u8)DIFF_NORMAL;
@@ -1222,7 +1267,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
             if (bgmData[0] != 0x5641575a || bgmData[1] != 1 ||
                 bgmData[2] != 0x700)
             {
-                g_GameErrorContext.Fatal("BGM ƒf[ƒ^‚Ìƒo[ƒWƒ‡ƒ“‚ªˆá‚¢‚Ü‚·\r\n");
+                g_GameErrorContext.Fatal("BGM ãƒ‡ãƒ¼ã‚¿ã®ãƒãƒ¼ã‚¸ãƒ§ãƒ³ãŒé•ã„ã¾ã™\r\n");
                 return ZUN_ERROR;
             }
         }
@@ -1241,95 +1286,102 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
               g_LastFileSize == sizeof(GameConfiguration)))
         {
             // STRING: TH07 0x00496e88
-            g_GameErrorContext.Log("ƒRƒ“ƒtƒBƒOƒf[ƒ^‚ªˆÙí‚Å‚µ‚½‚Ì‚ÅÄ‰Šú‰»‚µ‚Ü‚µ‚½\r\n");
+            g_GameErrorContext.Log("ã‚³ãƒ³ãƒ•ã‚£ã‚°ãƒ‡ãƒ¼ã‚¿ãŒç•°å¸¸ã§ã—ãŸã®ã§å†åˆæœŸåŒ–ã—ã¾ã—ãŸ\r\n");
             goto init;
         }
         g_ControllerMapping = g_Supervisor.cfg.controllerMapping;
+    }
+    if (Netplay::IsMultiplayer())
+    {
+        g_Supervisor.cfg.frameskipConfig = 0;
+        g_Supervisor.cfg.slowMode = 0;
     }
     g_Supervisor.cfg.loaded = 1;
     if (this->cfg.noVertexBuffers)
     {
         // STRING: TH07 0x00496e64
-        g_GameErrorContext.Log("’¸“_ƒoƒbƒtƒ@‚Ìg—p‚ğ—}§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("é ‚ç‚¹ãƒãƒƒãƒ•ã‚¡ã®ä½¿ç”¨ã‚’æŠ‘åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.disableFog)
     {
         // STRING: TH07 0x00496e48
-        g_GameErrorContext.Log("ƒtƒHƒO‚Ìg—p‚ğ—}§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ãƒ•ã‚©ã‚°ã®ä½¿ç”¨ã‚’æŠ‘åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.use16BitTextures)
     {
         // STRING: TH07 0x00496e20
-        g_GameErrorContext.Log("16Bit ‚ÌƒeƒNƒXƒ`ƒƒ‚Ìg—p‚ğ‹­§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("16Bit ã®ãƒ†ã‚¯ã‚¹ãƒãƒ£ã®ä½¿ç”¨ã‚’å¼·åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->IsClearingBackbuffer())
     {
         // STRING: TH07 0x00496dfc
-        g_GameErrorContext.Log("ƒoƒbƒNƒoƒbƒtƒ@‚ÌÁ‹‚ğ‹­§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ãƒãƒƒã‚¯ãƒãƒƒãƒ•ã‚¡ã®æ¶ˆå»ã‚’å¼·åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.disableItemDrawAroundPlayfield)
     {
         // STRING: TH07 0x00496dd0
-        g_GameErrorContext.Log("ƒQ[ƒ€ü‚è‚ÌƒAƒCƒeƒ€‚Ì•`‰æ‚ğ—}§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ã‚²ãƒ¼ãƒ å‘¨ã‚Šã®ã‚¢ã‚¤ãƒ†ãƒ ã®æç”»ã‚’æŠ‘åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.disableGouraud)
     {
         // STRING: TH07 0x00496da8
-        g_GameErrorContext.Log("ƒO[ƒ[ƒVƒF[ƒfƒBƒ“ƒO‚ğ—}§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ã‚°ãƒ¼ãƒ­ãƒ¼ã‚·ã‚§ãƒ¼ãƒ‡ã‚£ãƒ³ã‚°ã‚’æŠ‘åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.disableZBuffer)
     {
         // STRING: TH07 0x00496d8c
-        g_GameErrorContext.Log("ƒfƒvƒXƒeƒXƒg‚ğ—}§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ãƒ‡ãƒ—ã‚¹ãƒ†ã‚¹ãƒˆã‚’æŠ‘åˆ¶ã—ã¾ã™\r\n");
     }
     this->vsyncEnabled = 0;
     this->cfg.unused = 0;
     if (this->cfg.disableTextureBlend)
     {
         // STRING: TH07 0x00496d6c
-        g_GameErrorContext.Log("ƒeƒNƒXƒ`ƒƒ‚ÌF‡¬‚ğ—}§‚µ‚Ü‚·n");
+        g_GameErrorContext.Log("ãƒ†ã‚¯ã‚¹ãƒãƒ£ã®è‰²åˆæˆã‚’æŠ‘åˆ¶ã—ã¾ã™n");
     }
     if (this->cfg.windowed)
     {
         // STRING: TH07 0x00496d4c
-        g_GameErrorContext.Log("ƒEƒBƒ“ƒhƒEƒ‚[ƒh‚Å‹N“®‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ã‚¦ã‚£ãƒ³ãƒ‰ã‚¦ãƒ¢ãƒ¼ãƒ‰ã§èµ·å‹•ã—ã¾ã™\r\n");
     }
     if (this->cfg.forceReferenceRender)
     {
         // STRING: TH07 0x00496d24
-        g_GameErrorContext.Log("ƒŠƒtƒ@ƒŒƒ“ƒXƒ‰ƒXƒ^ƒ‰ƒCƒU‚ğ‹­§‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ãƒªãƒ•ã‚¡ãƒ¬ãƒ³ã‚¹ãƒ©ã‚¹ã‚¿ãƒ©ã‚¤ã‚¶ã‚’å¼·åˆ¶ã—ã¾ã™\r\n");
     }
     if (this->cfg.disableDinput)
     {
         // STRING: TH07 0x00496cec
-        g_GameErrorContext.Log("ƒpƒbƒhAƒL[ƒ{[ƒh‚Ì“ü—Í‚É DirectInput ‚ğg—p‚µ‚Ü‚¹‚ñ\r\n");
+        g_GameErrorContext.Log("ãƒ‘ãƒƒãƒ‰ã€ã‚­ãƒ¼ãƒœãƒ¼ãƒ‰ã®å…¥åŠ›ã« DirectInput ã‚’ä½¿ç”¨ã—ã¾ã›ã‚“\r\n");
     }
     if (this->cfg.redrawEveryFrame)
     {
         // STRING: TH07 0x00496cd0
-        g_GameErrorContext.Log("‰æ–Êü‚è‚ğ–ˆ‰ñ•`‰æ‚µ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ç”»é¢å‘¨ã‚Šã‚’æ¯å›æç”»ã—ã¾ã™\r\n");
     }
     if (this->cfg.preloadBgm)
     {
         // STRING: TH07 0x00496cb0
-        g_GameErrorContext.Log("‚a‚f‚l‚ğƒƒ‚ƒŠ‚É“Ç‚İ‚İ‚Ü‚·\r\n");
+        g_GameErrorContext.Log("ï¼¢ï¼§ï¼­ã‚’ãƒ¡ãƒ¢ãƒªã«èª­ã¿è¾¼ã¿ã¾ã™\r\n");
     }
     if (this->cfg.enableVsync)
     {
         // STRING: TH07 0x00496c98
-        g_GameErrorContext.Log("‚’¼“¯Šú‚ğæ‚è‚Ü‚¹‚ñ\r\n");
+        g_GameErrorContext.Log("å‚ç›´åŒæœŸã‚’å–ã‚Šã¾ã›ã‚“\r\n");
         g_Supervisor.vsyncEnabled = 1;
     }
-    if (FileSystem::WriteDataToFile(configFilename, &g_Supervisor.cfg,
+    if (!Netplay::NoSave() &&
+        FileSystem::WriteDataToFile(configFilename, &g_Supervisor.cfg,
                                     sizeof(GameConfiguration)))
     {
         // STRING: TH07 0x00496c78
-        g_GameErrorContext.Fatal("ƒtƒ@ƒCƒ‹‚ª‘‚«o‚¹‚Ü‚¹‚ñ %s\r\n", configFilename);
+        g_GameErrorContext.Fatal("ãƒ•ã‚¡ã‚¤ãƒ«ãŒæ›¸ãå‡ºã›ã¾ã›ã‚“ %s\r\n", configFilename);
         // STRING: TH07 0x00496c20
-        g_GameErrorContext.Fatal("ƒtƒHƒ‹ƒ_‚ª‘‚İ‹Ö~‘®«‚É‚È‚Á‚Ä‚¢‚é‚©AƒfƒBƒXƒN‚ª‚¢‚Á‚Ï‚¢‚¢‚Á‚Ï‚¢‚É‚È‚Á‚Ä‚Ü‚¹‚ñ‚©H\r\n");
+        g_GameErrorContext.Fatal("ãƒ•ã‚©ãƒ«ãƒ€ãŒæ›¸è¾¼ã¿ç¦æ­¢å±æ€§ã«ãªã£ã¦ã„ã‚‹ã‹ã€ãƒ‡ã‚£ã‚¹ã‚¯ãŒã„ã£ã±ã„ã„ã£ã±ã„ã«ãªã£ã¦ã¾ã›ã‚“ã‹ï¼Ÿ\r\n");
         return ZUN_ERROR;
     }
 
+    Netplay::ApplyAudioPreferences();
     return ZUN_SUCCESS;
 }
 

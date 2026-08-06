@@ -1,0 +1,88 @@
+th07_multi_net distribution package
+
+1. Obtain a legitimate Touhou 7 / Perfect Cherry Blossom installation.
+2. Copy your own th07.dat and thbgm.dat into this package folder, next to
+   th07_multi_net.exe. These original game data files are intentionally not
+   included in the distribution package.
+3. Double-click th07_multi_net.exe on every PC. It opens the connection
+   launcher. Enter an ASCII-letter/digit-only player name, then choose Host or
+   Guest under "Connect as"; a guest also enters the host's IP address. The
+   host chooses 2 or 3 players and keeps "Predictive rollback (lowest input
+   lag)" checked. Pick Fullscreen 640x480 or Window 640x480 / 960x720 /
+   1280x960 in the same launcher.
+4. Press the button below the settings ("Start hosting" on the host,
+   "Connect to host" on a guest). Wait until "cur state" lists the other
+   players with their address and latency and Start Game becomes enabled, then
+   any player can press Start Game to start every PC at once.
+5. After the game starts, choose and confirm a character and shot for P1, then
+   P2, then P3. The prompts identify whose selection is active.
+6. For a local two-player game on one PC, press "Start Game (local)" in the
+   launcher instead.
+
+Controller setup:
+  Configure the pad separately in TH07 on each PC before matching. Each PC's
+  own keyboard/pad drives its own player, and each PC reads its own th07.cfg;
+  host mappings are not sent to the guests.
+  --test-random-input and --no-controller affect only the PC where they were
+  specified. Do not use them on a player that should use a physical pad.
+  An unfocused game ignores keyboard typing but continues polling its pad.
+
+Synchronized unlocks and resource drops:
+  Multiplayer makes Extra, Phantasm, every character/shot, and all Practice
+  stages available in memory on every PC, regardless of score.dat progress.
+  It does not write those unlocks back to the save. Life and bomb items dropped
+  by enemies or enemy ECL scripts produce one copy per player, and anyone may
+  collect any of them; life transfer and debug items are not multiplied.
+
+HUD / Power:
+  Every player's lives and bombs use separate compact star-icon rows, each
+  labelled with that player's name and loadout. The Power bars, labels and
+  values sit side by side. When any player is at Full Power, only every other
+  Power item converts to Cherry; the rest remain Power items.
+
+Life transfer / revival:
+  Overlap two ships within 20 pixels. The giving player releases Shot and
+  holds Slow/Focus for 90 frames while the yellow NN% display fills. A life
+  item then homes to the other player; a Spirit player is revived directly.
+
+Boss health:
+  Final damage to a boss scales with the number of players: unchanged for one,
+  0.75x for two, 2/3 for three.
+
+Useful test options (run th07_multi_net.exe from a terminal):
+  --test-random-input  local ship only: deterministic move/shot/bomb test
+  --rollback            predictive rollback mode (launcher default)
+  --blt-prepare 0..16   input/update lead time before presentation (default 1)
+  --low-latency-spin    pure spin wait for latency experiments (high CPU)
+  --test-seconds 20     stop an automated test after 20 seconds
+
+Manual Host with only a Guest randomized:
+  Host PC:
+    .\th07_multi_net.exe --host --port 17723 --rollback --delay 0 --windowed --no-demo --no-save --invincible
+  Guest PC (replace HOST_IP):
+    .\th07_multi_net.exe --join HOST_IP --port 17723 --rollback --delay 0 --windowed --no-save --test-random-input
+  Omit --invincible on the Host for a normal damage test. Add
+  --test-seconds 30 to the Guest only when it should stop after 30 seconds.
+
+Rollback starts only after every PC reports gameplay-ready on the same exact
+frame. It then keeps twelve two-frame keyframes (24 frames total), which is
+what a three-player session needs because guest-to-guest input crosses two
+links. Movement, Focus, and Shot remain delay-0 predicted. Bomb is predicted
+released and a late real bomb rewinds/replays its original frame. Bomb and
+border-break fade/pulse/screen-shake/cut-in effects are included in rollback
+restoration.
+
+The OpenInputLagPatch-style update-before-draw loop is integrated directly in
+th07_multi_net.exe. Do not add openinputlagpatch.dll or oilp_loader.exe: their
+original TH07 patch addresses do not match this rebuilt executable.
+
+Nothing has to be configured for it. To tune it anyway, add a [LowLatency]
+section to mod_config.ini next to the executable:
+  Enabled = 1          0 disables the low latency loop entirely
+  BltPrepareTime = 1   milliseconds before the next 60 Hz target to start work
+  Sleep = 1            0 = pure spin (lower jitter, much higher CPU)
+  DwmFlush = 0         experimental queue bound; slower on the tested PCs
+Every value above is the default, so omitting the section changes nothing.
+
+Do not redistribute th07.dat or thbgm.dat. They are required runtime data,
+but must come from the user's own legitimate game installation.

@@ -2,6 +2,7 @@
 
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
+#include "Netplay.hpp"
 #include "Supervisor.hpp"
 #include "dsutil.hpp"
 #include "dxutil.hpp"
@@ -361,6 +362,10 @@ ZunResult SoundPlayer::StartBGM(const char *path)
     DWORD notifySize;
 
     strcpy(this->bgmArchivePath, path);
+    if (!Netplay::IsBgmEnabled())
+    {
+        return ZUN_SUCCESS;
+    }
     if (!this->manager)
     {
         return ZUN_ERROR;

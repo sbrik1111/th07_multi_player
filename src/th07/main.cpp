@@ -11,6 +11,7 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "Netplay.hpp"
 #include "ResultScreen.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
@@ -41,6 +42,16 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     tagMSG msg;
 
     res = RENDER_RESULT_KEEP_RUNNING;
+    if (!Netplay::Initialize(lpCmdline))
+    {
+        if (!Netplay::WasStartupCancelled())
+        {
+            MessageBoxA(NULL, Netplay::GetStatusText(), "th07_multi_net",
+                        MB_OK | MB_ICONERROR);
+        }
+        Netplay::Shutdown();
+        return Netplay::WasStartupCancelled() ? 0 : 1;
+    }
     g_Supervisor.hInstance = hInstance;
     SystemParametersInfoA(SPI_GETSCREENSAVEACTIVE, 0,
                           &g_GameWindow.screen_save_active, 0);
@@ -51,7 +62,8 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE, 0, NULL, 2);
     SystemParametersInfoA(SPI_SETLOWPOWERACTIVE, 0, NULL, 2);
     SystemParametersInfoA(SPI_SETPOWEROFFACTIVE, 0, NULL, 2);
-    if (GameWindow::CheckForRunningGameInstance(hInstance) == ZUN_ERROR)
+    if (!Netplay::AllowsMultipleInstances() &&
+        GameWindow::CheckForRunningGameInstance(hInstance) == ZUN_ERROR)
     {
         goto stop;
     }
@@ -75,6 +87,7 @@ start:
     {
         goto stop;
     }
+    SetWindowTextA(g_GameWindow.window, "th07_multi_net");
 
     if (GameWindow::InitD3dRendering())
     {
@@ -85,7 +98,8 @@ start:
     Controller::GetJoystickCaps();
     Controller::ResetKeyboard();
     g_AnmManager = new AnmManager();
-    if (!g_Supervisor.cfg.windowed)
+    if (Netplay::ForceFullscreen() ||
+        (!g_Supervisor.cfg.windowed && !Netplay::ForceWindowed()))
     {
         WINNLSEnableIME(0, 0);
         ShowCursor(0);
@@ -102,8 +116,14 @@ start:
     }
     res = RENDER_RESULT_KEEP_RUNNING;
     g_GameWindow.curFrame = -30;
+    Netplay::StartTestTimer();
     while (!g_GameWindow.isAppClosing)
     {
+        if (Netplay::HasTestTimedOut())
+        {
+            res = RENDER_RESULT_EXIT_SUCCESS;
+            break;
+        }
         if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
         {
             TranslateMessage(&msg);
@@ -136,7 +156,7 @@ start:
         }
     }
 cleanup:
-    if (g_GameManager.plst.magic != 0)
+    if (g_GameManager.plst.magic != 0 && !Netplay::NoSave())
     {
         ResultScreen::RegisterChain(2);
     }
@@ -168,8 +188,9 @@ stop:
         g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
         *g_GameErrorContext.m_BufferEnd = NULL;
         // STRING: TH07 0x00497c28
-        g_GameErrorContext.Log("çƒãNìÆÇóvÇ∑ÇÈÉIÉvÉVÉáÉìÇ™ïœçXÇ≥ÇÍÇΩÇÃÇ≈çƒãNìÆÇµÇ‹Ç∑\r\n");
-        if (!g_Supervisor.cfg.windowed)
+        g_GameErrorContext.Log("ÔøΩƒãNÔøΩÔøΩÔøΩÔøΩvÔøΩÔøΩÔøΩÔøΩIÔøΩvÔøΩVÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩœçXÔøΩÔøΩÔøΩÍÇΩÔøΩÃÇ≈çƒãNÔøΩÔøΩÔøΩÔøΩÔøΩ‹ÇÔøΩ\r\n");
+        if (Netplay::ForceFullscreen() ||
+            (!g_Supervisor.cfg.windowed && !Netplay::ForceWindowed()))
         {
             WINNLSEnableIME(0, 1);
         }
@@ -185,8 +206,11 @@ stop:
         }
         goto start;
     }
-    FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
-                                sizeof(GameConfiguration));
+    if (!Netplay::NoSave())
+    {
+        FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
+                                    sizeof(GameConfiguration));
+    }
     SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE,
                           g_GameWindow.screen_save_active, NULL, 2);
     SystemParametersInfoA(SPI_SETLOWPOWERACTIVE, g_GameWindow.low_power_active,
@@ -194,6 +218,10 @@ stop:
     SystemParametersInfoA(SPI_SETPOWEROFFACTIVE, g_GameWindow.power_off_active,
                           NULL, 2);
     WINNLSEnableIME(0, 1);
+    // Shutdown writes the end-of-run measurements, so it has to run before the
+    // error context is flushed to log.txt. With the old order the peer that
+    // closed the window logged them into a buffer nobody read again.
+    Netplay::Shutdown();
     g_GameErrorContext.Flush();
     return 0;
 }

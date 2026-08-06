@@ -610,7 +610,7 @@ i32 BulletManager::SpawnBulletPattern(EnemyBulletShooter *bulletProps)
     }
 
     bulletProps->sprites = this->bulletTypeTemplates + bulletProps->sprite;
-    angle = g_Player.AngleToPlayer(&bulletProps->position);
+    angle = GetClosestActivePlayer(&bulletProps->position)->AngleToPlayer(&bulletProps->position);
     for (x = 0; x < bulletProps->count2; x++)
     {
         for (y = 0; y < bulletProps->count1; y++)
@@ -663,7 +663,7 @@ Laser *BulletManager::SpawnLaserPattern(EnemyLaserShooter *laserShooter)
         if (laserShooter->type == 0)
         {
             laser->angle =
-                g_Player.AngleToPlayer(&laserShooter->position) + laser->angle;
+                GetClosestActivePlayer(&laserShooter->position)->AngleToPlayer(&laserShooter->position) + laser->angle;
         }
         laser->flags = laserShooter->flags;
         laser->timer = 0;
@@ -824,7 +824,7 @@ void Bullet::UpdateBulletDirChangeAimAtPlayer()
         {
             this->exFlags = this->exFlags & 0xffffff7f;
         }
-        this->angle = utils::AddNormalizeAngle(g_Player.AngleToPlayer(&this->pos),
+        this->angle = utils::AddNormalizeAngle(GetClosestActivePlayer(&this->pos)->AngleToPlayer(&this->pos),
                                                this->commandStates[3].angle);
         this->speed = this->commandStates[3].speed;
         local_8 = this->speed;
@@ -891,6 +891,8 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
     f32 width;
     i32 i;
     i32 collisionRes;
+    Player *collisionPlayer;
+    i32 playerId;
 
     blockIdx = 0;
     bullet = arg->bullets;
@@ -995,7 +997,20 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
         do_collision:
             if (!bullet->grazed && bullet->timer2.GetCurrent() >= 16)
             {
-                collisionRes = g_Player.CheckGraze(&bullet->pos, &bullet->sprites.grazeSize);
+                collisionPlayer = &g_Player;
+                collisionRes = 0;
+                for (playerId = 0;
+                     playerId < TH07_MULTI_MAX_PLAYERS && collisionRes == 0;
+                     playerId++)
+                {
+                    if (!IsPlayerSlotActive((u8)playerId))
+                    {
+                        continue;
+                    }
+                    collisionPlayer = &g_Players[playerId];
+                    collisionRes = collisionPlayer->CheckGraze(
+                        &bullet->pos, &bullet->sprites.grazeSize);
+                }
                 if (collisionRes == 1)
                 {
                     bullet->grazed = 1;
@@ -1006,14 +1021,28 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     if ((bullet->moreFlags & 0x1000) == 0)
                     {
                         bullet->state = BULLET_DESPAWN;
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(
+                            &bullet->pos, collisionPlayer->itemType, 1);
                     }
                 }
                 goto do_sprite_anim;
             }
 
         do_player_collision:
-            collisionRes = g_Player.CalcKillboxCollision(&bullet->pos, &bullet->sprites.grazeSize);
+            collisionPlayer = &g_Player;
+            collisionRes = 0;
+            for (playerId = 0;
+                 playerId < TH07_MULTI_MAX_PLAYERS && collisionRes == 0;
+                 playerId++)
+            {
+                if (!IsPlayerSlotActive((u8)playerId))
+                {
+                    continue;
+                }
+                collisionPlayer = &g_Players[playerId];
+                collisionRes = collisionPlayer->CalcKillboxCollision(
+                    &bullet->pos, &bullet->sprites.grazeSize);
+            }
             if (collisionRes != 0)
             {
                 if (collisionRes != 2 || (bullet->moreFlags & 0x1000) == 0)
@@ -1021,7 +1050,8 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     bullet->state = BULLET_DESPAWN;
                     if (collisionRes == 2)
                     {
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(
+                            &bullet->pos, collisionPlayer->itemType, 1);
                     }
                 }
             }
@@ -1153,7 +1183,17 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer >= laser->hitboxStartTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+                for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS;
+                     playerId++)
+                {
+                    if (IsPlayerSlotActive((u8)playerId))
+                    {
+                        g_Players[playerId].CalcLaserHitbox(
+                            &laserCenter, &laserHitbox, &laser->pos,
+                            laser->angle,
+                            laser->timer.GetCurrent() % 12 == 0);
+                    }
+                }
             }
             if (laser->timer < laser->startTime)
             {
@@ -1163,7 +1203,17 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             laser->state++;
             laser->targetWidth = laser->width;
         case LASER_ACTIVE:
-            g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+            for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS;
+                 playerId++)
+            {
+                if (IsPlayerSlotActive((u8)playerId))
+                {
+                    g_Players[playerId].CalcLaserHitbox(
+                        &laserCenter, &laserHitbox, &laser->pos,
+                        laser->angle,
+                        laser->timer.GetCurrent() % 12 == 0);
+                }
+            }
             if (laser->timer < laser->duration)
             {
                 break;
@@ -1199,7 +1249,17 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer < laser->hitboxEndTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+                for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS;
+                     playerId++)
+                {
+                    if (IsPlayerSlotActive((u8)playerId))
+                    {
+                        g_Players[playerId].CalcLaserHitbox(
+                            &laserCenter, &laserHitbox, &laser->pos,
+                            laser->angle,
+                            laser->timer.GetCurrent() % 12 == 0);
+                    }
+                }
             }
             if (laser->timer < laser->endTime)
             {

@@ -92,7 +92,9 @@ struct EffectManager
     f32 globalColorMultiplierG;
     f32 globalColorMultiplierB;
     f32 globalColorMultiplierA;
-    Effect effects[409];
+    // 0..399 are the particle pool, 400..412 are fixed P1/P2/P3 player
+    // effects, and 413 is the allocation-failure sentinel.
+    Effect effects[414];
     Effect layer0;
     Effect layer1;
     Effect layer2;
@@ -100,5 +102,5 @@ struct EffectManager
     Effect *layerPtrs[4];
     i32 frameCounter;
 };
-C_ASSERT(sizeof(EffectManager) == 0x496a8);
+C_ASSERT(sizeof(EffectManager) == 0x4a4e0);
 extern EffectManager g_EffectManager;

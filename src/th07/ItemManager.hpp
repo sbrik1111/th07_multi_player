@@ -6,6 +6,7 @@
 extern u8 g_ItemDropTable[32];
 
 void AngleToVector(D3DXVECTOR3 *out, f32 angle, f32 speed);
+i32 GetLifeTransferSpawnState(u8 targetPlayerId);
 
 typedef enum ItemType
 {
@@ -67,6 +68,10 @@ struct ItemManager
     void OnDraw();
     void RemoveAllItems();
     Item *SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state);
+    // Enemy/ECL resource drops use this narrow path so multiplayer can double
+    // lives and bombs without also doubling player transfers, debug items, or
+    // bullet-conversion rewards.
+    Item *SpawnEnemyDrop(D3DXVECTOR3 *heading, i32 itemType, i32 state);
 
     struct Item items[1101];
     i32 nextIndex;

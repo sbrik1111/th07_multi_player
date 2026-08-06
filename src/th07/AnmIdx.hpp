@@ -19,10 +19,16 @@
 #define ANM_FILE_LOADING 23
 #define ANM_FILE_STAGE_TEXT 24
 #define ANM_FILE_FACE 25
+#define ANM_FILE_FACE2 40 // Keep P2 face blocks away from P1 face's child block.
+// Past every existing id: LoadAnms walks a file's child chain into the
+// following slots, so 41 sat inside FACE2's chain and overwrote it.
+#define ANM_FILE_FACE3 50
 #define ANM_FILE_FACE_STAGE 28
 #define ANM_FILE_TITLE 32
 #define ANM_FILE_RESULT 42
 #define ANM_FILE_MUSIC 46
+#define ANM_FILE_PLAYER2 47
+#define ANM_FILE_PLAYER3 48
 #define ANM_FILE_STAFF 49
 
 #define ANM_OFFSET_ASCII 0x000
@@ -42,7 +48,16 @@
 #define ANM_OFFSET_STAGE_BG4 0x330
 #define ANM_OFFSET_STAGE_BG5 0x340
 #define ANM_OFFSET_PLAYER 0x400
+#define ANM_OFFSET_PLAYER2 0x500
+#define ANM_OFFSET_PLAYER3 0xa00
 #define ANM_OFFSET_FACE 0x4a0
+#define ANM_OFFSET_FACE2 0x5a0
+// Each player's face block sits 0xa0 past its player block, so the bomb cut-in
+// script index derived from the player offset lands inside it. P3 was missing
+// this: GetPlayerAnmScript(player, 1185) produced 0xaa1 for P3, an index that
+// nothing ever loaded, and handing that to SetActiveSprite left the VM with a
+// negative sourceFileIndex that the texture lookup then dereferenced.
+#define ANM_OFFSET_FACE3 0xaa0
 #define ANM_OFFSET_FACE_STAGE 0x4ad
 #define ANM_OFFSET_FRONT 0x600
 #define ANM_OFFSET_STAFF 0x600

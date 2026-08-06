@@ -8,3 +8,20 @@ reccmp-user.yml
 reccmp-build.yml
 scripts/__pycache__/
 compile_commands.json
+
+# Local game data and runtime-generated files.
+log.txt
+score.dat
+th07.cfg
+mod_config.ini
+th07.dat
+thbgm.dat
+replay/
+snapshot/
+
+# Locally generated distribution archives.
+dist/
+
+# Logs kept by the latency campaign driver for post-run diagnosis.
+test-results/
+test-screenshots/

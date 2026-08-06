@@ -73,7 +73,7 @@ ZunResult EclManager::Load(const char *path)
     if (!this->eclFile)
     {
         // STRING: TH07 0x00498700
-        g_GameErrorContext.Log("敵データの読み込みに失敗しました、データが壊れてるか失われています\r\n");
+        g_GameErrorContext.Log("謨ｵ繝�繝ｼ繧ｿ縺ｮ隱ｭ縺ｿ霎ｼ縺ｿ縺ｫ螟ｱ謨励＠縺ｾ縺励◆縲√ョ繝ｼ繧ｿ縺悟｣翫ｌ縺ｦ繧九°螟ｱ繧上ｌ縺ｦ縺�縺ｾ縺兔r\n");
         return ZUN_ERROR;
     }
 
@@ -201,11 +201,11 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case VAR_POS_Z:
         return enemy->position.z;
     case VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.x;
     case VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.y;
     case VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.z;
     case VAR_MOVE_INTERP_ORIGIN_X:
         return enemy->moveInterpStartPos.x;
     case VAR_MOVE_INTERP_ORIGIN_Y:
@@ -255,9 +255,9 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case VAR_SCORE:
         return enemy->score;
     case VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->position);
+        return GetClosestActivePlayer(&enemy->position)->AngleToPlayer(&enemy->position);
     case VAR_DISTANCE_FROM_PLAYER:
-        return D3DXVec3Length(&(g_Player.positionCenter - enemy->position));
+        return D3DXVec3Length(&(GetClosestActivePlayer(&enemy->position)->positionCenter - enemy->position));
     default:
         return eclVar;
     }
@@ -412,11 +412,11 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case VAR_POS_Z:
         return enemy->position.z;
     case VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.x;
     case VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.y;
     case VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return GetClosestActivePlayer(&enemy->position)->positionCenter.z;
     case VAR_LOCAL_FLOAT2_1:
         return enemy->currentContext.eclContextArgs.floatVars2[0];
     case VAR_LOCAL_FLOAT2_2:
@@ -448,7 +448,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case VAR_BOSS_LIFE_THRESHOLD4:
         return (f32)enemy->lifeCallbackThreshold[3];
     case VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->position);
+        return GetClosestActivePlayer(&enemy->position)->AngleToPlayer(&enemy->position);
     case VAR_ANGLE:
         return enemy->angle;
     case VAR_ANGULAR_VELOCITY:
@@ -475,7 +475,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case VAR_LAST_DAMAGE:
         return (f32)enemy->lastDamage;
     case VAR_DISTANCE_FROM_PLAYER:
-        return D3DXVec3Length(&(g_Player.positionCenter - enemy->position));
+        return D3DXVec3Length(&(GetClosestActivePlayer(&enemy->position)->positionCenter - enemy->position));
     default:
         return eclVar;
     }
@@ -523,11 +523,11 @@ f32 *EclManager::GetFloatVar(Enemy *enemy, f32 *eclVar, u16 paramMask,
     case VAR_POS_Z:
         return &enemy->position.z;
     case VAR_PLAYER_POS_X:
-        return &g_Player.positionCenter.x;
+        return &GetClosestActivePlayer(&enemy->position)->positionCenter.x;
     case VAR_PLAYER_POS_Y:
-        return &g_Player.positionCenter.y;
+        return &GetClosestActivePlayer(&enemy->position)->positionCenter.y;
     case VAR_PLAYER_POS_Z:
-        return &g_Player.positionCenter.z;
+        return &GetClosestActivePlayer(&enemy->position)->positionCenter.z;
     case VAR_LOCAL_FLOAT2_1:
         return &enemy->currentContext.eclContextArgs.floatVars2[0];
     case VAR_LOCAL_FLOAT2_2:
@@ -1230,7 +1230,7 @@ restart:
                 enemy->moveMode = 1;
                 break;
             case 53:
-                enemy->angle = g_Player.AngleToPlayer(&enemy->position) +
+                enemy->angle = GetClosestActivePlayer(&enemy->position)->AngleToPlayer(&enemy->position) +
                                GET_FLOAT_VALUE(enemy, 0);
                 enemy->moveSpeed = GET_FLOAT_VALUE(enemy, 1);
                 enemy->moveMode = 1;
@@ -1427,7 +1427,7 @@ restart:
                 if (enemy->lasers[local_8])
                 {
                     enemy->lasers[local_8]->angle =
-                        g_Player.AngleToPlayer(&enemy->lasers[local_8]->pos) +
+                        GetClosestActivePlayer(&enemy->lasers[local_8]->pos)->AngleToPlayer(&enemy->lasers[local_8]->pos) +
                         GET_FLOAT_VALUE(enemy, 1);
                 }
                 break;
@@ -1588,7 +1588,7 @@ restart:
                     GET_FLOAT_VALUE(enemy, 1);
                 break;
             case 52:
-                if (g_Player.positionCenter.x < enemy->position.x)
+                if (GetClosestActivePlayer(&enemy->position)->positionCenter.x < enemy->position.x)
                 {
                     exitAngle = utils::AddNormalizeAngle(
                         g_Rng.GetRandomFloatInRange(1.5707964f) + 2.3561945f, 0.0f);
@@ -1812,8 +1812,8 @@ restart:
                 enemy->currentContext.time += GET_INT_VALUE(enemy, 0);
                 break;
             case 124:
-                g_ItemManager.SpawnItem(&enemy->position,
-                                        GET_INT_VALUE(enemy, 0), 0);
+                g_ItemManager.SpawnEnemyDrop(&enemy->position,
+                                             GET_INT_VALUE(enemy, 0), 0);
                 break;
             case 125:
                 g_Stage.scriptWaitTime = GET_INT_VALUE(enemy, 0);
@@ -1960,7 +1960,7 @@ restart:
                     cosf(GET_FLOAT_VALUE(enemy, 2)) * GET_FLOAT_VALUE(enemy, 3);
                 break;
             case 155:
-                if ((g_Player.positionCenter.x < enemy->position.x &&
+                if ((GetClosestActivePlayer(&enemy->position)->positionCenter.x < enemy->position.x &&
                      enemy->position.x > 96.0f) ||
                     enemy->position.x > 288.0f)
                 {
@@ -2258,7 +2258,7 @@ restart:
             }
             if (enemy->isBoss && g_GameManager.currentStage >= 7)
             {
-                if (g_Player.bombInfo.isInUse &&
+                if (IsAnyActivePlayerBombing() &&
                     g_EnemyManager.spellcardInfo.isActive &&
                     g_EnemyManager.spellcardInfo.spellcardIdx >= 118)
                 {

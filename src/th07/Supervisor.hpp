@@ -6,12 +6,26 @@
 #include <dinput.h>
 
 #include "MidiOutput.hpp"
+#include "Multiplayer.hpp"
 #include "inttypes.hpp"
 
-extern u16 g_CurFrameRawInput;
-extern u16 g_CurFrameGameInput;
-extern u16 g_LastFrameRawInput;
-extern u16 g_LastFrameGameInput;
+extern u16 g_CurFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
+extern u16 g_CurFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
+extern u16 g_LastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
+extern u16 g_LastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
+
+#define g_CurFrameRawInput (g_CurFrameRawInputs[0])
+#define g_CurFrameGameInput (g_CurFrameGameInputs[0])
+#define g_LastFrameRawInput (g_LastFrameRawInputs[0])
+#define g_LastFrameGameInput (g_LastFrameGameInputs[0])
+#define g_CurFrameRawInputP2 (g_CurFrameRawInputs[1])
+#define g_CurFrameGameInputP2 (g_CurFrameGameInputs[1])
+#define g_LastFrameRawInputP2 (g_LastFrameRawInputs[1])
+#define g_LastFrameGameInputP2 (g_LastFrameGameInputs[1])
+#define g_CurFrameRawInputP3 (g_CurFrameRawInputs[2])
+#define g_CurFrameGameInputP3 (g_CurFrameGameInputs[2])
+#define g_LastFrameRawInputP3 (g_LastFrameRawInputs[2])
+#define g_LastFrameGameInputP3 (g_LastFrameGameInputs[2])
 extern u16 g_IsEighthFrameOfHeldInput;
 extern u16 g_NumOfFramesInputsWereHeld;
 
