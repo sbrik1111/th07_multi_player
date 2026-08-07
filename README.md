@@ -13,6 +13,23 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
+**v0.1.7** fixes the screen breaking up while the game is paused, and lets the
+window size and the music be changed after a match has been made.
+
+The game draws the stage across the whole window and then paints a border over
+everything outside the playfield. While the pause menu was up, that border was
+only scheduled by a counter the drawing code takes back down again, and the two
+did not balance: on about one paused frame in sixty the border was not painted
+and the stage appeared on top of the score panel. Firing a bomb cleared it, so
+it looked like flicker that came and went. The border is now always painted
+while a menu is up, with no counter in the way.
+
+The launcher used to lock its whole form the moment matching started. The
+display size and the BGM switch are decided per PC - no packet carries them and
+no peer is told what you picked - so they stay usable while you wait, and are
+read again on the way into the game. Everything the peers have to agree on is
+still settled before matching.
+
 **v0.1.6** makes the menus usable in a three-player session, and fixes a freeze
 on pausing. The title, difficulty and loadout screens used to wait a full
 network round trip for every single frame, because the rollback prediction that

@@ -2458,6 +2458,8 @@ void SetConnectionUiStatus(const char *text)
     }
 }
 
+void ReadConnectionUiLocalOnlyFields();
+
 bool ReadConnectionUiFields()
 {
     char playerName[128];
@@ -2551,28 +2553,7 @@ bool ReadConnectionUiFields()
     g_connectionUi.selection.rollback =
         SendMessageA(g_connectionUi.rollbackCheck, BM_GETCHECK, 0, 0) ==
         BST_CHECKED;
-    if (IsDlgButtonChecked(g_connectionUi.window,
-                           UI_ID_DISPLAY_FULLSCREEN_640) == BST_CHECKED)
-    {
-        g_connectionUi.selection.displayMode = DISPLAY_MODE_FULLSCREEN_640;
-    }
-    else if (IsDlgButtonChecked(g_connectionUi.window,
-                                UI_ID_DISPLAY_WINDOW_960) == BST_CHECKED)
-    {
-        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_960;
-    }
-    else if (IsDlgButtonChecked(g_connectionUi.window,
-                                UI_ID_DISPLAY_WINDOW_1280) == BST_CHECKED)
-    {
-        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_1280;
-    }
-    else
-    {
-        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_640;
-    }
-    g_connectionUi.selection.bgmEnabled =
-        SendMessageA(g_connectionUi.bgmCheck, BM_GETCHECK, 0, 0) ==
-        BST_CHECKED;
+    ReadConnectionUiLocalOnlyFields();
     g_connectionUi.selection.seEnabled =
         SendMessageA(g_connectionUi.seCheck, BM_GETCHECK, 0, 0) ==
         BST_CHECKED;
@@ -2612,13 +2593,51 @@ bool ReadConnectionUiFields()
     return true;
 }
 
+// The window size and the music switch decide nothing about the simulation:
+// they are answered per PC, they travel in no packet, and no peer is told what
+// this one picked. They are read again on the way into the game, so they stay
+// live after a match is made - somebody who has already found their opponents
+// should not have to drop the session to move the window off a second monitor
+// or turn the music down.
+void ReadConnectionUiLocalOnlyFields()
+{
+    if (IsDlgButtonChecked(g_connectionUi.window,
+                           UI_ID_DISPLAY_FULLSCREEN_640) == BST_CHECKED)
+    {
+        g_connectionUi.selection.displayMode = DISPLAY_MODE_FULLSCREEN_640;
+    }
+    else if (IsDlgButtonChecked(g_connectionUi.window,
+                                UI_ID_DISPLAY_WINDOW_960) == BST_CHECKED)
+    {
+        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_960;
+    }
+    else if (IsDlgButtonChecked(g_connectionUi.window,
+                                UI_ID_DISPLAY_WINDOW_1280) == BST_CHECKED)
+    {
+        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_1280;
+    }
+    else
+    {
+        g_connectionUi.selection.displayMode = DISPLAY_MODE_WINDOW_640;
+    }
+    if (g_connectionUi.bgmCheck)
+    {
+        g_connectionUi.selection.bgmEnabled =
+            SendMessageA(g_connectionUi.bgmCheck, BM_GETCHECK, 0, 0) ==
+            BST_CHECKED;
+    }
+}
+
 void SetConnectionUiNetworkFieldsEnabled(bool enabled)
 {
     EnableWindow(g_connectionUi.hostEdit, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.playerNameEdit, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.portEdit, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.delayEdit, enabled ? TRUE : FALSE);
-    EnableWindow(g_connectionUi.bgmCheck, enabled ? TRUE : FALSE);
+    // bgmCheck and the four display sizes are deliberately absent: see
+    // ReadConnectionUiLocalOnlyFields. Everything else here either travels to
+    // the peers or decides how the simulation runs, and has to be settled
+    // before the search starts.
     EnableWindow(g_connectionUi.seCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.rollbackCheck,
                  enabled && g_connectionUi.selection.playerCount != 3
@@ -2631,18 +2650,6 @@ void SetConnectionUiNetworkFieldsEnabled(bool enabled)
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_2),
                  enabled ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_3),
-                 enabled ? TRUE : FALSE);
-    EnableWindow(GetDlgItem(g_connectionUi.window,
-                            UI_ID_DISPLAY_FULLSCREEN_640),
-                 enabled ? TRUE : FALSE);
-    EnableWindow(GetDlgItem(g_connectionUi.window,
-                            UI_ID_DISPLAY_WINDOW_640),
-                 enabled ? TRUE : FALSE);
-    EnableWindow(GetDlgItem(g_connectionUi.window,
-                            UI_ID_DISPLAY_WINDOW_960),
-                 enabled ? TRUE : FALSE);
-    EnableWindow(GetDlgItem(g_connectionUi.window,
-                            UI_ID_DISPLAY_WINDOW_1280),
                  enabled ? TRUE : FALSE);
 }
 
@@ -2993,6 +3000,9 @@ void FinishConnectionUiNetworkStart(bool requestStart)
         g_connectionUi.selection.rollback = g_rollbackEnabled;
         g_connectionUi.selection.delay = g_delay;
     }
+    // These two stayed editable while the match was being made, so take what
+    // the form says now rather than what it said when the search started.
+    ReadConnectionUiLocalOnlyFields();
     SaveConnectionUiConfig(&g_connectionUi.selection);
     if (requestStart)
     {
@@ -13677,6 +13687,13 @@ bool Netplay::SynchronizeInputs(
         g_GameErrorContext.Log(
             "info : test stage %d gameplay active\r\n",
             g_GameManager.currentStage);
+        // Also in the trace, which is flushed and uncapped. A capture run that
+        // wants a screenshot of stage 5 has to know when stage 5 arrived, and
+        // the error context above is neither written until exit nor large
+        // enough to survive a long session.
+        NetplayTraceFile("info : stage marker %d frame %lu\r\n",
+                         (int)g_GameManager.currentStage,
+                         (unsigned long)g_frame);
     }
     testFrame = IsNetworked() ? g_frame : g_testInputSyncLocalFrame;
     if (g_testInputSyncEnabled && !g_testInputSyncInjected &&

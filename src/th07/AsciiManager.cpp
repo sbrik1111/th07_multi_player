@@ -87,17 +87,17 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
     }
     else if (g_GameManager.isInPauseMenu)
     {
-        // Gui::DrawGameScene normally redraws the static HUD only while its
-        // background animation is active.  The pause path stops the later
-        // calculation chains, so keep one draw scheduled each frame; this
-        // also clears the compact P1/P2 resource rows before their icons are
-        // queued again after a long session.
-        g_Supervisor.renderSkipFrames = 1;
+        // Gui::DrawGameScene used to be told to redraw the static HUD from
+        // here, by setting renderSkipFrames to one every frame. Present takes
+        // one off every frame it displays, so the counter reached zero often
+        // enough to drop the border on about one paused frame in sixty and
+        // leave the 3D scene showing over the score panel. That test now lives
+        // in Gui::DrawGameScene, which asks whether a menu is up rather than
+        // reading a counter; see the comment there.
         arg->pauseMenu.OnUpdate();
     }
     if (g_GameManager.isInRetryMenu)
     {
-        g_Supervisor.renderSkipFrames = 1;
         arg->retryMenu.OnUpdate();
     }
     arg->UpdateScripts();
