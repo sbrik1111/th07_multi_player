@@ -59,6 +59,17 @@ const int DEFAULT_PORT = 35000;
 // full 60 Hz frame of input latency from the old default. Users can still
 // raise this with --delay or the connection UI when the route is unstable.
 const int DEFAULT_DELAY = 1;
+// How far behind a menu reads its input. Prediction is suspended outside
+// gameplay, and with rollback on the delay is zero, so every menu frame waits
+// a full round trip for the other peers. A guest's input reaches the other
+// guest through the host, so a three-player session pays two hops per frame.
+// Measured over the real line: 2745 waits averaging 31 ms, every one of them
+// outside gameplay and none inside it.
+//
+// A menu has no reaction time worth protecting, so it buys its way out with
+// input delay instead. Four frames is 67 ms on the cursor and covers a round
+// trip on any line these sessions have run on.
+const int MENU_INPUT_DELAY = 4;
 const int DEFAULT_CONNECT_TIMEOUT_SECONDS = 120;
 // Keep enough redundant history to recover when one PC finishes a stage load
 // later than the other. The prediction window can put the fast peer fourteen
@@ -361,6 +372,7 @@ u32 g_testDeferredPollFrame = INVALID_FRAME;
 u32 g_testDeferredPollFrameCount = 0;
 bool g_testRandomInputEnabled = false;
 bool g_testEvasiveInputEnabled = false;
+bool g_testPauseCycleEnabled = false;
 // Drives the title and loadout screens. Every other test driver deliberately
 // refuses to write menu bits so a background window cannot steer a match, so
 // this is the only one allowed to, and only when explicitly requested. Without
@@ -424,6 +436,12 @@ DWORD g_testStartedTick = 0;
 u32 g_session = 0;
 u32 g_frame = 0;
 int g_delay = DEFAULT_DELAY;
+// Added to g_delay while a menu is up. It must be the same on every peer for
+// the same frame, or they read different inputs and the session comes apart -
+// so it is derived from nothing but the frame number and simulation state that
+// every peer already agrees on. See UpdateMenuInputDelay.
+int g_menuInputDelay = 0;
+u32 g_menuInputDelayFrame = INVALID_FRAME;
 bool g_rollbackEnabled = false;
 bool g_rollbackEverEnabled = false;
 bool g_rollbackReplaying = false;
@@ -567,7 +585,6 @@ u32 g_traceItemHash[INPUT_RING_SIZE];
 u8 g_bossDeathLogged = 0;
 // One-shot guards so the rollback failure paths are reported without filling
 // TH07's fixed 8 KiB error buffer.
-bool g_rollbackDeferralLogged = false;
 bool g_rollbackWindowExhaustedLogged = false;
 bool g_rollbackSnapshotMissingLogged = false;
 bool g_rollbackBombEffectOverflowLogged = false;
@@ -842,6 +859,7 @@ struct RollbackSnapshot
     u16 curFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
     i32 powerGiveTaps[TH07_MULTI_MAX_PLAYERS];
     i32 powerGiveWindow[TH07_MULTI_MAX_PLAYERS];
+    i32 menuInputDelay;
     u16 lastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
     u16 lastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
     u16 isEighthFrameOfHeldInput;
@@ -3882,7 +3900,6 @@ void ResetInputRings()
     g_rollbackSnapshotStage = -1;
     g_rollbackStageInvalidations = 0;
     g_bossDeathLogged = 0;
-    g_rollbackDeferralLogged = false;
     g_rollbackWindowExhaustedLogged = false;
     g_rollbackSnapshotMissingLogged = false;
     g_rollbackBombEffectOverflowLogged = false;
@@ -8129,10 +8146,99 @@ u32 CalculateCalcChainSignature()
     return HashStateValue(hash, (u32)count);
 }
 
+int EffectiveDelay()
+{
+    return g_delay + g_menuInputDelay;
+}
+
+// Moves the menu delay one step towards where it belongs, unconditionally in
+// both directions. Call it before the frame's consumption point is worked out.
+//
+// Nothing is tested about the inputs on the way, and that is the whole point.
+// An earlier version only stepped up across a frame whose input matched the
+// next one, on the theory that reading a frame twice could enter a menu
+// selection twice. Both halves of that were wrong. Reading a frame twice turns
+// A,B,C into A,B,B,C, and B,B is not a transition, so no press edge is ever
+// invented - the following input simply lands a frame later. And the test
+// itself asked whether the next frame's input had arrived, which is a question
+// about packets rather than about the simulation: the peer that had it stepped
+// and the peer that did not stayed, they read different inputs from that frame
+// on, and a real session diverged twenty seconds later.
+//
+// Stepping down skips a frame of input rather than repeating one, which can
+// lose a tap. It is skipped identically everywhere, and it happens as a stage
+// starts, so nothing is riding on it.
+//
+// At most one step per frame, and the frame is what is counted rather than the
+// call. SynchronizeInputs returns false and is called again for the same frame
+// whenever it is waiting on a packet, so counting calls makes the delay a
+// function of how often a peer had to wait - which is exactly the kind of
+// local timing that must not reach it. Measured before this guard: the host
+// stepped twice on frame 311 and the laptop once, and from there they read
+// different inputs.
+//
+// What is left depends only on the frame number, on notInMenu and replay, and
+// on g_delay - all of which every peer already agrees on frame by frame.
+void UpdateMenuInputDelay(u32 currentFrame)
+{
+    int target;
+
+    if (!Netplay::IsNetworked())
+    {
+        g_menuInputDelay = 0;
+        return;
+    }
+    if (g_menuInputDelayFrame == currentFrame)
+    {
+        return;
+    }
+    // notInMenu is false for two different things: the title and loadout
+    // screens, and the pause or retry menu during a stage. Only the first is
+    // safe to key on. Every peer leaves the title screens on the same simulated
+    // frame, because the synchronized input is what moves them. A pause does
+    // not work that way: the peer that pressed escape flips notInMenu at once,
+    // while the others predicted no press and only flip it when the rewind
+    // replays that frame. Which input frame is consumed is not something a
+    // rewind puts back, so a delay that stepped on a predicted pause would
+    // leave the peers reading different frames from then on.
+    //
+    // So the pause menu keeps the round trip per frame it has always had.
+    //
+    // The freeze that first sent us here was not this. Both guests stepping the
+    // delay on frame 46312 while the host never stepped at all was the host
+    // already being stuck, in PerformPendingRollback - see the comment there.
+    // That is fixed; this guard stands on its own.
+    target = !g_GameManager.notInMenu && !g_GameManager.replay &&
+            !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu &&
+            !g_GameManager.isPaused && MENU_INPUT_DELAY > g_delay
+        ? MENU_INPUT_DELAY - g_delay : 0;
+    if (g_menuInputDelay == target)
+    {
+        return;
+    }
+    if (g_menuInputDelay < target && currentFrame < (u32)EffectiveDelay() + 1)
+    {
+        return;
+    }
+    g_menuInputDelayFrame = currentFrame;
+    g_menuInputDelay += g_menuInputDelay < target ? 1 : -1;
+    {
+        // Every peer must produce this same list. Comparing the three of them
+        // is how the invariant above is actually checked; see
+        // tools/menu_delay_realline_test.ps1. It goes to the trace rather than
+        // the error context, which is capped at 8 KiB and lost these lines to
+        // the spell checkpoints the first time they were needed.
+        char line[96];
+        sprintf(line, "info : menu delay %d at frame %lu\r\n",
+                g_menuInputDelay, (unsigned long)currentFrame);
+        Netplay::WriteTraceLine(line);
+    }
+}
+
 bool IsRollbackGameplayState()
 {
     return (g_mode == Netplay::MODE_HOST || g_mode == Netplay::MODE_GUEST) &&
-        g_rollbackEnabled &&
+        g_rollbackEnabled && g_menuInputDelay == 0 &&
         g_GameManager.notInMenu && !g_GameManager.replay &&
         !g_GameManager.isPaused && !g_GameManager.isInPauseMenu &&
         !g_GameManager.isInRetryMenu &&
@@ -8415,6 +8521,7 @@ void SaveRollbackSnapshot(u32 simulationFrame)
            sizeof(g_powerGiveTaps));
     memcpy(snapshot->powerGiveWindow, g_powerGiveWindow,
            sizeof(g_powerGiveWindow));
+    snapshot->menuInputDelay = g_menuInputDelay;
     memcpy(snapshot->curFrameGameInputs, g_CurFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(snapshot->lastFrameRawInputs, g_LastFrameRawInputs,
@@ -8500,6 +8607,7 @@ bool RestoreRollbackSnapshot(const RollbackSnapshot *snapshot)
            sizeof(g_powerGiveTaps));
     memcpy(g_powerGiveWindow, snapshot->powerGiveWindow,
            sizeof(g_powerGiveWindow));
+    g_menuInputDelay = snapshot->menuInputDelay;
     memcpy(g_CurFrameGameInputs, snapshot->curFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(g_LastFrameRawInputs, snapshot->lastFrameRawInputs,
@@ -8610,7 +8718,7 @@ bool SynchronizeRollbackFrame(
     u16 controls[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
     int playerId;
 
-    if (currentFrame < (u32)g_delay)
+    if (currentFrame < (u32)EffectiveDelay())
     {
         for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
         {
@@ -8620,7 +8728,7 @@ bool SynchronizeRollbackFrame(
         return true;
     }
     currentSlot = (int)(currentFrame % INPUT_RING_SIZE);
-    targetFrame = currentFrame - (u32)g_delay;
+    targetFrame = currentFrame - (u32)EffectiveDelay();
     targetSlot = (int)(targetFrame % INPUT_RING_SIZE);
     if (g_localFrames[currentSlot] != currentFrame)
     {
@@ -8690,6 +8798,23 @@ bool SynchronizeRollbackFrame(
     return true;
 }
 
+// Neither of the two ways a rewind can fail is recoverable by waiting, and
+// nothing else clears the pending frame, so returning false from here used to
+// mean the peer never advanced again. TryGetRemoteInput reports that as "no
+// input yet" and the render loop settles into its one-millisecond retry, which
+// is a hard freeze with nothing on screen and nothing in a log that only gets
+// written on a clean exit. Give up on the correction instead, and say so where
+// it will be read: an unrepaired frame may surface later as a divergence,
+// which the state comparison already reports and a resynchronize can still act
+// on. A frozen session offers the player nothing at all.
+void AbandonPendingRollback(u32 currentFrame, u32 mismatchFrame)
+{
+    g_rollbackEarliestFrame = INVALID_FRAME;
+    g_GameErrorContext.Log(
+        "error : rollback correction abandoned at frame %lu (pending %lu); the session continues on state that was never repaired\r\n",
+        (unsigned long)currentFrame, (unsigned long)mismatchFrame);
+}
+
 bool PerformPendingRollback()
 {
     u32 mismatchFrame = g_rollbackEarliestFrame;
@@ -8723,23 +8848,25 @@ bool PerformPendingRollback()
         g_rollbackEarliestFrame = INVALID_FRAME;
         return true;
     }
-    if (!IsRollbackGameplayFrame())
-    {
-        // Menus, pauses, and stage transitions are not gameplay frames, so the
-        // simulation is not advancing and no further divergence accumulates.
-        // The correction MUST NOT be dropped here: discarding it silently left
-        // the peers permanently out of sync, and because the RNG resync path
-        // only repairs the seed, the diverged world state never recovered.
-        // Hold it and replay once gameplay resumes.
-        if (!g_rollbackDeferralLogged)
-        {
-            g_rollbackDeferralLogged = true;
-            g_GameErrorContext.Log(
-                "info : rollback correction deferred at frame %lu (pending %lu); not a gameplay frame\r\n",
-                (unsigned long)currentFrame, (unsigned long)mismatchFrame);
-        }
-        return true;
-    }
+    // A pause, a menu or a stage transition used to hold the correction back
+    // until gameplay resumed, on the grounds that a stopped simulation cannot
+    // diverge any further. It cannot - but frames keep being exchanged while
+    // the pause menu is open, and g_frame keeps counting through all of them.
+    // By the time the player resumed, the frame that needed repairing had aged
+    // far past the twenty-four frame keyframe history, the rewind below failed,
+    // and it failed again on every following call because nothing ever cleared
+    // the pending frame. TryGetRemoteInput reports a failed rewind as "no input
+    // yet", so that peer stopped advancing and every other peer sat waiting on
+    // it. Pausing for two seconds froze the whole session, reliably. Measured
+    // at frame 1041, with a correction still pending for frame 897.
+    //
+    // So repair it now, whatever the game happens to be showing. The rewind
+    // replays the same handful of frames it always would have, and the ones
+    // spent inside the pause menu cost almost nothing, because
+    // GameManager::OnUpdate returns as soon as it sees isInPauseMenu. The
+    // snapshot carries GameManager, AsciiManager and Supervisor, so restoring
+    // to a frame before the pause unwinds the pause as well, and the replay
+    // walks back into it from the corrected input.
     snapshotFrame = mismatchFrame + (u32)g_delay;
     snapshotFrame -= snapshotFrame % ROLLBACK_SNAPSHOT_INTERVAL;
     if (snapshotFrame > currentFrame ||
@@ -8757,8 +8884,9 @@ bool PerformPendingRollback()
                 (unsigned long)currentFrame, (unsigned long)mismatchFrame,
                 (unsigned long)snapshotFrame, ROLLBACK_HISTORY_FRAMES);
         }
-        SetStatus("rollback window exhausted; waiting for input");
-        return false;
+        SetStatus("rollback window exhausted; state may be out of sync");
+        AbandonPendingRollback(currentFrame, mismatchFrame);
+        return true;
     }
     snapshot = &g_rollbackSnapshots[GetRollbackSnapshotIndex(snapshotFrame)];
     if (snapshot->simulationFrame != snapshotFrame ||
@@ -8773,10 +8901,10 @@ bool PerformPendingRollback()
                 (unsigned long)snapshotFrame,
                 (unsigned long)snapshot->simulationFrame);
         }
-        SetStatus("rollback snapshot unavailable; waiting for input");
-        return false;
+        SetStatus("rollback snapshot unavailable; state may be out of sync");
+        AbandonPendingRollback(currentFrame, mismatchFrame);
+        return true;
     }
-    g_rollbackDeferralLogged = false;
     g_rollbackRestoredBombEffects += snapshot->bombEffectCount;
 
     g_rollbackEarliestFrame = INVALID_FRAME;
@@ -9087,6 +9215,31 @@ void ApplySynchronizedControl(Netplay::InGameControl control)
         break;
     default:
         break;
+    }
+}
+
+// Opens and closes the pause menu on a schedule. Nothing else in the test
+// suite ever pauses, which is how a rollback correction that could never be
+// applied after a pause reached three real machines: the automated runs walk
+// the title screens, play six stages and never once press escape. It froze the
+// session on the first pause anyone took.
+void ApplyPauseCycle(u16 *localPlayer1)
+{
+    u32 frame;
+
+    // Not gated on notInMenu: that is false while the pause menu is up, which
+    // is exactly when the second press has to arrive to close it again.
+    if (!g_testPauseCycleEnabled || g_GameManager.replay ||
+        g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
+    {
+        return;
+    }
+    frame = g_mode == Netplay::MODE_LOCAL ? g_testInputSyncLocalFrame : g_frame;
+    // One press to open it and one to close it again, two seconds apart, over
+    // and over. The edge is what matters, so a single frame each.
+    if (frame % 1800 == 900 || frame % 1800 == 1020)
+    {
+        *localPlayer1 |= TH_BUTTON_MENU;
     }
 }
 
@@ -11340,8 +11493,8 @@ void LogEndOfRunSummary()
             (unsigned long)g_dsSkipIgnore, (unsigned long)g_dsSkipZeroHash,
             (unsigned long)g_dsSkipRemote);
         g_GameErrorContext.Log(
-            "info : input timing delay %d stalls %lu avg_wait %lu ms max_wait %lu ms gameplay_stalls %lu gameplay_avg %lu ms gameplay_max %lu ms rtt %lu ms\r\n",
-            g_delay, (unsigned long)g_inputStallCount,
+            "info : input timing delay %d menu_delay %d stalls %lu avg_wait %lu ms max_wait %lu ms gameplay_stalls %lu gameplay_avg %lu ms gameplay_max %lu ms rtt %lu ms\r\n",
+            g_delay, g_menuInputDelay, (unsigned long)g_inputStallCount,
             (unsigned long)averageStall, (unsigned long)g_inputStallMaxMs,
             (unsigned long)g_gameplayInputStallCount,
             (unsigned long)averageGameplayStall,
@@ -11512,6 +11665,7 @@ bool Netplay::Initialize(const char *commandLine)
                                           "--test-random-input");
     g_testEvasiveInputEnabled = HasOption(commandLine,
                                            "--test-evasive-input");
+    g_testPauseCycleEnabled = HasOption(commandLine, "--test-pause-cycle");
     if (g_testRandomInputEnabled && g_testEvasiveInputEnabled)
     {
         SetStatus("--test-random-input and --test-evasive-input cannot be combined");
@@ -13488,6 +13642,7 @@ bool Netplay::SynchronizeInputs(
     ApplyRollbackInputTest(&localPlayer1, &localPlayer2);
     ApplyTestRandomInput(&localPlayer1, &localPlayer2, &localPlayer3);
     ApplyTestEvasiveInput(&localPlayer1, &localPlayer2, &localPlayer3);
+    ApplyPauseCycle(&localPlayer1);
     ApplyDamageEventTestInput(&localPlayer1, &localPlayer2);
     if (g_testP2FeaturesEnabled && g_mode == MODE_LOCAL &&
         g_GameManager.notInMenu)
@@ -13735,7 +13890,8 @@ bool Netplay::SynchronizeInputs(
         SaveRollbackSnapshot(currentFrame);
     }
 
-    if (currentFrame < (u32)g_delay)
+    UpdateMenuInputDelay(currentFrame);
+    if (currentFrame < (u32)EffectiveDelay())
     {
         // The remote input for these initial frames cannot be available yet.
         // Advancing with the local P1 input here makes the two peers simulate
@@ -13752,7 +13908,7 @@ bool Netplay::SynchronizeInputs(
         return true;
     }
 
-    targetFrame = currentFrame - g_delay;
+    targetFrame = currentFrame - EffectiveDelay();
     targetSlot = (int)(targetFrame % INPUT_RING_SIZE);
     if (!TryGetRemoteInput(targetFrame, IsRollbackPredictionFrame()))
     {

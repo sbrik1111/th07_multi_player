@@ -13,6 +13,23 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
+**v0.1.6** makes the menus usable in a three-player session, and fixes a freeze
+on pausing. The title, difficulty and loadout screens used to wait a full
+network round trip for every single frame, because the rollback prediction that
+covers gameplay is deliberately switched off outside it; walking from the title
+to the start of stage 1 spent about fifty seconds waiting. Those screens now
+carry a few frames of input delay instead, which every peer steps on the same
+simulated frame, and the same walk waits about two seconds.
+
+The freeze was separate and older. A rollback correction that arrived while the
+pause menu was open was held until gameplay resumed - but frames keep being
+exchanged while the menu is up, so by the time anyone pressed escape again the
+frame that needed repairing had aged out of the rewind history. The repair then
+failed on every following attempt, and the peer stopped advancing with nothing
+on screen to say why. Any pause longer than four tenths of a second did it. The
+correction is now applied when it arrives, and a repair that genuinely cannot be
+made gives up and says so in `log.txt` instead of stopping the session.
+
 **v0.1.5** adds a power transfer. Overlap a partner and tap shot eight times to
 send them twenty power; it crosses the screen as power items that home to them,
 the way a transferred life does.
