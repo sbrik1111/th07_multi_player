@@ -13,76 +13,37 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
-**v0.1.7** fixes the screen breaking up while the game is paused, and lets the
-window size and the music be changed after a match has been made.
+**v0.1.7**
 
-The game draws the stage across the whole window and then paints a border over
-everything outside the playfield. While the pause menu was up, that border was
-only scheduled by a counter the drawing code takes back down again, and the two
-did not balance: on about one paused frame in sixty the border was not painted
-and the stage appeared on top of the score panel. Firing a bomb cleared it, so
-it looked like flicker that came and went. The border is now always painted
-while a menu is up, with no counter in the way.
+* Fixed the screen breaking up while paused.
+* Window size and BGM can now be changed while waiting for a match to start.
 
-The launcher used to lock its whole form the moment matching started. The
-display size and the BGM switch are decided per PC - no packet carries them and
-no peer is told what you picked - so they stay usable while you wait, and are
-read again on the way into the game. Everything the peers have to agree on is
-still settled before matching.
+**v0.1.6**
 
-**v0.1.6** makes the menus usable in a three-player session, and fixes a freeze
-on pausing. The title, difficulty and loadout screens used to wait a full
-network round trip for every single frame, because the rollback prediction that
-covers gameplay is deliberately switched off outside it; walking from the title
-to the start of stage 1 spent about fifty seconds waiting. Those screens now
-carry a few frames of input delay instead, which every peer steps on the same
-simulated frame, and the same walk waits about two seconds.
+* Greatly reduced menu latency in multiplayer.
+* Fixed sessions freezing after pausing.
+* Failed rollback recovery now logs an error instead of freezing the game.
 
-The freeze was separate and older. A rollback correction that arrived while the
-pause menu was open was held until gameplay resumed - but frames keep being
-exchanged while the menu is up, so by the time anyone pressed escape again the
-frame that needed repairing had aged out of the rewind history. The repair then
-failed on every following attempt, and the peer stopped advancing with nothing
-on screen to say why. Any pause longer than four tenths of a second did it. The
-correction is now applied when it arrives, and a repair that genuinely cannot be
-made gives up and says so in `log.txt` instead of stopping the session.
+**v0.1.5**
 
-**v0.1.5** adds a power transfer. Overlap a partner and tap shot eight times to
-send them twenty power; it crosses the screen as power items that home to them,
-the way a transferred life does.
+* Added power transfer: overlap a partner and tap shot eight times to send them 20 power.
 
-**v0.1.4** turns every `Advanced settings` switch off by default. The
-player-name labels and `netplay_trace.txt` were both on, so a fresh install drew
-names over the ships and wrote a growing file next to the executable without
-anyone having asked for either. All five start off now.
+**v0.1.4**
 
-It also adds a fifth switch, **Pin FPU control word**. Direct3D sets the x87
-control word when it creates the device and again on every reset, which decides
-how the whole simulation rounds; pinning it stops a graphics driver from
-changing that mid-session. It is off by default, because on every machine
-measured the word was already the value it would be pinned to. Unlike the other
-four it is host-authoritative: peers that round differently are the exact
-failure it exists to prevent.
+* All `Advanced settings` options are now off by default.
+* Added **Pin FPU control word** for machines that may use different floating-point settings.
 
-**v0.1.3** fixes a freeze. The rollback keeps a short history of saved frames,
-and a frame whose bomb effects did not fit in its buffer was discarded instead
-of saved. A rewind that later needed that frame found nothing, decided the
-state could not be repaired, and waited - on every PC, at the same frame,
-recoverable only by everyone pressing F8. The buffer held 128 effects; a
-three-player stage reaches ninety-odd routinely, so the margin was thirty-one.
-It now holds 1024, and an overflow says so in `log.txt` instead of surfacing
-twenty minutes later as something else.
+**v0.1.3**
 
-v0.1.3 also adds a switch for `netplay_trace.txt` under `Advanced settings`,
-and gives the guest bot a better idea of what it is doing: it looks further
-ahead and weighs a threat by how soon it arrives, picks up power and lives
-instead of leaving them, keeps its distance from a boss, and bombs its way out
-of a hit rather than guessing at one.
+* Fixed a rollback freeze caused by bomb-effect history overflow.
+* Added optional `netplay_trace.txt` logging.
+* Improved guest bot movement, item collection, boss positioning, and bomb usage.
 
-**v0.1.2** fixed a serious item-drop synchronization issue related to item
-randomization, which could cause different items to appear between players.
+**v0.1.2**
 
-This is still an experimental release, so other desyncs may remain.
+* Fixed a serious item-drop synchronization issue caused by item randomization.
+
+This is still an experimental release, so other desyncs and bugs may remain.
 
 ## Known issues
 
