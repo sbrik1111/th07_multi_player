@@ -63,14 +63,14 @@ This is still an experimental release, so other desyncs and bugs may remain.
 
 ## What it does
 
-- **Two or three player netplay** over UDP. The host is P1, the guests are P2
-  and P3; guest-to-guest input is relayed through the host
-- **Local two player** on one keyboard
-- Each player picks their **own character and shot type**
-- Lives, bombs and power are per player; cherry and score are shared
-- Life transfer between players, and revival of a player who is out of lives
-- **Predictive rollback** so movement is not held back by the round trip
-  (on by default, zero added delay)
+* **Two or three player netplay** over UDP. The host is P1, the guests are P2 and P3; guest-to-guest input is relayed through the host
+* **The host must have the UDP port open/forwarded** so guests can connect
+* **Local two player** on one keyboard
+* Each player picks their **own character and shot type**
+* Lives, bombs and power are per player; cherry and score are shared
+* Life transfer between players, and revival of a player who is out of lives
+* **Predictive rollback** so movement is not held back by the round trip (on by default, zero added delay)
+
 
 ## Playing
 
