@@ -1617,8 +1617,27 @@ void Gui::DrawGameScene()
     g_Supervisor.viewport.Height = 480;
     g_Supervisor.d3dDevice->SetViewport(&g_Supervisor.viewport);
     vm = &this->impl->vms0[12];
+    // The block below paints the border that hides everything the playfield
+    // viewport does not cover: the stage is drawn across the whole window and
+    // this is what conceals the parts of it that are not supposed to show.
+    // Skipping it leaves the 3D scene sitting on top of the score panel.
+    //
+    // While the pause or retry menu is up nothing else advances, so the only
+    // thing that used to schedule this redraw was AsciiManager setting
+    // renderSkipFrames to one every frame - and Present takes one off every
+    // frame it displays. That balance does not hold: a frame that presents
+    // without the calculation chain having reached AsciiManager leaves the
+    // counter at zero, the border is not painted, and the scene shows through.
+    // Measured over six hundred paused frames on a stage 5 session: ten of
+    // them, scattered, which is the flicker people report. Firing a bomb
+    // cleared it because a bomb sets the counter to two.
+    //
+    // So ask the question directly instead of through a counter something else
+    // decrements. It costs a few dozen quads on frames where the game is not
+    // simulating anything anyway.
     if (g_Supervisor.cfg.redrawEveryFrame ||
         vm->currentInstruction ||
+        g_GameManager.isInPauseMenu || g_GameManager.isInRetryMenu ||
         g_Supervisor.renderSkipFrames != 0)
     {
         for (y = 0.0f; y < 464.0f; y = y + 32.0f)
