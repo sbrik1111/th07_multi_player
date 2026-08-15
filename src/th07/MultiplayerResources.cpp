@@ -1,4 +1,7 @@
 #include "GameManager.hpp"
+
+#include <string.h>
+
 #include "GameErrorContext.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
@@ -10,6 +13,9 @@
 MultiplayerPlayerResources
     g_MultiplayerPlayerResources[TH07_MULTI_MAX_GUESTS] = {
         {0, 0, 0}, {0, 0, 0}};
+MultiplayerContributionStats
+    g_MultiplayerContributionStats[TH07_MULTI_MAX_PLAYERS] = {
+        {0, 0}, {0, 0}, {0, 0}};
 
 static MultiplayerPlayerResources *GetSidecarResources(u8 playerId)
 {
@@ -73,6 +79,14 @@ f32 GetMultiplayerBossDamageMultiplier()
         return 0.75f;
     }
     return 1.0f;
+}
+
+f32 GetMultiplayerBombDamageMultiplier()
+{
+    // Three simultaneous bomb invulnerability windows are much stronger than
+    // the two-player case.  Scale only bomb hitbox damage; normal shots keep
+    // their full value and the existing boss multiplier remains separate.
+    return GetActivePlayerCount() >= 3 ? 2.0f / 3.0f : 1.0f;
 }
 
 i32 GetMultiplayerRankPenalty(i32 amount)
@@ -159,6 +173,66 @@ i32 GetPlayerCherryPlus(u8 playerId)
 {
     (void)playerId;
     return g_GameManager.cherryPlus;
+}
+
+u32 GetPlayerEnemiesDefeated(u8 playerId)
+{
+    if (playerId >= TH07_MULTI_MAX_PLAYERS)
+    {
+        return 0;
+    }
+    return g_MultiplayerContributionStats[playerId].enemiesDefeated;
+}
+
+u32 GetPlayerDamageDealt(u8 playerId)
+{
+    if (playerId >= TH07_MULTI_MAX_PLAYERS)
+    {
+        return 0;
+    }
+    return g_MultiplayerContributionStats[playerId].damageDealt;
+}
+
+void AddPlayerEnemiesDefeated(u8 playerId, u32 amount)
+{
+    MultiplayerContributionStats *stats;
+    if (playerId >= TH07_MULTI_MAX_PLAYERS)
+    {
+        return;
+    }
+    stats = &g_MultiplayerContributionStats[playerId];
+    if (0xffffffffu - stats->enemiesDefeated < amount)
+    {
+        stats->enemiesDefeated = 0xffffffffu;
+    }
+    else
+    {
+        stats->enemiesDefeated += amount;
+    }
+}
+
+void AddPlayerDamageDealt(u8 playerId, u32 amount)
+{
+    MultiplayerContributionStats *stats;
+    if (playerId >= TH07_MULTI_MAX_PLAYERS)
+    {
+        return;
+    }
+    stats = &g_MultiplayerContributionStats[playerId];
+    if (0xffffffffu - stats->damageDealt < amount)
+    {
+        stats->damageDealt = 0xffffffffu;
+    }
+    else
+    {
+        stats->damageDealt += amount;
+    }
+}
+
+void ResetPlayerContributionStats()
+{
+    memset(g_MultiplayerContributionStats, 0,
+           sizeof(g_MultiplayerContributionStats));
 }
 
 void SetPlayerLives(u8 playerId, i32 amount)
@@ -255,14 +329,16 @@ void AddPlayerCherryPlus(u8 playerId, i32 amount)
 void ResetMultiplayerPlayerResources(u8 playerId)
 {
     MultiplayerPlayerResources *resources = GetSidecarResources(playerId);
+    Player *player;
     if (!resources)
     {
         return;
     }
+    player = &g_Players[playerId];
     resources->livesRemaining = g_GameManager.defaultCfg
         ? g_GameManager.defaultCfg->lifeCount : 0;
-    resources->bombsRemaining = g_Player.shooterData
-        ? (i32)g_Player.shooterData->initialBombs : 0;
+    resources->bombsRemaining = player->shooterData
+        ? (i32)player->shooterData->initialBombs : 0;
     resources->currentPower = 0;
 }
 

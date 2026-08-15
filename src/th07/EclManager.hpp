@@ -193,3 +193,22 @@ struct EclManager
     EclRawInstr **subTable;
 };
 extern EclManager g_EclManager;
+
+// Stage 4's second boss spellcard depends on the player's character. With the
+// multiplayer chain enabled, each distinct active character fights its copy
+// in player order before the script is allowed to continue to the shared
+// cards.
+void ResetStage4BossChain();
+void NoteStage4ChainedSpellcard(struct Enemy *enemy);
+bool IsStage4ChainedCardActive();
+bool Stage4ChainRestartPhase(struct Enemy *enemy, i32 phaseOver);
+
+// This is simulation state, not presentation state. Netplay rollback snapshots
+// save and restore it alongside the original game managers.
+extern i32 g_stage4ChainQueue[3];
+extern i32 g_stage4ChainCount;
+extern i32 g_stage4ChainPos;
+extern i32 g_stage4ChainBossId;
+extern i32 g_stage4ChainCardActive;
+extern i32 g_stage4ChainPhaseLife;
+extern i32 g_stage4ChainSpellIdx;

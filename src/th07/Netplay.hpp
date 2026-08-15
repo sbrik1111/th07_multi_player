@@ -60,6 +60,7 @@ enum InGameControl
 //   --test-hash-trace (log deterministic per-frame 3P state hashes)
 //   --no-controller (ignore joystick input for deterministic test runs)
 //   --rollback (zero-delay prediction with state snapshot/replay recovery)
+//   --compatibility-check (Host rejects different EXE/data/profile; default off)
 //   --low-latency / --no-low-latency (update-before-draw frame loop)
 //   --blt-prepare 0..16 --low-latency-spin
 //   --test-rollback-input (test-only movement/shoot/focus/bomb input stream)
@@ -73,6 +74,7 @@ enum InGameControl
 //   --test-rng-mismatch (test-only; host injects one RNG mismatch)
 //   --test-state-mismatch (test-only; host injects one logical-state mismatch)
 //   --test-result-reconnect (test-only; both peers exercise Result/title reconnect)
+//   --test-ending-sync (test-only; peers start Ending with different clear histories)
 //   --test-replay-block (test-only; both peers exercise multiplayer Replay guard)
 //   --test-ui-sync (test-only; both peers exercise shared menu input)
 //   --test-input-sync (test-only; both peers exercise separate P1/P2 input lanes)
@@ -173,6 +175,10 @@ const char *GetPlayerName(u8 playerId);
 // affect what is drawn, so peers need not agree on them.
 bool ShouldShowStagePlayerNames();
 bool ShouldShowNetDiagnostics();
+bool ShouldShowContributionStats();
+// Host-authoritative gameplay option: fight the Stage 4 character-specific
+// card once for every distinct active player character.
+bool IsStage4BossChainEnabled();
 bool ShouldWriteFrameTrace();
 // Appends one line to netplay_trace.txt. For diagnostics that outlive the
 // 8 KiB error context, from modules that cannot see the writer directly.
@@ -185,7 +191,6 @@ InGameControl ConsumeSynchronizedControl();
 void AdjustDelay(int amount);
 void ToggleInsaneMode();
 bool IsInsaneMode();
-
 // A network frame samples its local input only once. While waiting for the
 // matching remote input, this returns false so the pending sample is retained.
 // GameWindow uses IsWaitingForRemoteInput() to keep an incomplete frame out

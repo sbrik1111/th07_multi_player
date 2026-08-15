@@ -50,6 +50,10 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                         MB_OK | MB_ICONERROR);
         }
         Netplay::Shutdown();
+        // Connection compatibility failures happen before the normal game
+        // shutdown path. Preserve their exact local/remote IDs in log.txt so
+        // a rejected match can be diagnosed after the error dialog closes.
+        g_GameErrorContext.Flush();
         return Netplay::WasStartupCancelled() ? 0 : 1;
     }
     g_Supervisor.hInstance = hInstance;

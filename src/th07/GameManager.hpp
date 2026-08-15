@@ -72,8 +72,16 @@ struct MultiplayerPlayerResources
     i32 currentPower;
 };
 
+struct MultiplayerContributionStats
+{
+    u32 enemiesDefeated;
+    u32 damageDealt;
+};
+
 extern MultiplayerPlayerResources
     g_MultiplayerPlayerResources[TH07_MULTI_MAX_GUESTS];
+extern MultiplayerContributionStats
+    g_MultiplayerContributionStats[TH07_MULTI_MAX_PLAYERS];
 
 #define g_Player2Resources (g_MultiplayerPlayerResources[0])
 #define g_Player3Resources (g_MultiplayerPlayerResources[1])
@@ -82,6 +90,8 @@ i32 GetPlayerLives(u8 playerId);
 i32 GetPlayerBombs(u8 playerId);
 i32 GetPlayerPower(u8 playerId);
 i32 GetPlayerCherryPlus(u8 playerId);
+u32 GetPlayerEnemiesDefeated(u8 playerId);
+u32 GetPlayerDamageDealt(u8 playerId);
 void SetPlayerLives(u8 playerId, i32 amount);
 void SetPlayerBombs(u8 playerId, i32 amount);
 void SetPlayerPower(u8 playerId, i32 amount);
@@ -90,12 +100,16 @@ void AddPlayerLives(u8 playerId, i32 amount);
 void AddPlayerBombs(u8 playerId, i32 amount);
 void AddPlayerPower(u8 playerId, i32 amount);
 void AddPlayerCherryPlus(u8 playerId, i32 amount);
+void AddPlayerEnemiesDefeated(u8 playerId, u32 amount);
+void AddPlayerDamageDealt(u8 playerId, u32 amount);
+void ResetPlayerContributionStats();
 void ResetMultiplayerPlayerResources(u8 playerId);
 void ResetPlayer2Resources();
 void ExtendPlayerFromItem(u8 playerId);
 void ExtendAllPlayersFromPoints();
 i32 GetSharedBorderThreshold();
 f32 GetMultiplayerBossDamageMultiplier();
+f32 GetMultiplayerBombDamageMultiplier();
 i32 GetMultiplayerRankPenalty(i32 amount);
 void ApplyActivePlayerCountParameters(i32 previousCount, i32 newCount);
 

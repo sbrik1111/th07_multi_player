@@ -615,6 +615,12 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
             g_GameManager.RegenerateGameIntegrityCsum();
             g_GameManager.SetBombsRemainingAndComputeCsum(
                 g_Player.shooterData->initialBombs);
+            if (Netplay::IsMultiplayer())
+            {
+                g_GameErrorContext.Log(
+                    "info : P1 resources initialized bombs %d\r\n",
+                    GetPlayerBombs(0));
+            }
         }
         arg->ResetRegionsPos();
         arg->globals->currentPower = 0.0f;

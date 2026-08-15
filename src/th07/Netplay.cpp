@@ -17,6 +17,8 @@
 #include "AnmManager.hpp"
 #include "EnemyManager.hpp"
 #include "EffectManager.hpp"
+#include "EclManager.hpp"
+#include "Ending.hpp"
 #include "Player.hpp"
 #include "Stage.hpp"
 #include "BulletManager.hpp"
@@ -34,9 +36,14 @@
 namespace
 {
 const u32 NETPLAY_MAGIC = 0x374e4854; // "THN7"
-// 27: verification records carry per-section hashes instead of one
-// player/world composite, so a divergence names its subsystem.
-const u16 NETPLAY_VERSION = 27;
+// 31: Stage 4 can deterministically chain each distinct player character's
+// second boss spellcard. The negotiated flag and rollback state are new.
+const u16 NETPLAY_VERSION = 31;
+// Bump this when the meaning of a deterministic external setting or an
+// integrated gameplay patch changes without necessarily changing generated
+// code. Display, audio, and local controller mappings are deliberately not
+// part of this profile because each PC is allowed to choose them independently.
+const u32 NETPLAY_COMPATIBILITY_PROFILE = 1;
 const u16 NETPLAY_FLAG_INVINCIBLE = 1;
 const u16 NETPLAY_FLAG_NO_DEMO = 2;
 const u16 NETPLAY_FLAG_QUICK_START = 4;
@@ -54,6 +61,9 @@ const u16 NETPLAY_FLAG_TEST_DAMAGE_EVENTS = 1024;
 // immediately after WELCOME.
 const u16 NETPLAY_FLAG_CONNECTION_UI = 2048;
 const u16 NETPLAY_FLAG_PIN_FPU = 4096;
+const u16 NETPLAY_FLAG_COMPATIBILITY_CHECK = 8192;
+const u16 NETPLAY_FLAG_COMPATIBILITY_IDENTITY = 16384;
+const u16 NETPLAY_FLAG_STAGE4_CHAIN = 32768;
 const int DEFAULT_PORT = 35000;
 // One frame is enough for the normal Tailscale/LAN path and removes one
 // full 60 Hz frame of input latency from the old default. Users can still
@@ -196,7 +206,17 @@ enum PacketType
     PACKET_INPUT = 3,
     PACKET_PING = 4,
     PACKET_PONG = 5,
-    PACKET_CONTROL = 6
+    PACKET_CONTROL = 6,
+    PACKET_REJECT = 7,
+    PACKET_COMPATIBILITY_CHALLENGE = 8
+};
+
+enum CompatibilityMismatch
+{
+    COMPATIBILITY_MISMATCH_BUILD = 1,
+    COMPATIBILITY_MISMATCH_TH07_DATA = 2,
+    COMPATIBILITY_MISMATCH_THBGM_DATA = 4,
+    COMPATIBILITY_MISMATCH_PROFILE = 8
 };
 
 enum ControlType
@@ -252,6 +272,17 @@ struct RelayInputRecord
     u32 frame;
     u16 input;
     u16 control;
+};
+
+struct CompatibilityIdentity
+{
+    u32 buildIdLow;
+    u32 buildIdHigh;
+    u32 th07DataIdLow;
+    u32 th07DataIdHigh;
+    u32 thbgmDataIdLow;
+    u32 thbgmDataIdHigh;
+    u32 profile;
 };
 
 struct NetPacket
@@ -328,6 +359,9 @@ bool g_invincible = false;
 // they know what their game is doing.
 bool g_showStagePlayerNames = false;
 bool g_showNetDiagnostics = false;
+// Contribution totals are simulation state, but this switch is deliberately
+// local to each PC: it only controls whether that PC draws the totals.
+bool g_showContributionStats = true;
 // netplay_trace.txt is the only record of what two peers stopped agreeing
 // about, and it is what identified the item-drop divergence. It is also a
 // file that grows next to the executable for as long as people play - a few
@@ -351,6 +385,13 @@ bool g_writeFrameTrace = false;
 // disagree about how to round floats are the exact failure it exists to
 // prevent, so the host's answer is the one that counts.
 bool g_pinFpuControlWord = false;
+// Host-authoritative and off by default. This changes the Stage 4 boss script,
+// so every peer must inherit one answer through the handshake.
+bool g_stage4BossChain = false;
+// Optional because community data patches intentionally change th07.dat or
+// thbgm.dat. A Host enables strict matching for the whole room; default off.
+bool g_compatibilityCheckEnabled = false;
+bool g_compatibilityCheckExplicit = false;
 bool g_demoDisabled = false;
 bool g_quickStartEnabled = false;
 bool g_quickStartPending = false;
@@ -626,6 +667,11 @@ bool g_waitingForRemoteInput = false;
 bool g_connectionFailed = false;
 bool g_rngMismatch = false;
 bool g_protocolMismatch = false;
+bool g_compatibilityMismatch = false;
+u16 g_compatibilityMismatchFlags = 0;
+CompatibilityIdentity g_localCompatibilityIdentity;
+bool g_localCompatibilityInitialized = false;
+bool g_localCompatibilityValid = false;
 bool g_reconnectKeyDown = false;
 bool g_reconnectTestPending = false;
 bool g_controlTestEnabled = false;
@@ -646,6 +692,15 @@ const int TEST_BOSS_DESYNC_INTERVAL = 600;
 bool g_testKeepStaleStageSnapshots = false;
 bool g_testResultReconnectEnabled = false;
 u32 g_testResultPolicyFrames = 0;
+bool g_endingSkipHistoryNormalized = false;
+bool g_testEndingSyncEnabled = false;
+bool g_testEndingSyncInjected = false;
+bool g_testEndingSyncPassed = false;
+bool g_testEndingSyncFailureReported = false;
+bool g_testEndingSyncActiveLogged = false;
+bool g_testEndingSyncWaitLogged = false;
+u32 g_testEndingSyncMatchedFrames = 0;
+u32 g_testEndingSyncLastComparedFrame = INVALID_FRAME;
 bool g_testReplayBlockEnabled = false;
 bool g_testReplayBlockInjected = false;
 bool g_testUiSyncEnabled = false;
@@ -840,6 +895,7 @@ struct RollbackSnapshot
     u8 globals[sizeof(ZunGlobals)];
     u8 rng[sizeof(Rng)];
     u8 multiplayerResources[sizeof(g_MultiplayerPlayerResources)];
+    u8 contributionStats[sizeof(g_MultiplayerContributionStats)];
     u8 players[TH07_MULTI_MAX_PLAYERS][sizeof(Player)];
     u8 enemyManager[sizeof(EnemyManager)];
     u8 bulletManager[sizeof(BulletManager)];
@@ -860,6 +916,13 @@ struct RollbackSnapshot
     i32 powerGiveTaps[TH07_MULTI_MAX_PLAYERS];
     i32 powerGiveWindow[TH07_MULTI_MAX_PLAYERS];
     i32 menuInputDelay;
+    i32 stage4ChainQueue[3];
+    i32 stage4ChainCount;
+    i32 stage4ChainPos;
+    i32 stage4ChainBossId;
+    i32 stage4ChainCardActive;
+    i32 stage4ChainPhaseLife;
+    i32 stage4ChainSpellIdx;
     u16 lastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
     u16 lastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
     u16 isEighthFrameOfHeldInput;
@@ -885,6 +948,7 @@ bool IsRollbackSnapshotFrame(u32 simulationFrame)
 }
 
 void SetStatus(const char *text);
+void SetConnectionUiStatus(const char *text);
 void GetConnectionUiConfigPath(char *path, int pathSize);
 void ResetPlayerLifecycleTrace();
 void ResetItemTrace();
@@ -1194,6 +1258,20 @@ MainMenu *FindActiveMainMenu()
         if (element->callback == (ChainCallback)MainMenu::OnUpdate)
         {
             return (MainMenu *)element->arg;
+        }
+        element = element->next;
+    }
+    return NULL;
+}
+
+Ending *FindActiveEnding()
+{
+    ChainElem *element = g_Chain.calcChain.next;
+    while (element)
+    {
+        if (element->callback == (ChainCallback)Ending::OnUpdate)
+        {
+            return (Ending *)element->arg;
         }
         element = element->next;
     }
@@ -2077,6 +2155,9 @@ enum
     UI_ID_STATUS_LABEL = 130,
     UI_ID_WRITE_TRACE = 131,
     UI_ID_PIN_FPU = 132,
+    UI_ID_COMPATIBILITY_CHECK = 133,
+    UI_ID_STAGE4_CHAIN = 134,
+    UI_ID_SHOW_CONTRIBUTION = 135,
 };
 
 // Everything below the role selector is pushed down by its height. Keeping it
@@ -2084,10 +2165,10 @@ enum
 // coordinates.
 const int UI_ROLE_ROW_HEIGHT = 34;
 
-// Height of the four advanced rows. Hiding the checkboxes without closing
+// Height of the seven advanced rows. Hiding the checkboxes without closing
 // the space they occupied left a blank band in the middle of the window,
 // so everything below moves up by this much while they are hidden.
-const int UI_ADVANCED_BLOCK_HEIGHT = 100;
+const int UI_ADVANCED_BLOCK_HEIGHT = 172;
 
 const UINT CONNECTION_UI_TIMER_ID = 1;
 const UINT CONNECTION_UI_TIMER_INTERVAL_MS = 15;
@@ -2117,8 +2198,11 @@ struct ConnectionUiSelection
     bool evasiveBot;
     bool showStageNames;
     bool showNetStats;
+    bool showContribution;
     bool writeTrace;
     bool pinFpu;
+    bool compatibilityCheck;
+    bool stage4BossChain;
     bool cancelled;
 };
 
@@ -2135,8 +2219,11 @@ struct ConnectionUiState
     HWND evasiveBotCheck;
     HWND stageNamesCheck;
     HWND netStatsCheck;
+    HWND contributionCheck;
     HWND traceCheck;
     HWND pinFpuCheck;
+    HWND compatibilityCheck;
+    HWND stage4ChainCheck;
     HWND connectButton;
     HWND startButton;
     HWND status;
@@ -2198,6 +2285,570 @@ void GetModuleSiblingPath(const char *filename, char *path, int pathSize)
 void GetConnectionUiConfigPath(char *path, int pathSize)
 {
     GetModuleSiblingPath("mod_config.ini", path, pathSize);
+}
+
+void InitializeCompatibilityHash(u64 *hash)
+{
+    *hash = ((u64)0xcbf29ce4UL << 32) | (u64)0x84222325UL;
+}
+
+void UpdateCompatibilityHash(u64 *hash, const void *data, u32 size)
+{
+    const u8 *bytes = (const u8 *)data;
+    const u64 prime = ((u64)0x00000100UL << 32) | (u64)0x000001b3UL;
+    u32 i;
+    for (i = 0; i < size; i++)
+    {
+        *hash ^= bytes[i];
+        *hash *= prime;
+    }
+}
+
+void UpdateCompatibilityHashU32(u64 *hash, u32 value)
+{
+    UpdateCompatibilityHash(hash, &value, sizeof(value));
+}
+
+bool ReadFileRangeIntoCompatibilityHash(HANDLE file, DWORD offset,
+                                        DWORD size, u64 *hash)
+{
+    const DWORD bufferSize = 64 * 1024;
+    u8 *buffer;
+    DWORD remaining = size;
+    DWORD position;
+    bool succeeded = true;
+
+    SetLastError(NO_ERROR);
+    position = SetFilePointer(file, offset, NULL, FILE_BEGIN);
+    if (position == INVALID_SET_FILE_POINTER && GetLastError() != NO_ERROR)
+    {
+        return false;
+    }
+    buffer = (u8 *)malloc(bufferSize);
+    if (!buffer)
+    {
+        return false;
+    }
+    while (remaining != 0)
+    {
+        DWORD requested = remaining < bufferSize ? remaining : bufferSize;
+        DWORD bytesRead = 0;
+        if (!ReadFile(file, buffer, requested, &bytesRead, NULL) ||
+            bytesRead != requested)
+        {
+            succeeded = false;
+            break;
+        }
+        UpdateCompatibilityHash(hash, buffer, bytesRead);
+        remaining -= bytesRead;
+    }
+    free(buffer);
+    return succeeded;
+}
+
+bool CalculateExecutableBuildId(u32 *low, u32 *high)
+{
+    char path[MAX_PATH];
+    HANDLE file;
+    IMAGE_DOS_HEADER dosHeader;
+    DWORD signature;
+    IMAGE_FILE_HEADER fileHeader;
+    IMAGE_SECTION_HEADER *sections;
+    DWORD bytesRead;
+    DWORD sectionTableOffset;
+    u64 hash;
+    int sectionIndex;
+    int codeSectionCount = 0;
+    bool succeeded = true;
+
+    GetModuleSiblingPath("th07_multi_net.exe", path, sizeof(path));
+    if (GetModuleFileNameA(NULL, path, sizeof(path)) == 0)
+    {
+        return false;
+    }
+    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                       OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+    if (!ReadFile(file, &dosHeader, sizeof(dosHeader), &bytesRead, NULL) ||
+        bytesRead != sizeof(dosHeader) || dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    SetLastError(NO_ERROR);
+    if (SetFilePointer(file, dosHeader.e_lfanew, NULL, FILE_BEGIN) ==
+            INVALID_SET_FILE_POINTER &&
+        GetLastError() != NO_ERROR)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    if (!ReadFile(file, &signature, sizeof(signature), &bytesRead, NULL) ||
+        bytesRead != sizeof(signature) || signature != IMAGE_NT_SIGNATURE ||
+        !ReadFile(file, &fileHeader, sizeof(fileHeader), &bytesRead, NULL) ||
+        bytesRead != sizeof(fileHeader) || fileHeader.NumberOfSections == 0 ||
+        fileHeader.NumberOfSections > 96)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    sections = (IMAGE_SECTION_HEADER *)malloc(
+        sizeof(IMAGE_SECTION_HEADER) * fileHeader.NumberOfSections);
+    if (!sections)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    sectionTableOffset = dosHeader.e_lfanew + sizeof(signature) +
+        sizeof(fileHeader) + fileHeader.SizeOfOptionalHeader;
+    SetLastError(NO_ERROR);
+    if (SetFilePointer(file, sectionTableOffset, NULL, FILE_BEGIN) ==
+            INVALID_SET_FILE_POINTER &&
+        GetLastError() != NO_ERROR)
+    {
+        free(sections);
+        CloseHandle(file);
+        return false;
+    }
+    if (!ReadFile(file, sections,
+                  sizeof(IMAGE_SECTION_HEADER) * fileHeader.NumberOfSections,
+                  &bytesRead, NULL) ||
+        bytesRead != sizeof(IMAGE_SECTION_HEADER) * fileHeader.NumberOfSections)
+    {
+        free(sections);
+        CloseHandle(file);
+        return false;
+    }
+
+    InitializeCompatibilityHash(&hash);
+    // Hash executable code rather than the whole PE file. The linker embeds
+    // an absolute PDB path and a timestamp outside code, so byte-for-byte EXE
+    // hashes can differ when the same commit is rebuilt on another PC.
+    for (sectionIndex = 0;
+         sectionIndex < (int)fileHeader.NumberOfSections;
+         sectionIndex++)
+    {
+        const IMAGE_SECTION_HEADER &section = sections[sectionIndex];
+        if ((section.Characteristics & IMAGE_SCN_CNT_CODE) == 0 ||
+            section.SizeOfRawData == 0)
+        {
+            continue;
+        }
+        UpdateCompatibilityHash(&hash, section.Name, sizeof(section.Name));
+        UpdateCompatibilityHashU32(&hash, section.SizeOfRawData);
+        if (!ReadFileRangeIntoCompatibilityHash(
+                file, section.PointerToRawData, section.SizeOfRawData, &hash))
+        {
+            succeeded = false;
+            break;
+        }
+        codeSectionCount++;
+    }
+    free(sections);
+    CloseHandle(file);
+    if (!succeeded || codeSectionCount == 0)
+    {
+        return false;
+    }
+    UpdateCompatibilityHashU32(&hash, NETPLAY_VERSION);
+    UpdateCompatibilityHashU32(&hash, NETPLAY_COMPATIBILITY_PROFILE);
+    UpdateCompatibilityHashU32(&hash, sizeof(NetPacket));
+    *low = (u32)hash;
+    *high = (u32)(hash >> 32);
+    return true;
+}
+
+bool ReadCompatibilityCacheValue(const char *configPath, const char *key,
+                                 u32 *value)
+{
+    char text[32];
+    char *end;
+    unsigned long parsed;
+    GetPrivateProfileStringA("CompatibilityCache", key, "", text,
+                             sizeof(text), configPath);
+    if (text[0] == '\0')
+    {
+        return false;
+    }
+    parsed = strtoul(text, &end, 16);
+    if (end == text || *end != '\0')
+    {
+        return false;
+    }
+    *value = (u32)parsed;
+    return true;
+}
+
+void WriteCompatibilityCacheValue(const char *configPath, const char *key,
+                                  u32 value)
+{
+    char text[16];
+    sprintf(text, "%08lX", (unsigned long)value);
+    WritePrivateProfileStringA("CompatibilityCache", key, text, configPath);
+}
+
+void MakeCompatibilityCacheKey(char *key, int keySize, const char *prefix,
+                               const char *suffix)
+{
+    _snprintf(key, keySize - 1, "%s%s", prefix, suffix);
+    key[keySize - 1] = '\0';
+}
+
+bool ReadCachedGameDataId(const char *configPath, const char *prefix,
+                          u32 sizeLow, u32 sizeHigh,
+                          const FILETIME &writeTime, u32 *idLow, u32 *idHigh)
+{
+    char key[64];
+    u32 cachedSizeLow;
+    u32 cachedSizeHigh;
+    u32 cachedWriteLow;
+    u32 cachedWriteHigh;
+
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "SizeLow");
+    if (!ReadCompatibilityCacheValue(configPath, key, &cachedSizeLow))
+    {
+        return false;
+    }
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "SizeHigh");
+    if (!ReadCompatibilityCacheValue(configPath, key, &cachedSizeHigh))
+    {
+        return false;
+    }
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "WriteLow");
+    if (!ReadCompatibilityCacheValue(configPath, key, &cachedWriteLow))
+    {
+        return false;
+    }
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "WriteHigh");
+    if (!ReadCompatibilityCacheValue(configPath, key, &cachedWriteHigh))
+    {
+        return false;
+    }
+    if (cachedSizeLow != sizeLow || cachedSizeHigh != sizeHigh ||
+        cachedWriteLow != writeTime.dwLowDateTime ||
+        cachedWriteHigh != writeTime.dwHighDateTime)
+    {
+        return false;
+    }
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "IdLow");
+    if (!ReadCompatibilityCacheValue(configPath, key, idLow))
+    {
+        return false;
+    }
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "IdHigh");
+    return ReadCompatibilityCacheValue(configPath, key, idHigh);
+}
+
+void WriteCachedGameDataId(const char *configPath, const char *prefix,
+                           u32 sizeLow, u32 sizeHigh,
+                           const FILETIME &writeTime, u32 idLow, u32 idHigh)
+{
+    char key[64];
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "SizeLow");
+    WriteCompatibilityCacheValue(configPath, key, sizeLow);
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "SizeHigh");
+    WriteCompatibilityCacheValue(configPath, key, sizeHigh);
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "WriteLow");
+    WriteCompatibilityCacheValue(configPath, key, writeTime.dwLowDateTime);
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "WriteHigh");
+    WriteCompatibilityCacheValue(configPath, key, writeTime.dwHighDateTime);
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "IdLow");
+    WriteCompatibilityCacheValue(configPath, key, idLow);
+    MakeCompatibilityCacheKey(key, sizeof(key), prefix, "IdHigh");
+    WriteCompatibilityCacheValue(configPath, key, idHigh);
+}
+
+bool CalculateGameDataId(const char *filename, const char *cachePrefix,
+                         u32 *idLow, u32 *idHigh)
+{
+    char path[MAX_PATH];
+    char configPath[MAX_PATH];
+    HANDLE file;
+    DWORD sizeLow;
+    DWORD sizeHigh = 0;
+    FILETIME writeTime;
+    u64 hash;
+    bool succeeded;
+
+    GetModuleSiblingPath(filename, path, sizeof(path));
+    file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                       OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+    sizeLow = GetFileSize(file, &sizeHigh);
+    if (sizeLow == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    if (!GetFileTime(file, NULL, NULL, &writeTime))
+    {
+        CloseHandle(file);
+        return false;
+    }
+    GetConnectionUiConfigPath(configPath, sizeof(configPath));
+    if (ReadCachedGameDataId(configPath, cachePrefix, sizeLow, sizeHigh,
+                             writeTime, idLow, idHigh))
+    {
+        CloseHandle(file);
+        return true;
+    }
+    // TH07's two archives are below 4 GiB. Reject an unexpectedly larger
+    // replacement instead of silently hashing only its first four gigabytes.
+    if (sizeHigh != 0)
+    {
+        CloseHandle(file);
+        return false;
+    }
+    InitializeCompatibilityHash(&hash);
+    succeeded = ReadFileRangeIntoCompatibilityHash(file, 0, sizeLow, &hash);
+    CloseHandle(file);
+    if (!succeeded)
+    {
+        return false;
+    }
+    *idLow = (u32)hash;
+    *idHigh = (u32)(hash >> 32);
+    if (!g_localNoSave)
+    {
+        WriteCachedGameDataId(configPath, cachePrefix, sizeLow, sizeHigh,
+                              writeTime, *idLow, *idHigh);
+    }
+    return true;
+}
+
+bool EnsureLocalCompatibilityIdentity()
+{
+    bool buildValid;
+    bool th07Valid;
+    bool thbgmValid;
+    if (g_localCompatibilityInitialized && g_localCompatibilityValid)
+    {
+        return true;
+    }
+    g_localCompatibilityInitialized = true;
+    memset(&g_localCompatibilityIdentity, 0,
+           sizeof(g_localCompatibilityIdentity));
+    g_localCompatibilityIdentity.profile = NETPLAY_COMPATIBILITY_PROFILE;
+    buildValid = CalculateExecutableBuildId(
+        &g_localCompatibilityIdentity.buildIdLow,
+        &g_localCompatibilityIdentity.buildIdHigh);
+    th07Valid = CalculateGameDataId(
+        "th07.dat", "Th07Dat",
+        &g_localCompatibilityIdentity.th07DataIdLow,
+        &g_localCompatibilityIdentity.th07DataIdHigh);
+    thbgmValid = CalculateGameDataId(
+        "thbgm.dat", "ThbgmDat",
+        &g_localCompatibilityIdentity.thbgmDataIdLow,
+        &g_localCompatibilityIdentity.thbgmDataIdHigh);
+    g_localCompatibilityValid = buildValid && th07Valid && thbgmValid;
+    if (!buildValid)
+    {
+        SetStatus("could not calculate executable build ID");
+    }
+    else if (!th07Valid)
+    {
+        SetStatus("missing or unreadable th07.dat next to executable");
+    }
+    else if (!thbgmValid)
+    {
+        SetStatus("missing or unreadable thbgm.dat next to executable");
+    }
+    if (g_localCompatibilityValid)
+    {
+        g_GameErrorContext.Log(
+            "info : compatibility build %08lx%08lx th07 %08lx%08lx thbgm %08lx%08lx profile %lu packet %lu\r\n",
+            (unsigned long)g_localCompatibilityIdentity.buildIdHigh,
+            (unsigned long)g_localCompatibilityIdentity.buildIdLow,
+            (unsigned long)g_localCompatibilityIdentity.th07DataIdHigh,
+            (unsigned long)g_localCompatibilityIdentity.th07DataIdLow,
+            (unsigned long)g_localCompatibilityIdentity.thbgmDataIdHigh,
+            (unsigned long)g_localCompatibilityIdentity.thbgmDataIdLow,
+            (unsigned long)g_localCompatibilityIdentity.profile,
+            (unsigned long)sizeof(NetPacket));
+    }
+    return g_localCompatibilityValid;
+}
+
+u16 CompareCompatibilityIdentity(const CompatibilityIdentity &remote)
+{
+    u16 mismatch = 0;
+    EnsureLocalCompatibilityIdentity();
+    if (remote.buildIdLow != g_localCompatibilityIdentity.buildIdLow ||
+        remote.buildIdHigh != g_localCompatibilityIdentity.buildIdHigh)
+    {
+        mismatch |= COMPATIBILITY_MISMATCH_BUILD;
+    }
+    if (remote.th07DataIdLow != g_localCompatibilityIdentity.th07DataIdLow ||
+        remote.th07DataIdHigh != g_localCompatibilityIdentity.th07DataIdHigh)
+    {
+        mismatch |= COMPATIBILITY_MISMATCH_TH07_DATA;
+    }
+    if (remote.thbgmDataIdLow !=
+            g_localCompatibilityIdentity.thbgmDataIdLow ||
+        remote.thbgmDataIdHigh !=
+            g_localCompatibilityIdentity.thbgmDataIdHigh)
+    {
+        mismatch |= COMPATIBILITY_MISMATCH_THBGM_DATA;
+    }
+    if (remote.profile != g_localCompatibilityIdentity.profile)
+    {
+        mismatch |= COMPATIBILITY_MISMATCH_PROFILE;
+    }
+    return mismatch;
+}
+
+void GetPacketCompatibilityIdentity(const NetPacket &packet,
+                                    CompatibilityIdentity *identity)
+{
+    // HELLO/WELCOME/REJECT have no input history. Reuse the beginning of that
+    // existing wire area so gameplay INPUT packets do not grow by 28 bytes
+    // merely to carry an identity that is needed only during matching.
+    memcpy(identity, packet.records, sizeof(*identity));
+}
+
+u16 ComparePacketCompatibilityIdentity(const NetPacket &packet)
+{
+    CompatibilityIdentity remote;
+    GetPacketCompatibilityIdentity(packet, &remote);
+    return CompareCompatibilityIdentity(remote);
+}
+
+void AppendCompatibilityMismatchName(char *text, int textSize,
+                                     const char *name)
+{
+    if (text[0] != '\0')
+    {
+        strncat(text, ", ", textSize - strlen(text) - 1);
+    }
+    strncat(text, name, textSize - strlen(text) - 1);
+}
+
+void FormatCompatibilityMismatch(u16 mismatch, char *text, int textSize)
+{
+    char fields[112];
+    fields[0] = '\0';
+    if ((mismatch & COMPATIBILITY_MISMATCH_BUILD) != 0)
+    {
+        AppendCompatibilityMismatchName(fields, sizeof(fields), "EXE build");
+    }
+    if ((mismatch & COMPATIBILITY_MISMATCH_TH07_DATA) != 0)
+    {
+        AppendCompatibilityMismatchName(fields, sizeof(fields), "th07.dat");
+    }
+    if ((mismatch & COMPATIBILITY_MISMATCH_THBGM_DATA) != 0)
+    {
+        AppendCompatibilityMismatchName(fields, sizeof(fields), "thbgm.dat");
+    }
+    if ((mismatch & COMPATIBILITY_MISMATCH_PROFILE) != 0)
+    {
+        AppendCompatibilityMismatchName(fields, sizeof(fields),
+                                        "patch/settings profile");
+    }
+    if (fields[0] == '\0')
+    {
+        strcpy(fields, "unknown identity");
+    }
+    _snprintf(text, textSize - 1, "incompatible: %s", fields);
+    text[textSize - 1] = '\0';
+}
+
+void LogCompatibilityMismatch(const CompatibilityIdentity &remote,
+                              u16 mismatch)
+{
+    g_GameErrorContext.Log(
+        "error : compatibility mismatch 0x%04x local build %08lx%08lx th07 %08lx%08lx thbgm %08lx%08lx profile %lu; remote build %08lx%08lx th07 %08lx%08lx thbgm %08lx%08lx profile %lu\r\n",
+        (unsigned)mismatch,
+        (unsigned long)g_localCompatibilityIdentity.buildIdHigh,
+        (unsigned long)g_localCompatibilityIdentity.buildIdLow,
+        (unsigned long)g_localCompatibilityIdentity.th07DataIdHigh,
+        (unsigned long)g_localCompatibilityIdentity.th07DataIdLow,
+        (unsigned long)g_localCompatibilityIdentity.thbgmDataIdHigh,
+        (unsigned long)g_localCompatibilityIdentity.thbgmDataIdLow,
+        (unsigned long)g_localCompatibilityIdentity.profile,
+        (unsigned long)remote.buildIdHigh,
+        (unsigned long)remote.buildIdLow,
+        (unsigned long)remote.th07DataIdHigh,
+        (unsigned long)remote.th07DataIdLow,
+        (unsigned long)remote.thbgmDataIdHigh,
+        (unsigned long)remote.thbgmDataIdLow,
+        (unsigned long)remote.profile);
+}
+
+void SendCompatibilityRejection(const sockaddr_in &address, u16 mismatch)
+{
+    NetPacket packet;
+    int repeat;
+    InitializePacket(&packet, PACKET_REJECT);
+    packet.controlValue = mismatch;
+    for (repeat = 0; repeat < 4; repeat++)
+    {
+        sendto(g_socket, (const char *)&packet, sizeof(packet), 0,
+               (const sockaddr *)&address, sizeof(address));
+    }
+}
+
+void SendCompatibilityChallenge(const sockaddr_in &address)
+{
+    NetPacket packet;
+    int repeat;
+    InitializePacket(&packet, PACKET_COMPATIBILITY_CHALLENGE);
+    for (repeat = 0; repeat < 4; repeat++)
+    {
+        sendto(g_socket, (const char *)&packet, sizeof(packet), 0,
+               (const sockaddr *)&address, sizeof(address));
+    }
+}
+
+bool ValidateHelloCompatibility(const NetPacket &packet,
+                                const sockaddr_in &from)
+{
+    char status[160];
+    CompatibilityIdentity remote;
+    u16 mismatch;
+    if ((packet.flags & NETPLAY_FLAG_COMPATIBILITY_IDENTITY) == 0)
+    {
+        SendCompatibilityChallenge(from);
+        SetConnectionUiStatus("guest is checking EXE and game data...");
+        SetStatus("waiting for guest compatibility identity");
+        return false;
+    }
+    GetPacketCompatibilityIdentity(packet, &remote);
+    mismatch = CompareCompatibilityIdentity(remote);
+    if (mismatch == 0)
+    {
+        return true;
+    }
+    FormatCompatibilityMismatch(mismatch, status, sizeof(status));
+    SendCompatibilityRejection(from, mismatch);
+    SetConnectionUiStatus(status);
+    SetStatus(status);
+    LogCompatibilityMismatch(remote, mismatch);
+    return false;
+}
+
+bool AcceptCompatibilityRejection(const NetPacket &packet)
+{
+    char status[160];
+    CompatibilityIdentity remote;
+    u16 mismatch = packet.controlValue;
+    GetPacketCompatibilityIdentity(packet, &remote);
+    if (mismatch == 0)
+    {
+        mismatch = CompareCompatibilityIdentity(remote);
+    }
+    g_compatibilityMismatch = true;
+    g_compatibilityMismatchFlags = mismatch;
+    FormatCompatibilityMismatch(mismatch, status, sizeof(status));
+    SetConnectionUiStatus(status);
+    SetStatus(status);
+    LogCompatibilityMismatch(remote, mismatch);
+    return false;
 }
 
 bool IsPlayerNameCharacter(char c)
@@ -2370,10 +3021,17 @@ void LoadConnectionUiConfig(ConnectionUiSelection *selection)
         GetPrivateProfileIntA("Display", "StagePlayerNames", 0, path) != 0;
     selection->showNetStats =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
+    selection->showContribution =
+        GetPrivateProfileIntA("Display", "ContributionStats", 1, path) != 0;
     selection->writeTrace =
         GetPrivateProfileIntA("Diagnostics", "FrameTrace", 0, path) != 0;
     selection->pinFpu =
         GetPrivateProfileIntA("Diagnostics", "PinFpu", 0, path) != 0;
+    selection->compatibilityCheck =
+        GetPrivateProfileIntA("Diagnostics", "CompatibilityCheck", 0,
+                              path) != 0;
+    selection->stage4BossChain =
+        GetPrivateProfileIntA("Gameplay", "Stage4BossChain", 0, path) != 0;
     // P2 is selected in the in-game TH06-style setup screen. Keep these
     // fields at -1 so a stale pre-UI configuration cannot bypass that step.
     selection->p2Character = -1;
@@ -2405,10 +3063,17 @@ void LoadDisplayPreferences()
         GetPrivateProfileIntA("Display", "StagePlayerNames", 0, path) != 0;
     g_showNetDiagnostics =
         GetPrivateProfileIntA("Display", "NetDiagnostics", 0, path) != 0;
+    g_showContributionStats =
+        GetPrivateProfileIntA("Display", "ContributionStats", 1, path) != 0;
     g_writeFrameTrace =
         GetPrivateProfileIntA("Diagnostics", "FrameTrace", 0, path) != 0;
     g_pinFpuControlWord =
         GetPrivateProfileIntA("Diagnostics", "PinFpu", 0, path) != 0;
+    g_compatibilityCheckEnabled =
+        GetPrivateProfileIntA("Diagnostics", "CompatibilityCheck", 0,
+                              path) != 0;
+    g_stage4BossChain =
+        GetPrivateProfileIntA("Gameplay", "Stage4BossChain", 0, path) != 0;
 }
 
 void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
@@ -2444,10 +3109,18 @@ void SaveConnectionUiConfig(const ConnectionUiSelection *selection)
                                path);
     WritePrivateProfileStringA("Display", "NetDiagnostics",
                                selection->showNetStats ? "1" : "0", path);
+    WritePrivateProfileStringA("Display", "ContributionStats",
+                               selection->showContribution ? "1" : "0",
+                               path);
     WritePrivateProfileStringA("Diagnostics", "FrameTrace",
                                selection->writeTrace ? "1" : "0", path);
     WritePrivateProfileStringA("Diagnostics", "PinFpu",
                                selection->pinFpu ? "1" : "0", path);
+    WritePrivateProfileStringA("Diagnostics", "CompatibilityCheck",
+                               selection->compatibilityCheck ? "1" : "0",
+                               path);
+    WritePrivateProfileStringA("Gameplay", "Stage4BossChain",
+                               selection->stage4BossChain ? "1" : "0", path);
 }
 
 void SetConnectionUiStatus(const char *text)
@@ -2498,10 +3171,16 @@ bool ReadConnectionUiFields()
         GetDlgItem(g_connectionUi.window, UI_ID_SHOW_STAGE_NAMES);
     g_connectionUi.netStatsCheck =
         GetDlgItem(g_connectionUi.window, UI_ID_SHOW_NET_STATS);
+    g_connectionUi.contributionCheck =
+        GetDlgItem(g_connectionUi.window, UI_ID_SHOW_CONTRIBUTION);
     g_connectionUi.traceCheck =
         GetDlgItem(g_connectionUi.window, UI_ID_WRITE_TRACE);
     g_connectionUi.pinFpuCheck =
         GetDlgItem(g_connectionUi.window, UI_ID_PIN_FPU);
+    g_connectionUi.compatibilityCheck =
+        GetDlgItem(g_connectionUi.window, UI_ID_COMPATIBILITY_CHECK);
+    g_connectionUi.stage4ChainCheck =
+        GetDlgItem(g_connectionUi.window, UI_ID_STAGE4_CHAIN);
     if (!g_connectionUi.hostEdit || !g_connectionUi.playerNameEdit ||
         !g_connectionUi.portEdit ||
         !g_connectionUi.delayEdit || !g_connectionUi.bgmCheck ||
@@ -2572,6 +3251,12 @@ bool ReadConnectionUiFields()
             SendMessageA(g_connectionUi.netStatsCheck, BM_GETCHECK, 0,
                          0) == BST_CHECKED;
     }
+    if (g_connectionUi.contributionCheck)
+    {
+        g_connectionUi.selection.showContribution =
+            SendMessageA(g_connectionUi.contributionCheck, BM_GETCHECK, 0,
+                         0) == BST_CHECKED;
+    }
     if (g_connectionUi.traceCheck)
     {
         g_connectionUi.selection.writeTrace =
@@ -2582,6 +3267,18 @@ bool ReadConnectionUiFields()
     {
         g_connectionUi.selection.pinFpu =
             SendMessageA(g_connectionUi.pinFpuCheck, BM_GETCHECK, 0,
+                         0) == BST_CHECKED;
+    }
+    if (g_connectionUi.compatibilityCheck)
+    {
+        g_connectionUi.selection.compatibilityCheck =
+            SendMessageA(g_connectionUi.compatibilityCheck, BM_GETCHECK, 0,
+                          0) == BST_CHECKED;
+    }
+    if (g_connectionUi.stage4ChainCheck)
+    {
+        g_connectionUi.selection.stage4BossChain =
+            SendMessageA(g_connectionUi.stage4ChainCheck, BM_GETCHECK, 0,
                          0) == BST_CHECKED;
     }
     g_connectionUi.selection.playerCount =
@@ -2630,6 +3327,9 @@ void ReadConnectionUiLocalOnlyFields()
 
 void SetConnectionUiNetworkFieldsEnabled(bool enabled)
 {
+    bool hostPlayerCountEditable =
+        enabled || g_mode == Netplay::MODE_HOST;
+
     EnableWindow(g_connectionUi.hostEdit, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.playerNameEdit, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.portEdit, enabled ? TRUE : FALSE);
@@ -2645,12 +3345,23 @@ void SetConnectionUiNetworkFieldsEnabled(bool enabled)
     EnableWindow(g_connectionUi.evasiveBotCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.stageNamesCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.netStatsCheck, enabled ? TRUE : FALSE);
+    EnableWindow(g_connectionUi.contributionCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.traceCheck, enabled ? TRUE : FALSE);
     EnableWindow(g_connectionUi.pinFpuCheck, enabled ? TRUE : FALSE);
+    EnableWindow(g_connectionUi.compatibilityCheck,
+                 enabled &&
+                         IsDlgButtonChecked(g_connectionUi.window,
+                                            UI_ID_ROLE_GUEST) != BST_CHECKED
+                     ? TRUE : FALSE);
+    EnableWindow(g_connectionUi.stage4ChainCheck,
+                 enabled &&
+                         IsDlgButtonChecked(g_connectionUi.window,
+                                            UI_ID_ROLE_GUEST) != BST_CHECKED
+                     ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_2),
-                 enabled ? TRUE : FALSE);
+                 hostPlayerCountEditable ? TRUE : FALSE);
     EnableWindow(GetDlgItem(g_connectionUi.window, UI_ID_PLAYER_COUNT_3),
-                 enabled ? TRUE : FALSE);
+                 hostPlayerCountEditable ? TRUE : FALSE);
 }
 
 void UpdateConnectionUiPeerStatus()
@@ -2662,13 +3373,31 @@ void UpdateConnectionUiPeerStatus()
 
     text[0] = '\0';
     firstPlayerId = g_mode == Netplay::MODE_HOST ? 1 : 0;
-    lastPlayerId = g_mode == Netplay::MODE_HOST ? g_playerCount : 1;
+    lastPlayerId = g_playerCount;
     for (playerId = firstPlayerId; playerId < lastPlayerId; playerId++)
     {
         char line[128];
-        if (!g_peerPresent[playerId])
+        bool present;
+
+        if (playerId == g_localPlayerSlot)
+        {
+            continue;
+        }
+        // Guests talk only to the Host. WELCOME's connected-player mask is
+        // therefore the authoritative way for one Guest to see whether the
+        // other Guest is present; no direct Guest endpoint exists to print.
+        present = g_mode == Netplay::MODE_HOST
+            ? g_peerPresent[playerId]
+            : (g_connectedPlayerMask & (1 << playerId)) != 0;
+        if (!present)
         {
             sprintf(line, "P%d: waiting...", playerId + 1);
+        }
+        else if (g_mode == Netplay::MODE_GUEST && playerId != 0)
+        {
+            const char *name = Netplay::GetPlayerName((u8)playerId);
+            sprintf(line, "P%d  %-10s  connected via host",
+                    playerId + 1, name ? name : "Player");
         }
         else
         {
@@ -2713,6 +3442,8 @@ void ResetConnectionUiAttempt(const char *status)
     g_initialRngSeed = 0;
     g_connectionFailed = false;
     g_protocolMismatch = false;
+    g_compatibilityMismatch = false;
+    g_compatibilityMismatchFlags = 0;
     g_connectionUi.selection.mode = Netplay::MODE_SINGLE;
     g_connectionUi.attemptingConnection = false;
     g_connectionUi.startRequested = false;
@@ -2725,6 +3456,9 @@ void ResetConnectionUiAttempt(const char *status)
     g_connectionUi.lastPingTick = 0;
     g_connectionUi.lastStartSendTick = 0;
     g_connectionUi.launchAtTick = 0;
+    g_peerExitReceived = false;
+    g_localPlayerSlot = 0;
+    g_connectedPlayerMask = 1;
     SetConnectionUiNetworkFieldsEnabled(true);
     EnableWindow(g_connectionUi.connectButton, TRUE);
     EnableWindow(g_connectionUi.startButton, FALSE);
@@ -2779,7 +3513,10 @@ void EnterConnectionUiConnectedState()
 {
     g_connected = AreAllExpectedPeersConnected();
     g_connectionFailed = false;
-    g_connectionUi.attemptingConnection = !g_connected;
+    // A completed match is still an active launcher session until the
+    // synchronized game start. Keep Stop Search on its non-destructive path
+    // and allow the Host to revise the requested player count in that window.
+    g_connectionUi.attemptingConnection = true;
     EnableWindow(g_connectionUi.startButton,
                  g_connected && g_mode == Netplay::MODE_HOST
                      ? TRUE : FALSE);
@@ -2796,6 +3533,105 @@ void EnterConnectionUiConnectedState()
     UpdateConnectionUiPeerStatus();
     SendPing();
     g_connectionUi.lastPingTick = GetTickCount();
+}
+
+bool ChangeConnectionUiHostPlayerCount(int playerCount)
+{
+    int oldPlayerCount = g_playerCount;
+
+    if (playerCount != 2 && playerCount != 3)
+    {
+        return false;
+    }
+    if (g_mode != Netplay::MODE_HOST ||
+        !g_connectionUi.attemptingConnection)
+    {
+        return false;
+    }
+    if (g_connectionUi.startRequested ||
+        g_connectionUi.startCommitted)
+    {
+        CheckRadioButton(
+            g_connectionUi.window,
+            UI_ID_PLAYER_COUNT_2, UI_ID_PLAYER_COUNT_3,
+            oldPlayerCount == 3 ? UI_ID_PLAYER_COUNT_3
+                                : UI_ID_PLAYER_COUNT_2);
+        SetConnectionUiStatus("game start is already in progress");
+        return false;
+    }
+    if (playerCount == oldPlayerCount)
+    {
+        return true;
+    }
+    // Do not silently choose and kick one peer after all three players have
+    // matched. If just P2 has joined a 3P search, shrinking to two is safe and
+    // is the common "let's start with two" case.
+    if (playerCount == 2 && g_peerPresent[1] && g_peerPresent[2])
+    {
+        CheckRadioButton(
+            g_connectionUi.window,
+            UI_ID_PLAYER_COUNT_2, UI_ID_PLAYER_COUNT_3,
+            UI_ID_PLAYER_COUNT_3);
+        SetConnectionUiStatus(
+            "both guests are connected; one must leave before 2 players");
+        return false;
+    }
+    if (playerCount == 2 && g_peerPresent[2])
+    {
+        // P2 may have stopped searching while P3 stayed. Compact the one
+        // remaining Guest into P2 before announcing a two-player room.
+        char playerName[PLAYER_NAME_LENGTH];
+        strncpy(playerName, Netplay::GetPlayerName(2),
+                sizeof(playerName) - 1);
+        playerName[sizeof(playerName) - 1] = '\0';
+        g_peerAddresses[1] = g_peerAddresses[2];
+        g_peerPresent[1] = true;
+        g_lastRoundTripMsByPlayer[1] = g_lastRoundTripMsByPlayer[2];
+        g_peerPresent[2] = false;
+        memset(&g_peerAddresses[2], 0, sizeof(g_peerAddresses[2]));
+        g_lastRoundTripMsByPlayer[2] = 0;
+        SetSessionPlayerName(1, playerName);
+        SetSessionPlayerName(2, "Player3");
+    }
+
+    g_playerCount = playerCount;
+    g_connectionUi.selection.playerCount = playerCount;
+    g_connectedPlayerMask = 1;
+    if (g_peerPresent[1])
+    {
+        g_connectedPlayerMask |= 1 << 1;
+    }
+    if (playerCount == 3 && g_peerPresent[2])
+    {
+        g_connectedPlayerMask |= 1 << 2;
+    }
+    if (playerCount == 3)
+    {
+        g_rollbackEnabled = true;
+        g_rollbackEverEnabled = true;
+        g_delay = 0;
+        g_connectionUi.selection.rollback = true;
+        SendMessageA(g_connectionUi.rollbackCheck, BM_SETCHECK,
+                     BST_CHECKED, 0);
+    }
+    EnableWindow(g_connectionUi.rollbackCheck, FALSE);
+    g_connectionUi.startRequested = false;
+    g_connectionUi.startCommitted = false;
+    g_connectionUi.startCommitConfirmed = false;
+    g_connectionUi.startAckMask = 0;
+    g_connectionUi.startCommitAckMask = 0;
+    g_connectionUi.lastStartSendTick = 0;
+    g_connectionUi.launchAtTick = 0;
+    SaveConnectionUiConfig(&g_connectionUi.selection);
+
+    // WELCOME can be accepted repeatedly before launch. It carries the new
+    // player count, connected mask, rollback mode and all player names.
+    SendWelcomeToAllGuests(4);
+    EnterConnectionUiConnectedState();
+    g_GameErrorContext.Log(
+        "info : Host changed launcher player count %d -> %d (mask 0x%02x)\r\n",
+        oldPlayerCount, playerCount, (unsigned)g_connectedPlayerMask);
+    return true;
 }
 
 bool BeginConnectionUiNetwork(Netplay::Mode mode)
@@ -2816,6 +3652,17 @@ bool BeginConnectionUiNetwork(Netplay::Mode mode)
         return false;
     }
     SetLocalPlayerName(g_connectionUi.selection.playerName);
+    if (mode == Netplay::MODE_HOST &&
+        g_connectionUi.selection.compatibilityCheck)
+    {
+        SetConnectionUiStatus("checking EXE and game data...");
+        UpdateWindow(g_connectionUi.window);
+        if (!EnsureLocalCompatibilityIdentity())
+        {
+            SetConnectionUiStatus(g_status);
+            return false;
+        }
+    }
     strncpy(requestedHost, g_connectionUi.selection.host,
             sizeof(requestedHost) - 1);
     requestedHost[sizeof(requestedHost) - 1] = '\0';
@@ -2833,6 +3680,8 @@ bool BeginConnectionUiNetwork(Netplay::Mode mode)
     g_connected = false;
     g_connectionFailed = false;
     g_protocolMismatch = false;
+    g_compatibilityMismatch = false;
+    g_compatibilityMismatchFlags = 0;
     g_connectionUi.selection.mode = mode;
     strncpy(g_connectionUi.selection.host, requestedHost,
             sizeof(g_connectionUi.selection.host) - 1);
@@ -2843,6 +3692,13 @@ bool BeginConnectionUiNetwork(Netplay::Mode mode)
     g_connectionUi.selection.playerCount = requestedPlayerCount;
     g_connectionUi.selection.rollback = requestedRollback;
     g_mode = mode;
+    if (mode != Netplay::MODE_GUEST)
+    {
+        g_stage4BossChain = g_connectionUi.selection.stage4BossChain;
+    }
+    g_compatibilityCheckEnabled =
+        mode == Netplay::MODE_HOST &&
+        g_connectionUi.selection.compatibilityCheck;
     g_playerCount = requestedPlayerCount;
     g_localPlayerSlot = mode == Netplay::MODE_HOST ? 0 : 1;
     g_connectedPlayerMask = (u8)(1 << g_localPlayerSlot);
@@ -3064,11 +3920,60 @@ void PollConnectionUiNetwork()
         {
             continue;
         }
+        if (g_mode == Netplay::MODE_HOST && packet.type == PACKET_HELLO)
+        {
+            if (packet.version != NETPLAY_VERSION)
+            {
+                char status[160];
+                sprintf(status,
+                        "incompatible protocol: guest %u, host %u",
+                        (unsigned)packet.version,
+                        (unsigned)NETPLAY_VERSION);
+                SetConnectionUiStatus(status);
+                SetStatus(status);
+                g_GameErrorContext.Log(
+                    "error : rejected HELLO protocol version %u; local version %u\r\n",
+                    (unsigned)packet.version, (unsigned)NETPLAY_VERSION);
+                continue;
+            }
+            if (g_compatibilityCheckEnabled &&
+                !ValidateHelloCompatibility(packet, from))
+            {
+                continue;
+            }
+        }
         if (!ValidatePacketVersion(packet))
         {
             ResetConnectionUiAttempt(
                 "version mismatch; use the same build");
             SetStatus("protocol version mismatch; use the same build on both peers");
+            return;
+        }
+
+        if (g_mode == Netplay::MODE_GUEST &&
+            packet.type == PACKET_COMPATIBILITY_CHALLENGE)
+        {
+            NetPacket hello;
+            g_compatibilityCheckEnabled = true;
+            SetConnectionUiStatus("checking EXE and game data...");
+            UpdateWindow(g_connectionUi.window);
+            if (!EnsureLocalCompatibilityIdentity())
+            {
+                ResetConnectionUiAttempt(g_status);
+                return;
+            }
+            InitializePacket(&hello, PACKET_HELLO);
+            SendPacket(hello);
+            g_connectionUi.lastHelloSendTick = GetTickCount();
+            SetConnectionUiStatus("compatibility ID sent; waiting host...");
+            continue;
+        }
+
+        if (g_mode == Netplay::MODE_GUEST &&
+            packet.type == PACKET_REJECT)
+        {
+            AcceptCompatibilityRejection(packet);
+            ResetConnectionUiAttempt(g_status);
             return;
         }
 
@@ -3093,6 +3998,13 @@ void PollConnectionUiNetwork()
             packet.type == PACKET_WELCOME &&
             (!g_connected || packet.session == g_session))
         {
+            if ((packet.flags & NETPLAY_FLAG_COMPATIBILITY_CHECK) != 0 &&
+                ComparePacketCompatibilityIdentity(packet) != 0)
+            {
+                AcceptCompatibilityRejection(packet);
+                ResetConnectionUiAttempt(g_status);
+                return;
+            }
             if (!g_connected || packet.session == g_session)
             {
                 char delay[32];
@@ -3107,6 +4019,10 @@ void PollConnectionUiNetwork()
                 SetWindowTextA(g_connectionUi.delayEdit, delay);
                 SendMessageA(g_connectionUi.rollbackCheck, BM_SETCHECK,
                              g_rollbackEnabled ? BST_CHECKED : BST_UNCHECKED,
+                             0);
+                SendMessageA(g_connectionUi.compatibilityCheck, BM_SETCHECK,
+                             g_compatibilityCheckEnabled
+                                 ? BST_CHECKED : BST_UNCHECKED,
                              0);
                 EnableWindow(g_connectionUi.rollbackCheck,
                              g_playerCount == 3 ? FALSE : TRUE);
@@ -3124,7 +4040,7 @@ void PollConnectionUiNetwork()
             }
             continue;
         }
-        if (!g_connected || packet.session != g_session)
+        if (packet.session != g_session)
         {
             continue;
         }
@@ -3138,25 +4054,31 @@ void PollConnectionUiNetwork()
                 g_connected = false;
                 g_connectionUi.startRequested = false;
                 g_connectionUi.startCommitted = false;
+                g_connectionUi.startCommitConfirmed = false;
+                g_connectionUi.startAckMask = 0;
+                g_connectionUi.startCommitAckMask = 0;
+                g_connectionUi.launchAtTick = 0;
                 EnableWindow(g_connectionUi.startButton, FALSE);
                 SendWelcomeToAllGuests(2);
                 UpdateConnectionUiPeerStatus();
                 SetStatus("guest left launcher; waiting replacement");
                 continue;
             }
-            g_peerExitReceived = true;
-            g_connectionUi.selection.cancelled = true;
-            g_connectionUi.finished = true;
-            SetConnectionUiStatus("peer closed the game");
-            SetStatus("peer closed the game; exiting");
+            // A Host stopping a launcher search is not a request to terminate
+            // the Guest executable. Return the Guest to its own pre-match UI
+            // so the same window can reconnect or choose another role.
+            ResetConnectionUiAttempt("host stopped search");
+            SetStatus("host stopped launcher search");
             g_GameErrorContext.Log(
-                "info : peer closed the game while launcher was open; exiting\r\n");
-            CloseNetworkSocket();
-            if (g_connectionUi.window)
-            {
-                DestroyWindow(g_connectionUi.window);
-            }
+                "info : Host stopped search; Guest launcher returned to settings\r\n");
             return;
+        }
+        // PING and start-barrier controls matter only after every expected
+        // slot has joined. PEER_EXIT above is intentionally handled earlier:
+        // a Guest must also be removable from a partially filled 3P room.
+        if (!g_connected)
+        {
+            continue;
         }
         if (packet.type == PACKET_PING)
         {
@@ -3322,6 +4244,18 @@ void SetConnectionUiRole(HWND window, bool guest)
         SetWindowTextA(g_connectionUi.connectButton,
                        guest ? "Connect to host" : "Start hosting");
     }
+    if (g_connectionUi.compatibilityCheck)
+    {
+        EnableWindow(g_connectionUi.compatibilityCheck,
+                     !guest && !g_connectionUi.attemptingConnection
+                         ? TRUE : FALSE);
+    }
+    if (g_connectionUi.stage4ChainCheck)
+    {
+        EnableWindow(g_connectionUi.stage4ChainCheck,
+                     !guest && !g_connectionUi.attemptingConnection
+                         ? TRUE : FALSE);
+    }
 }
 
 // The evasive bot is a test aid, not something a normal session touches, so it
@@ -3338,14 +4272,15 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
 {
     static const int advancedIds[] = {
         UI_ID_GUEST_EVASIVE_BOT, UI_ID_SHOW_NET_STATS,
-        UI_ID_SHOW_STAGE_NAMES, UI_ID_WRITE_TRACE, UI_ID_PIN_FPU
+        UI_ID_SHOW_STAGE_NAMES, UI_ID_SHOW_CONTRIBUTION, UI_ID_WRITE_TRACE,
+        UI_ID_PIN_FPU, UI_ID_COMPATIBILITY_CHECK, UI_ID_STAGE4_CHAIN
     };
     // The y each control sits at while the advanced rows are shown.
     static const ConnectionUiMovedControl movedControls[] = {
-        { UI_ID_CONNECT, 464 },
-        { UI_ID_STATUS_LABEL, 504 }, { UI_ID_STATUS, 524 },
-        { UI_ID_START_GAME, 604 }, { UI_ID_START_LOCAL, 604 },
-        { UI_ID_CANCEL, 644 }
+        { UI_ID_CONNECT, 536 },
+        { UI_ID_STATUS_LABEL, 576 }, { UI_ID_STATUS, 596 },
+        { UI_ID_START_GAME, 676 }, { UI_ID_START_LOCAL, 676 },
+        { UI_ID_CANCEL, 716 }
     };
     int shift = visible ? 0 : UI_ADVANCED_BLOCK_HEIGHT;
     int index;
@@ -3385,7 +4320,10 @@ void SetConnectionUiAdvancedVisible(HWND window, bool visible)
     {
         SetWindowPos(window, NULL, 0, 0,
                      windowRect.right - windowRect.left,
-                     710 + UI_ROLE_ROW_HEIGHT - shift,
+                     // SetWindowPos takes the whole window, while control
+                     // coordinates use the client area. Leave title-bar and
+                     // border room so Cancel/Stop Search is not clipped.
+                     790 + UI_ROLE_ROW_HEIGHT - shift,
                      SWP_NOMOVE | SWP_NOZORDER);
     }
     InvalidateRect(window, NULL, TRUE);
@@ -3409,9 +4347,13 @@ void ShowConnectionUiHostSettings()
     {
         return;
     }
-    sprintf(text, "From host: %s, delay %d, %d players",
+    sprintf(text,
+            "From host: %s, delay %d, %dP\r\n"
+            "File check %s, Stage 4 chain %s",
             g_rollbackEnabled ? "rollback on" : "rollback off", g_delay,
-            g_playerCount);
+            g_playerCount,
+            g_compatibilityCheckEnabled ? "on" : "off",
+            g_stage4BossChain ? "on" : "off");
     SetWindowTextA(control, text);
     g_connectionUi.hostSettingsKnown = true;
     ShowWindow(control, SW_SHOW);
@@ -3515,7 +4457,7 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
         g_connectionUi.delayEdit = CreateConnectionUiControl(
             "EDIT", delay, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 110, 272,
             100, 24, window, UI_ID_DELAY);
-        CreateConnectionUiControl("STATIC", "", SS_LEFT, 20, 274, 360, 22,
+        CreateConnectionUiControl("STATIC", "", SS_LEFT, 20, 274, 360, 44,
                                   window, UI_ID_HOST_SETTINGS);
         g_connectionUi.rollbackCheck = CreateConnectionUiControl(
             "BUTTON", "Predictive rollback (lowest input lag)",
@@ -3545,20 +4487,36 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
             "BUTTON", "Show player names at stage start",
             BS_AUTOCHECKBOX, 20, 386, 370, 22, window,
             UI_ID_SHOW_STAGE_NAMES);
+        g_connectionUi.contributionCheck = CreateConnectionUiControl(
+            "BUTTON", "Show contribution stats (K/D)",
+            BS_AUTOCHECKBOX, 20, 410, 370, 22, window,
+            UI_ID_SHOW_CONTRIBUTION);
         g_connectionUi.traceCheck = CreateConnectionUiControl(
             "BUTTON", "Write netplay_trace.txt (desync diagnosis)",
-            BS_AUTOCHECKBOX, 20, 410, 370, 22, window,
+            BS_AUTOCHECKBOX, 20, 434, 370, 22, window,
             UI_ID_WRITE_TRACE);
         g_connectionUi.pinFpuCheck = CreateConnectionUiControl(
             "BUTTON", "Pin FPU control word (host decides)",
-            BS_AUTOCHECKBOX, 20, 434, 370, 22, window,
+            BS_AUTOCHECKBOX, 20, 458, 370, 22, window,
             UI_ID_PIN_FPU);
+        g_connectionUi.compatibilityCheck = CreateConnectionUiControl(
+            "BUTTON", "Verify EXE/game data compatibility (Host)",
+            BS_AUTOCHECKBOX, 20, 482, 370, 22, window,
+            UI_ID_COMPATIBILITY_CHECK);
+        g_connectionUi.stage4ChainCheck = CreateConnectionUiControl(
+            "BUTTON", "Chain character-specific Stage 4 cards (Host)",
+            BS_AUTOCHECKBOX, 20, 506, 370, 22, window,
+            UI_ID_STAGE4_CHAIN);
         SendMessageA(g_connectionUi.netStatsCheck, BM_SETCHECK,
                      g_connectionUi.selection.showNetStats ? BST_CHECKED
                                                            : BST_UNCHECKED,
                      0);
         SendMessageA(g_connectionUi.stageNamesCheck, BM_SETCHECK,
                      g_connectionUi.selection.showStageNames
+                         ? BST_CHECKED : BST_UNCHECKED,
+                     0);
+        SendMessageA(g_connectionUi.contributionCheck, BM_SETCHECK,
+                     g_connectionUi.selection.showContribution
                          ? BST_CHECKED : BST_UNCHECKED,
                      0);
         SendMessageA(g_connectionUi.evasiveBotCheck, BM_SETCHECK,
@@ -3573,23 +4531,31 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
                      g_connectionUi.selection.pinFpu ? BST_CHECKED
                                                      : BST_UNCHECKED,
                      0);
+        SendMessageA(g_connectionUi.compatibilityCheck, BM_SETCHECK,
+                     g_connectionUi.selection.compatibilityCheck
+                         ? BST_CHECKED : BST_UNCHECKED,
+                     0);
+        SendMessageA(g_connectionUi.stage4ChainCheck, BM_SETCHECK,
+                     g_connectionUi.selection.stage4BossChain
+                         ? BST_CHECKED : BST_UNCHECKED,
+                     0);
         g_connectionUi.connectButton = CreateConnectionUiControl(
-            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 464, 370, 32,
+            "BUTTON", "Start hosting", BS_PUSHBUTTON, 20, 512, 370, 32,
             window, UI_ID_CONNECT);
-        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 504,
+        CreateConnectionUiControl("STATIC", "cur state:", SS_LEFT, 20, 552,
                                   80, 20, window, UI_ID_STATUS_LABEL);
         g_connectionUi.status = CreateConnectionUiControl(
-            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 524, 370,
+            "STATIC", "no connection", SS_LEFT | WS_BORDER, 20, 572, 370,
             72, window, UI_ID_STATUS);
         g_connectionUi.startButton = CreateConnectionUiControl(
             "BUTTON", "Start Game",
-            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 604, 160, 32, window,
+            BS_DEFPUSHBUTTON | WS_DISABLED, 20, 652, 160, 32, window,
             UI_ID_START_GAME);
         CreateConnectionUiControl("BUTTON", "Start Game (local)",
-                                  BS_PUSHBUTTON, 220, 604, 160, 32, window,
+                                  BS_PUSHBUTTON, 220, 652, 160, 32, window,
                                   UI_ID_START_LOCAL);
         CreateConnectionUiControl("BUTTON", "Cancel", BS_PUSHBUTTON, 280,
-                                  644, 100, 28, window, UI_ID_CANCEL);
+                                  692, 100, 28, window, UI_ID_CANCEL);
         SetConnectionUiRole(
             window, g_connectionUi.selection.mode == Netplay::MODE_GUEST);
         SetConnectionUiAdvancedVisible(window, false);
@@ -3619,6 +4585,12 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
     {
         if (LOWORD(wParam) == UI_ID_PLAYER_COUNT_3)
         {
+            if (g_connectionUi.attemptingConnection)
+            {
+                ChangeConnectionUiHostPlayerCount(3);
+                return 0;
+            }
+            g_connectionUi.selection.playerCount = 3;
             SendMessageA(g_connectionUi.rollbackCheck, BM_SETCHECK,
                          BST_CHECKED, 0);
             EnableWindow(g_connectionUi.rollbackCheck, FALSE);
@@ -3626,6 +4598,12 @@ LRESULT CALLBACK ConnectionUiWndProc(HWND window, UINT message, WPARAM wParam,
         }
         if (LOWORD(wParam) == UI_ID_PLAYER_COUNT_2)
         {
+            if (g_connectionUi.attemptingConnection)
+            {
+                ChangeConnectionUiHostPlayerCount(2);
+                return 0;
+            }
+            g_connectionUi.selection.playerCount = 2;
             EnableWindow(g_connectionUi.rollbackCheck, TRUE);
             return 0;
         }
@@ -3728,6 +4706,11 @@ bool RunConnectionUi(ConnectionUiSelection *selection, bool rollbackAllowed)
     memset(&g_connectionUi, 0, sizeof(g_connectionUi));
     g_connectionUi.selection.mode = Netplay::MODE_SINGLE;
     LoadConnectionUiConfig(&g_connectionUi.selection);
+    if (g_compatibilityCheckExplicit)
+    {
+        g_connectionUi.selection.compatibilityCheck =
+            g_compatibilityCheckEnabled;
+    }
     SetLocalPlayerName(g_connectionUi.selection.playerName);
     if (g_displayMode != DISPLAY_MODE_FROM_GAME_CONFIG)
     {
@@ -3920,11 +4903,21 @@ void ResetInputRings()
     g_peerExitReceived = false;
     g_rngMismatch = false;
     g_protocolMismatch = false;
+    g_compatibilityMismatch = false;
+    g_compatibilityMismatchFlags = 0;
     g_reconnectKeyDown = false;
     g_controlTestFrame = 0;
     g_testRngMismatchInjected = false;
     g_testStateMismatchInjected = false;
     g_testResultPolicyFrames = 0;
+    g_endingSkipHistoryNormalized = false;
+    g_testEndingSyncInjected = false;
+    g_testEndingSyncPassed = false;
+    g_testEndingSyncFailureReported = false;
+    g_testEndingSyncActiveLogged = false;
+    g_testEndingSyncWaitLogged = false;
+    g_testEndingSyncMatchedFrames = 0;
+    g_testEndingSyncLastComparedFrame = INVALID_FRAME;
     g_testReplayBlockInjected = false;
     g_testUiSyncInjected = false;
     g_testUiSyncVerified = false;
@@ -4087,6 +5080,13 @@ void InitializePacket(NetPacket *packet, PacketType type)
     int i;
     int playerId;
     int relayIndex;
+    bool carriesCompatibility = type == PACKET_HELLO ||
+        type == PACKET_WELCOME || type == PACKET_REJECT ||
+        type == PACKET_COMPATIBILITY_CHALLENGE;
+    if (carriesCompatibility && g_compatibilityCheckEnabled)
+    {
+        EnsureLocalCompatibilityIdentity();
+    }
     memset(packet, 0, sizeof(*packet));
     packet->magic = NETPLAY_MAGIC;
     packet->version = NETPLAY_VERSION;
@@ -4143,6 +5143,23 @@ void InitializePacket(NetPacket *packet, PacketType type)
     if (g_testDamageEventsEnabled)
     {
         packet->flags |= NETPLAY_FLAG_TEST_DAMAGE_EVENTS;
+    }
+    if (g_pinFpuControlWord)
+    {
+        packet->flags |= NETPLAY_FLAG_PIN_FPU;
+    }
+    if (g_compatibilityCheckEnabled)
+    {
+        packet->flags |= NETPLAY_FLAG_COMPATIBILITY_CHECK;
+    }
+    if (g_stage4BossChain)
+    {
+        packet->flags |= NETPLAY_FLAG_STAGE4_CHAIN;
+    }
+    if (carriesCompatibility && g_compatibilityCheckEnabled &&
+        g_localCompatibilityValid)
+    {
+        packet->flags |= NETPLAY_FLAG_COMPATIBILITY_IDENTITY;
     }
     packet->quickDifficulty = (u8)g_quickDifficulty;
     packet->quickCharacter = (u8)g_quickCharacter;
@@ -4203,6 +5220,12 @@ void InitializePacket(NetPacket *packet, PacketType type)
         {
             packet->relayRecords[relayIndex][i].frame = INVALID_FRAME;
         }
+    }
+    if (carriesCompatibility && g_compatibilityCheckEnabled &&
+        g_localCompatibilityValid)
+    {
+        memcpy(packet->records, &g_localCompatibilityIdentity,
+               sizeof(g_localCompatibilityIdentity));
     }
 }
 
@@ -4871,9 +5894,13 @@ void UpdateHostPeerLifecycles()
 void NotifyPeerExit()
 {
     int repeat;
+    bool hasPeer;
 
+    hasPeer = g_mode == Netplay::MODE_HOST
+        ? CountConnectedGuestPeers() > 0
+        : g_peerPresent[0];
     if ((g_mode != Netplay::MODE_HOST && g_mode != Netplay::MODE_GUEST) ||
-        g_peerExitReceived || g_socket == INVALID_SOCKET || !g_hasPeer)
+        g_peerExitReceived || g_socket == INVALID_SOCKET || !hasPeer)
     {
         return;
     }
@@ -4989,20 +6016,37 @@ void MarkRngMismatch(u32 frame, u16 localSeed, u16 remoteSeed,
 
 bool ReceivePacket(NetPacket *packet, sockaddr_in *from)
 {
+    u8 buffer[4096];
     int fromSize = sizeof(*from);
     int received;
+    int copied;
     memset(from, 0, sizeof(*from));
-    received = recvfrom(g_socket, (char *)packet, sizeof(*packet), 0,
+    received = recvfrom(g_socket, (char *)buffer, sizeof(buffer), 0,
                         (sockaddr *)from, &fromSize);
     if (received == SOCKET_ERROR)
     {
         return false;
     }
-    if (received != sizeof(*packet) || packet->magic != NETPLAY_MAGIC)
+    // Keep the fixed header readable even when an older peer sends its
+    // smaller packet layout. This lets the launcher report a protocol error
+    // instead of silently timing out. Same-version packets still require the
+    // exact complete structure.
+    if (received < 8)
     {
         return false;
     }
-    return true;
+    memset(packet, 0, sizeof(*packet));
+    copied = received < (int)sizeof(*packet) ? received : sizeof(*packet);
+    memcpy(packet, buffer, copied);
+    if (packet->magic != NETPLAY_MAGIC)
+    {
+        return false;
+    }
+    if (packet->version != NETPLAY_VERSION)
+    {
+        return true;
+    }
+    return received == sizeof(*packet);
 }
 
 bool ValidatePacketVersion(const NetPacket &packet)
@@ -5210,6 +6254,9 @@ void ApplyHostOptions(const NetPacket &packet, bool armQuickStart)
         g_localIgnoreControllerInput ? 1 : 0,
         g_ignoreControllerInput ? 1 : 0, (int)g_mode);
     g_pinFpuControlWord = (packet.flags & NETPLAY_FLAG_PIN_FPU) != 0;
+    g_compatibilityCheckEnabled =
+        (packet.flags & NETPLAY_FLAG_COMPATIBILITY_CHECK) != 0;
+    g_stage4BossChain = (packet.flags & NETPLAY_FLAG_STAGE4_CHAIN) != 0;
     g_rollbackEnabled = (packet.flags & NETPLAY_FLAG_ROLLBACK) != 0;
     g_rollbackEverEnabled = g_rollbackEverEnabled || g_rollbackEnabled;
     // Scripted damage changes simulation state, so it is Host-authoritative
@@ -5282,6 +6329,12 @@ bool AcceptWelcomePacket(const NetPacket &packet, const sockaddr_in &from,
                          bool armQuickStart)
 {
     bool welcomeChanged;
+    if ((packet.flags & NETPLAY_FLAG_COMPATIBILITY_CHECK) != 0 &&
+        ComparePacketCompatibilityIdentity(packet) != 0)
+    {
+        AcceptCompatibilityRejection(packet);
+        return false;
+    }
     if (packet.assignedSlot < 1 ||
         packet.assignedSlot >= TH07_MULTI_MAX_PLAYERS ||
         packet.playerCount < 2 ||
@@ -5369,6 +6422,18 @@ void PollPackets()
         if (g_mode == Netplay::MODE_GUEST && fromPlayerId != 0)
         {
             continue;
+        }
+        if (g_mode == Netplay::MODE_HOST && packet.type == PACKET_HELLO)
+        {
+            if (packet.version != NETPLAY_VERSION)
+            {
+                continue;
+            }
+            if (g_compatibilityCheckEnabled &&
+                !ValidateHelloCompatibility(packet, from))
+            {
+                continue;
+            }
         }
         if (!ValidatePacketVersion(packet))
         {
@@ -5661,8 +6726,69 @@ bool WaitForPeer(const char *caption)
             {
                 continue;
             }
+            if (g_mode == Netplay::MODE_HOST &&
+                packet.type == PACKET_HELLO)
+            {
+                if (packet.version != NETPLAY_VERSION)
+                {
+                    char status[160];
+                    sprintf(status,
+                            "incompatible protocol: guest %u, host %u",
+                            (unsigned)packet.version,
+                            (unsigned)NETPLAY_VERSION);
+                    SetStatus(status);
+                    if (statusWindow)
+                    {
+                        SetWindowTextA(statusWindow, status);
+                    }
+                    g_GameErrorContext.Log(
+                        "error : rejected HELLO protocol version %u; local version %u\r\n",
+                        (unsigned)packet.version,
+                        (unsigned)NETPLAY_VERSION);
+                    continue;
+                }
+                if (g_compatibilityCheckEnabled &&
+                    !ValidateHelloCompatibility(packet, from))
+                {
+                    if (statusWindow)
+                    {
+                        SetWindowTextA(statusWindow, g_status);
+                    }
+                    continue;
+                }
+            }
             if (!ValidatePacketVersion(packet))
             {
+                break;
+            }
+            if (g_mode == Netplay::MODE_GUEST &&
+                packet.type == PACKET_COMPATIBILITY_CHALLENGE)
+            {
+                g_compatibilityCheckEnabled = true;
+                SetStatus("checking EXE and game data...");
+                if (statusWindow)
+                {
+                    SetWindowTextA(statusWindow, g_status);
+                    UpdateWindow(statusWindow);
+                }
+                if (!EnsureLocalCompatibilityIdentity())
+                {
+                    if (statusWindow)
+                    {
+                        DestroyWindow(statusWindow);
+                    }
+                    return false;
+                }
+                InitializePacket(&hello, PACKET_HELLO);
+                SendPacket(hello);
+                lastSend = GetTickCount();
+                SetStatus("compatibility ID sent; waiting for Host");
+                continue;
+            }
+            if (g_mode == Netplay::MODE_GUEST &&
+                packet.type == PACKET_REJECT)
+            {
+                AcceptCompatibilityRejection(packet);
                 break;
             }
             if (g_mode == Netplay::MODE_HOST && packet.type == PACKET_HELLO)
@@ -5701,6 +6827,12 @@ bool WaitForPeer(const char *caption)
                 SameAddress(from, g_peerAddresses[0]) &&
                 packet.type == PACKET_WELCOME)
             {
+                if ((packet.flags & NETPLAY_FLAG_COMPATIBILITY_CHECK) != 0 &&
+                    ComparePacketCompatibilityIdentity(packet) != 0)
+                {
+                    AcceptCompatibilityRejection(packet);
+                    break;
+                }
                 if (!g_connected &&
                     !AcceptWelcomePacket(packet, from, true))
                 {
@@ -5789,7 +6921,7 @@ bool WaitForPeer(const char *caption)
             SetStatus("guest connected; synchronized launch");
             return true;
         }
-        if (g_protocolMismatch)
+        if (g_protocolMismatch || g_compatibilityMismatch)
         {
             break;
         }
@@ -5803,6 +6935,13 @@ bool WaitForPeer(const char *caption)
     if (g_protocolMismatch)
     {
         SetStatus("protocol version mismatch; use the same build on both peers");
+    }
+    else if (g_compatibilityMismatch)
+    {
+        char status[160];
+        FormatCompatibilityMismatch(g_compatibilityMismatchFlags,
+                                    status, sizeof(status));
+        SetStatus(status);
     }
     else
     {
@@ -5864,6 +7003,108 @@ bool ReconnectToPeer()
 
 const i32 TH07_SUPERVISOR_TITLE_STATE = 1;
 const i32 TH07_SUPERVISOR_RESULT_STATE = 5;
+const i32 TH07_SUPERVISOR_ENDING_STATE = 9;
+const u32 TEST_ENDING_SYNC_VERIFY_FRAMES = 180;
+
+void InjectEndingSynchronizationTest()
+{
+    i32 shotType;
+    i32 difficulty;
+    bool injectedSeen;
+
+    if (!g_testEndingSyncEnabled || g_testEndingSyncInjected ||
+        !Netplay::IsNetworked() || g_frame < 120 ||
+        g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE ||
+        !g_GameManager.notInMenu || !g_GameManager.globals)
+    {
+        return;
+    }
+    shotType = g_GameManager.shotTypeAndCharacter;
+    difficulty = g_GameManager.difficulty;
+    if (shotType < 0 || shotType >= 6 ||
+        difficulty < 0 || difficulty >= 6)
+    {
+        return;
+    }
+
+    // Reproduce the real failure: Host has this ending in score.dat while
+    // Guest does not. Ending::AddedCallback used that local bit to decide
+    // whether held Ctrl executes five parser steps or one.
+    injectedSeen = g_mode == Netplay::MODE_HOST;
+    if (g_GameManager.globals->numRetries == 0)
+    {
+        g_GameManager.clrd[shotType]
+            .difficultyClearedWithRetries[difficulty] =
+                injectedSeen ? 99 : 0;
+    }
+    else
+    {
+        g_GameManager.clrd[shotType]
+            .difficultyClearedWithoutRetries[difficulty] =
+                injectedSeen ? 99 : 0;
+    }
+    g_testEndingSyncInjected = true;
+    g_Supervisor.curState = TH07_SUPERVISOR_ENDING_STATE;
+    g_GameErrorContext.Log(
+        "info : test ending history injected local seen %d at frame %lu\r\n",
+        injectedSeen ? 1 : 0, (unsigned long)g_frame);
+}
+
+void NormalizeMultiplayerEndingSkipHistory()
+{
+    i32 shotType;
+    i32 difficulty;
+    bool localHasSeenEnding;
+
+    if (!Netplay::IsMultiplayer() || g_endingSkipHistoryNormalized ||
+        g_Supervisor.curState != TH07_SUPERVISOR_ENDING_STATE ||
+        !g_GameManager.globals)
+    {
+        return;
+    }
+    shotType = g_GameManager.shotTypeAndCharacter;
+    difficulty = g_GameManager.difficulty;
+    if (shotType < 0 || shotType >= 6 ||
+        difficulty < 0 || difficulty >= 6)
+    {
+        return;
+    }
+
+    // Ending::AddedCallback reads this local score.dat-derived value before
+    // writing the same clear marker. Set that imminent in-memory marker one
+    // callback earlier on every peer. This changes no eventual save result,
+    // but makes hasSeenEnding (and therefore Ctrl/Skip speed) deterministic.
+    if (g_GameManager.globals->numRetries == 0)
+    {
+        localHasSeenEnding =
+            g_GameManager.clrd[shotType]
+                .difficultyClearedWithRetries[difficulty] == 99;
+        g_GameManager.clrd[shotType]
+            .difficultyClearedWithRetries[difficulty] = 99;
+    }
+    else
+    {
+        localHasSeenEnding =
+            g_GameManager.clrd[shotType]
+                .difficultyClearedWithoutRetries[difficulty] == 99;
+        g_GameManager.clrd[shotType]
+            .difficultyClearedWithoutRetries[difficulty] = 99;
+    }
+    g_endingSkipHistoryNormalized = true;
+    g_GameErrorContext.Log(
+        "info : multiplayer ending skip normalized (local seen %d, shared seen 1)\r\n",
+        localHasSeenEnding ? 1 : 0);
+}
+
+void ApplyEndingSynchronizationTestInput(u16 *localInput)
+{
+    if (localInput && g_testEndingSyncEnabled &&
+        g_testEndingSyncInjected &&
+        g_Supervisor.curState == TH07_SUPERVISOR_ENDING_STATE)
+    {
+        *localInput |= TH_BUTTON_SKIP;
+    }
+}
 
 bool IsSharedUiFrame()
 {
@@ -6326,6 +7567,10 @@ u32 CalculatePlayerStateHash()
             hash, (u32)GetPlayerBombs((u8)playerId));
         hash = HashStateValue(
             hash, (u32)GetPlayerPower((u8)playerId));
+        hash = HashStateValue(
+            hash, GetPlayerEnemiesDefeated((u8)playerId));
+        hash = HashStateValue(
+            hash, GetPlayerDamageDealt((u8)playerId));
     }
     return hash != 0 ? hash : 1;
 }
@@ -8038,6 +9283,58 @@ void CompareConfirmedDetailedState(u32 currentFrame)
     g_lastDetailedStateComparedFrame = frame;
 }
 
+u32 CalculateEndingStateHash()
+{
+    Ending *ending = FindActiveEnding();
+    u32 hash = 2166136261u;
+    u32 scriptOffset;
+
+    if (!ending)
+    {
+        if (g_testEndingSyncEnabled && g_testEndingSyncInjected &&
+            !g_testEndingSyncWaitLogged && g_frame >= 140)
+        {
+            g_testEndingSyncWaitLogged = true;
+            g_GameErrorContext.Log(
+                "info : test ending comparison waiting for parser at frame %lu\r\n",
+                (unsigned long)g_frame);
+        }
+        return 0;
+    }
+
+    if (g_testEndingSyncEnabled && !g_testEndingSyncActiveLogged)
+    {
+        g_testEndingSyncActiveLogged = true;
+        g_GameErrorContext.Log(
+            "info : test ending parser active seen %d at frame %lu\r\n",
+            ending->hasSeenEnding, (unsigned long)g_frame);
+    }
+
+    // Ending::FadingEffect and the ANM draw state advance from OnDraw, whose
+    // cadence is process-local while a peer waits for UDP input. Only hash
+    // the script parser and its calculation-time fields. These are the state
+    // that decides when each peer leaves the ending.
+    hash = HashStateValue(hash, (u32)ending->hasSeenEnding);
+    hash = HashTimerState(hash, ending->timer1);
+    hash = HashTimerState(hash, ending->timer2);
+    hash = HashTimerState(hash, ending->timer3);
+    hash = HashStateValue(hash, (u32)ending->minWaitResetFrames);
+    hash = HashStateValue(hash, (u32)ending->minWaitFrames);
+    hash = HashStateValue(hash, (u32)ending->line2Delay);
+    hash = HashStateValue(hash, (u32)ending->topLineDelay);
+    hash = HashStateValue(hash, (u32)ending->timesFileParsed);
+    hash = HashFloat2State(hash, ending->backgroundPos);
+    hash = HashStateValue(
+        hash, StateFloatBits(ending->backgroundScrollSpeed));
+    scriptOffset = 0xffffffffu;
+    if (ending->endFileData && ending->endFileDataPtr)
+    {
+        scriptOffset = (u32)(ending->endFileDataPtr - ending->endFileData);
+    }
+    hash = HashStateValue(hash, scriptOffset);
+    return hash != 0 ? hash : 1;
+}
+
 // This deliberately hashes only stable logical values. Pointer addresses,
 // allocation order, and render-only objects are process-local and must not
 // participate in a network comparison. The checksum is an early divergence
@@ -8048,12 +9345,19 @@ u32 CalculateLogicalStateHash()
     ZunGlobals *globals = g_GameManager.globals;
     i32 playerId;
 
+    // Ending script progress is synchronized input state too. In particular,
+    // Ctrl executes five parser steps for a previously viewed ending but only
+    // one otherwise, so compare that state explicitly instead of treating all
+    // non-gameplay scenes as uncheckable menus.
+    if (g_Supervisor.curState == TH07_SUPERVISOR_ENDING_STATE)
+    {
+        return CalculateEndingStateHash();
+    }
+
     // The input ring also covers the title/menu transition so both peers can
-    // reach the same quick-start boundary.  Menu objects and timers are
+    // reach the same quick-start boundary. Other menu objects and timers are
     // intentionally local, however, and may be at different draw frames
-    // before gameplay begins.  Do not turn that expected startup difference
-    // into an RNG resync.  A zero hash means "not gameplay" and is ignored by
-    // the comparison below.
+    // before gameplay begins. A zero hash means "not comparable".
     if (!g_GameManager.notInMenu ||
         g_Supervisor.curState != TH07_SUPERVISOR_GAME_STATE)
     {
@@ -8062,6 +9366,16 @@ u32 CalculateLogicalStateHash()
 
     hash = HashStateValue(hash, g_GameManager.flags);
     hash = HashStateValue(hash, (u32)g_GameManager.difficulty);
+    hash = HashStateValue(hash, g_stage4BossChain ? 1u : 0u);
+    hash = HashStateValue(hash, (u32)g_stage4ChainCount);
+    hash = HashStateValue(hash, (u32)g_stage4ChainPos);
+    hash = HashStateValue(hash, (u32)g_stage4ChainBossId);
+    hash = HashStateValue(hash, (u32)g_stage4ChainCardActive);
+    hash = HashStateValue(hash, (u32)g_stage4ChainPhaseLife);
+    hash = HashStateValue(hash, (u32)g_stage4ChainSpellIdx);
+    hash = HashStateValue(hash, (u32)g_stage4ChainQueue[0]);
+    hash = HashStateValue(hash, (u32)g_stage4ChainQueue[1]);
+    hash = HashStateValue(hash, (u32)g_stage4ChainQueue[2]);
     hash = HashStateValue(hash, (u32)GetActivePlayerMask());
     hash = HashStateValue(hash, (u32)g_absentPlayerMask);
     for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
@@ -8080,6 +9394,10 @@ u32 CalculateLogicalStateHash()
             hash, (u32)GetPlayerBombs((u8)playerId));
         hash = HashStateValue(
             hash, (u32)GetPlayerPower((u8)playerId));
+        hash = HashStateValue(
+            hash, GetPlayerEnemiesDefeated((u8)playerId));
+        hash = HashStateValue(
+            hash, GetPlayerDamageDealt((u8)playerId));
     }
     hash = HashStateValue(hash, (u32)g_GameManager.isPaused);
     hash = HashStateValue(hash, (u32)g_GameManager.isInPauseMenu);
@@ -8121,6 +9439,88 @@ u32 CalculateLogicalStateHash()
         hash = HashStateValue(hash, 0);
     }
     return hash != 0 ? hash : 1;
+}
+
+void VerifyEndingSynchronizationTest(u32 newestFrame)
+{
+    u32 frame;
+    int slot;
+    int playerId;
+
+    if (!g_testEndingSyncEnabled || !g_testEndingSyncInjected ||
+        g_testEndingSyncPassed || g_testEndingSyncFailureReported ||
+        g_Supervisor.curState != TH07_SUPERVISOR_ENDING_STATE ||
+        newestFrame < (u32)DETAILED_STATE_COMPARE_LAG)
+    {
+        return;
+    }
+
+    // Input records clear their hash field while the frame remains in the
+    // 32-record redundancy window. Compare behind that window, after the
+    // verification record has arrived and can no longer be cleared again.
+    frame = newestFrame - (u32)DETAILED_STATE_COMPARE_LAG;
+    slot = (int)(frame % INPUT_RING_SIZE);
+    if (g_localFrames[slot] != frame || g_localStateHash[slot] == 0 ||
+        g_testEndingSyncLastComparedFrame == frame)
+    {
+        return;
+    }
+
+    for (playerId = 0; playerId < g_playerCount; playerId++)
+    {
+        // The Host receives every Guest's own verification stream. Guests
+        // receive other Guests' inputs through the Host, but not their
+        // verification records, so each Guest compares against P1.
+        if (!IsExpectedRemotePlayerId(playerId) ||
+            (g_mode == Netplay::MODE_GUEST && playerId != 0))
+        {
+            continue;
+        }
+        if (g_remoteFramesByPlayer[playerId][slot] != frame ||
+            g_remoteStateHashByPlayer[playerId][slot] == 0)
+        {
+            if (!g_testEndingSyncWaitLogged && frame >= 140)
+            {
+                g_testEndingSyncWaitLogged = true;
+                g_GameErrorContext.Log(
+                    "info : test ending comparison waiting at frame %lu local %08lx remote P%d frame %lu hash %08lx\r\n",
+                    (unsigned long)frame,
+                    (unsigned long)g_localStateHash[slot], playerId + 1,
+                    (unsigned long)g_remoteFramesByPlayer[playerId][slot],
+                    (unsigned long)g_remoteStateHashByPlayer[playerId][slot]);
+            }
+            return;
+        }
+        if (g_localStateHash[slot] !=
+            g_remoteStateHashByPlayer[playerId][slot])
+        {
+            g_testEndingSyncFailureReported = true;
+            g_GameErrorContext.Log(
+                "error : ending script state diverged at frame %lu against P%d (%08lx/%08lx)\r\n",
+                (unsigned long)frame, playerId + 1,
+                (unsigned long)g_localStateHash[slot],
+                (unsigned long)g_remoteStateHashByPlayer[playerId][slot]);
+            SetStatus("ending synchronization test failed");
+            return;
+        }
+    }
+
+    if (g_testEndingSyncLastComparedFrame != INVALID_FRAME &&
+        frame != g_testEndingSyncLastComparedFrame + 1)
+    {
+        g_testEndingSyncMatchedFrames = 0;
+    }
+    g_testEndingSyncLastComparedFrame = frame;
+    g_testEndingSyncMatchedFrames++;
+    if (g_testEndingSyncMatchedFrames >= TEST_ENDING_SYNC_VERIFY_FRAMES)
+    {
+        g_testEndingSyncPassed = true;
+        g_GameErrorContext.Log(
+            "info : test ending synchronization verified for %lu frames through frame %lu\r\n",
+            (unsigned long)g_testEndingSyncMatchedFrames,
+            (unsigned long)frame);
+        SetStatus("ending synchronization test passed");
+    }
 }
 
 bool IsBombEffectCalcCallback(ChainCallback callback)
@@ -8503,6 +9903,9 @@ void SaveRollbackSnapshot(u32 simulationFrame)
     memcpy(snapshot->multiplayerResources,
            g_MultiplayerPlayerResources,
            sizeof(g_MultiplayerPlayerResources));
+    memcpy(snapshot->contributionStats,
+           g_MultiplayerContributionStats,
+           sizeof(g_MultiplayerContributionStats));
     for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
     {
         memcpy(snapshot->players[playerId], &g_Players[playerId],
@@ -8532,6 +9935,14 @@ void SaveRollbackSnapshot(u32 simulationFrame)
     memcpy(snapshot->powerGiveWindow, g_powerGiveWindow,
            sizeof(g_powerGiveWindow));
     snapshot->menuInputDelay = g_menuInputDelay;
+    memcpy(snapshot->stage4ChainQueue, g_stage4ChainQueue,
+           sizeof(g_stage4ChainQueue));
+    snapshot->stage4ChainCount = g_stage4ChainCount;
+    snapshot->stage4ChainPos = g_stage4ChainPos;
+    snapshot->stage4ChainBossId = g_stage4ChainBossId;
+    snapshot->stage4ChainCardActive = g_stage4ChainCardActive;
+    snapshot->stage4ChainPhaseLife = g_stage4ChainPhaseLife;
+    snapshot->stage4ChainSpellIdx = g_stage4ChainSpellIdx;
     memcpy(snapshot->curFrameGameInputs, g_CurFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(snapshot->lastFrameRawInputs, g_LastFrameRawInputs,
@@ -8569,6 +9980,9 @@ bool RestoreRollbackSnapshot(const RollbackSnapshot *snapshot)
     memcpy(g_MultiplayerPlayerResources,
            snapshot->multiplayerResources,
            sizeof(g_MultiplayerPlayerResources));
+    memcpy(g_MultiplayerContributionStats,
+           snapshot->contributionStats,
+           sizeof(g_MultiplayerContributionStats));
     for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
     {
         memcpy(&g_Players[playerId], snapshot->players[playerId],
@@ -8618,6 +10032,14 @@ bool RestoreRollbackSnapshot(const RollbackSnapshot *snapshot)
     memcpy(g_powerGiveWindow, snapshot->powerGiveWindow,
            sizeof(g_powerGiveWindow));
     g_menuInputDelay = snapshot->menuInputDelay;
+    memcpy(g_stage4ChainQueue, snapshot->stage4ChainQueue,
+           sizeof(g_stage4ChainQueue));
+    g_stage4ChainCount = snapshot->stage4ChainCount;
+    g_stage4ChainPos = snapshot->stage4ChainPos;
+    g_stage4ChainBossId = snapshot->stage4ChainBossId;
+    g_stage4ChainCardActive = snapshot->stage4ChainCardActive;
+    g_stage4ChainPhaseLife = snapshot->stage4ChainPhaseLife;
+    g_stage4ChainSpellIdx = snapshot->stage4ChainSpellIdx;
     memcpy(g_CurFrameGameInputs, snapshot->curFrameGameInputs,
            sizeof(g_CurFrameGameInputs));
     memcpy(g_LastFrameRawInputs, snapshot->lastFrameRawInputs,
@@ -11414,12 +12836,15 @@ void ShowHelpAndExit()
         "--fullscreen, --window-size 640x480|960x720|1280x960,\r\n"
         "--low-latency, --no-low-latency, --blt-prepare 0..16,\r\n"
         "--low-latency-spin,\r\n"
+        "--compatibility-check (Host strict EXE/data check; default off),\r\n"
+        "--stage4-chain / --no-stage4-chain (Host Stage 4 card chain),\r\n"
         "--test-full-run, --invincible, --no-invincible, --auto-shoot, --auto-skip,\r\n"
         "--auto-bomb, --no-controller,\r\n"
         "--test-random-input, --test-evasive-input, --test-damage-events,\r\n"
         "--test-resource-drops,\r\n"
         "--test-p2-features, --test-p3-features, --test-hash-trace,\r\n"
-        "--test-boss-desync, --test-keep-stale-stage-snapshots,\r\n"
+        "--test-boss-desync, --test-ending-sync,\r\n"
+        "--test-keep-stale-stage-snapshots,\r\n"
         "--three-player, --players 3,\r\n"
         "--difficulty, --character, --shot, --stage, --practice, --normal-stage,\r\n"
         "--p2-character, --p2-shot, --p3-character, --p3-shot,\r\n"
@@ -11581,6 +13006,17 @@ bool Netplay::Initialize(const char *commandLine)
     g_bgmEnabled = true;
     g_seEnabled = true;
     LoadLowLatencyConfig();
+    g_compatibilityCheckExplicit =
+        HasOption(commandLine, "--compatibility-check") ||
+        HasOption(commandLine, "--no-compatibility-check");
+    if (HasOption(commandLine, "--compatibility-check"))
+    {
+        g_compatibilityCheckEnabled = true;
+    }
+    if (HasOption(commandLine, "--no-compatibility-check"))
+    {
+        g_compatibilityCheckEnabled = false;
+    }
     g_lowLatencyExplicit = HasOption(commandLine, "--low-latency");
     if (g_lowLatencyExplicit)
     {
@@ -11644,6 +13080,7 @@ bool Netplay::Initialize(const char *commandLine)
     // covers the UI's mod_config.ini write.
     g_localNoSave = HasOption(commandLine, "--test") || isFullRunTest ||
         HasOption(commandLine, "--test-damage-events") ||
+        HasOption(commandLine, "--test-ending-sync") ||
         HasOption(commandLine, "--no-save");
     g_controlTestEnabled = HasOption(commandLine, "--test-controls");
     g_testRngMismatchEnabled = HasOption(commandLine,
@@ -11660,6 +13097,8 @@ bool Netplay::Initialize(const char *commandLine)
     }
     g_testResultReconnectEnabled = HasOption(commandLine,
                                               "--test-result-reconnect");
+    g_testEndingSyncEnabled = HasOption(commandLine,
+                                        "--test-ending-sync");
     g_testReplayBlockEnabled = HasOption(commandLine,
                                           "--test-replay-block");
     g_testUiSyncEnabled = HasOption(commandLine, "--test-ui-sync");
@@ -11722,7 +13161,7 @@ bool Netplay::Initialize(const char *commandLine)
         g_testRollbackInputEnabled ||
         g_testResourceDropsEnabled || g_testP2FeaturesEnabled ||
         g_testP3FeaturesEnabled || g_testHashTraceEnabled ||
-        g_testDamageEventsEnabled;
+        g_testDamageEventsEnabled || g_testEndingSyncEnabled;
     g_invincible = (isTestPreset || HasOption(commandLine, "--invincible")) &&
         !g_testDamageEventsEnabled &&
         !HasOption(commandLine, "--no-invincible");
@@ -12143,8 +13582,15 @@ bool Netplay::Initialize(const char *commandLine)
         g_bgmEnabled = uiSelection.bgmEnabled;
         g_showStagePlayerNames = uiSelection.showStageNames;
         g_showNetDiagnostics = uiSelection.showNetStats;
+        g_showContributionStats = uiSelection.showContribution;
         g_writeFrameTrace = uiSelection.writeTrace;
-        g_pinFpuControlWord = uiSelection.pinFpu;
+        // ApplyHostOptions already put the Host's deterministic settings on a
+        // GUI Guest. Do not overwrite them with that Guest's saved checkboxes.
+        if (uiSelection.mode != Netplay::MODE_GUEST)
+        {
+            g_pinFpuControlWord = uiSelection.pinFpu;
+            g_stage4BossChain = uiSelection.stage4BossChain;
+        }
         g_seEnabled = uiSelection.seEnabled;
         requestedPlayerCount = uiSelection.playerCount;
         g_rollbackEnabled = uiSelection.rollback &&
@@ -12202,6 +13648,22 @@ bool Netplay::Initialize(const char *commandLine)
         SetStatus("choose only one of --local, --host, or --join");
         return false;
     }
+    if (HasOption(commandLine, "--stage4-chain") &&
+        (!useConnectionUi || uiSelection.mode != Netplay::MODE_GUEST))
+    {
+        g_stage4BossChain = true;
+    }
+    if (HasOption(commandLine, "--no-stage4-chain") &&
+        (!useConnectionUi || uiSelection.mode != Netplay::MODE_GUEST))
+    {
+        g_stage4BossChain = false;
+    }
+    if (!useConnectionUi &&
+        hasHost && g_compatibilityCheckEnabled &&
+        !EnsureLocalCompatibilityIdentity())
+    {
+        return false;
+    }
 
     if (hasLocal ||
         (isTestPreset && !hasHost && !hasJoinOption))
@@ -12255,6 +13717,13 @@ bool Netplay::Initialize(const char *commandLine)
     if (hasJoin)
     {
         g_mode = MODE_GUEST;
+        // The Host decides whether strict identity checking is required. Send
+        // a lightweight HELLO first; a strict Host challenges us to hash the
+        // EXE/data before it assigns a slot.
+        if (!useConnectionUi)
+        {
+            g_compatibilityCheckEnabled = false;
+        }
         if (useConnectionUi)
         {
             if (!g_connected || g_socket == INVALID_SOCKET ||
@@ -12715,6 +14184,16 @@ bool Netplay::ShouldShowStagePlayerNames()
 bool Netplay::ShouldShowNetDiagnostics()
 {
     return g_showNetDiagnostics;
+}
+
+bool Netplay::ShouldShowContributionStats()
+{
+    return g_showContributionStats;
+}
+
+bool Netplay::IsStage4BossChainEnabled()
+{
+    return g_stage4BossChain;
 }
 
 bool Netplay::ShouldWriteFrameTrace()
@@ -13633,6 +15112,8 @@ bool Netplay::SynchronizeInputs(
     {
         return SynchronizeRollbackFrame(synchronizedPlayers);
     }
+    InjectEndingSynchronizationTest();
+    NormalizeMultiplayerEndingSkipHistory();
     RefreshRollbackPredictionState();
     ApplyFinalMultiplayerScoreBonus();
     RunResourceDropTest();
@@ -13647,6 +15128,7 @@ bool Netplay::SynchronizeInputs(
         localPlayer2 = CaptureConfiguredLocalP2Input(localPlayer2);
     }
     ArmInputAfterRelease(&localPlayer1, &localPlayer2);
+    ApplyEndingSynchronizationTestInput(&localPlayer1);
     ApplyAutomaticTestBomb(&localPlayer1, &localPlayer2);
     ApplyTestMenuInput(&localPlayer1);
     ApplyRollbackInputTest(&localPlayer1, &localPlayer2);
@@ -13931,6 +15413,7 @@ bool Netplay::SynchronizeInputs(
     {
         return false;
     }
+    VerifyEndingSynchronizationTest(targetFrame);
     if (targetFrame == 0 && !g_startupFrameBarrierLogged)
     {
         g_startupFrameBarrierLogged = true;

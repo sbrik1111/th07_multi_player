@@ -761,7 +761,9 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
 static void ApplyPlayerFocusOverlapAlpha(Effect *effect)
 {
     i32 playerId;
-    for (playerId = 1; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    // Check every slot: GetPlayerOverlapAlpha keeps the local player's ring
+    // opaque and fades only remote rings for this PC's perspective.
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
     {
         if (IsPlayerSlotActive((u8)playerId) &&
             effect == g_Players[playerId].focusEffect)

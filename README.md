@@ -13,6 +13,10 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
+The current development line also includes independent character/shot
+selection for all three players, shared-border handling, synchronized enemy
+drops, and predictive rollback across stage transitions.
+
 **v0.1.7**
 
 * Fixed the screen breaking up while paused.
@@ -30,7 +34,8 @@ Three-player netplay has been confirmed working in testing.
 
 **v0.1.4**
 
-* All `Advanced settings` options are now off by default.
+* Added the `Advanced settings` section for optional bot, display, and
+  diagnostic controls.
 * Added **Pin FPU control word** for machines that may use different floating-point settings.
 
 **v0.1.3**
@@ -47,30 +52,26 @@ This is still an experimental release, so other desyncs and bugs may remain.
 
 ## Known issues
 
-- **Player-name labels may display incorrectly at the start of a stage.**
-- **The screen breaks up while paused.** The pause menu draws over a frame the
-  network code may not have finished, and the result can be torn or partly
-  stale until play resumes
-- **The title screen and the ending run very slowly in three player
-  sessions.** Both are outside the synchronized gameplay loop, and the extra
-  peer makes them noticeably worse
 - **A session can still desync.** v0.1.2 fixed the known item-drop
   synchronization issue, but this does not guarantee that every possible cause
   has been found. If a session drifts apart, everyone should leave and rematch.
   `netplay_trace.txt`, written next to the executable, records what the peers
   stopped agreeing about. It can be switched off under `Advanced settings`, at
   the cost of leaving nothing to read if a session does go wrong
+- **The title screen and the ending run very slowly in three player
+  sessions.** Both are outside the synchronized gameplay loop, and the extra
+  peer makes them noticeably worse
 
 ## What it does
 
-- **Two or three player netplay** over UDP. The host is P1, the guests are P2
-  and P3; guest-to-guest input is relayed through the host
-- **Local two player** on one keyboard
-- Each player picks their **own character and shot type**
-- Lives, bombs and power are per player; cherry and score are shared
-- Life transfer between players, and revival of a player who is out of lives
-- **Predictive rollback** so movement is not held back by the round trip
-  (on by default, zero added delay)
+* **Two or three player netplay** over UDP. The host is P1, the guests are P2 and P3; guest-to-guest input is relayed through the host
+* **The host must have the UDP port open/forwarded** so guests can connect
+* **Local two player** on one keyboard
+* Each player picks their **own character and shot type**
+* Lives, bombs and power are per player; cherry and score are shared
+* Life transfer between players, and revival of a player who is out of lives
+* **Predictive rollback** so movement is not held back by the round trip (on by default, zero added delay)
+
 
 ## Playing
 
@@ -119,19 +120,25 @@ There is no keyboard mapping for a third local player.
 
 ## Launcher settings
 
-`Advanced settings` holds five switches. All five start off.
+`Advanced settings` holds eight switches. Display and diagnostic choices are
+stored locally, so Host and Guests may choose different values.
 
 | Setting | Effect |
 | --- | --- |
 | Guest evasive bot (test) | Hands the guest's ship to a bot that dodges, collects power and lives, keeps its distance from a boss, and bombs its way out of a hit |
 | Net diagnostics | Draws `NET H RTT 25ms D0` at the top of the playfield |
 | Show player names at stage start | Each player's name over their ship for the first four seconds of a stage |
+| Show contribution stats (K/D) | Shows each player's defeated-enemy count and applied damage in the HUD |
 | Write netplay_trace.txt | Records what the peers stopped agreeing about, for diagnosing a desync. A few megabytes an hour. Turn it on before a session you expect to report |
 | Pin FPU control word | Holds the x87 control word to one value every frame, so a graphics driver cannot change how floats round mid-session |
+| Verify EXE/game data compatibility | Rejects peers with incompatible executable, game data, or settings identities |
+| Chain character-specific Stage 4 cards | Runs the Stage 4 character-specific boss cards for each distinct active character |
 
-The first four are per-PC preferences; players do not have to agree on them.
-The FPU pin is not: it decides how the simulation rounds, so the host's answer
-is applied to everyone. Guests keep their own box but the host's value wins.
+The Guest bot, display switches, trace setting, and compatibility display are
+per-PC preferences; players do not have to agree on them. Contribution totals
+remain synchronized for rollback even when their local HUD drawing is disabled.
+The FPU pin and Stage 4 chain are simulation-affecting options, so the Host's
+answer is applied to everyone.
 
 A lost or recovering connection is always reported regardless of the
 diagnostics setting.

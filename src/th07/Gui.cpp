@@ -1599,6 +1599,8 @@ void Gui::DrawGameScene()
     f32 multiplayerScoreLabelOffsetY;
     f32 resourceIconStep;
     bool compactMultiplayerHud;
+    u32 contributionKills;
+    u32 contributionDamage;
 
     compactMultiplayerHud = Netplay::IsMultiplayer();
     multiplayerHudBaseY = 76.0f;
@@ -2008,6 +2010,28 @@ void Gui::DrawGameScene()
                 0.0f);
             g_AsciiManager.AddString(
                 &textDrawPos, GetMultiplayerHudLoadoutName((u8)playerId));
+
+            // Keep a compact live contribution readout in the left half of
+            // each row. This is a local display preference; the totals remain
+            // synchronized even when this PC chooses not to draw them.
+            if (Netplay::ShouldShowContributionStats())
+            {
+                contributionKills = GetPlayerEnemiesDefeated(
+                    (u8)playerId);
+                contributionDamage = GetPlayerDamageDealt(
+                    (u8)playerId);
+                g_AsciiManager.scale.x = 0.42f;
+                g_AsciiManager.scale.y = 0.42f;
+                g_AsciiManager.color = 0xffa0d8ff;
+                textDrawPos = D3DXVECTOR3(
+                    424.0f + multiplayerHudOffsetX,
+                    multiplayerHudBaseY + 27.0f + 48.0f * playerId,
+                    0.0f);
+                AsciiManager::AddFormatText(
+                    &g_AsciiManager, &textDrawPos, "K:%lu D:%lu",
+                    (unsigned long)contributionKills,
+                    (unsigned long)contributionDamage);
+            }
 
             g_AsciiManager.scale.x = 0.55f;
             g_AsciiManager.scale.y = 0.55f;

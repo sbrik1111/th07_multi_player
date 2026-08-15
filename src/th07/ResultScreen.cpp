@@ -17,6 +17,8 @@
 #include "pbg4/Lzss.hpp"
 #include "utils.hpp"
 
+bool ShouldSkipReplaySavePrompt();
+
 // GLOBAL: TH07 0x004964f4
 static const f32 g_DifficultyWeightsList[] = {-30.0f, -10.0f, 20.0f, 30.0f, 30.0f};
 
@@ -1734,7 +1736,9 @@ ZunResult ResultScreen::CheckConfirmButton()
         if (this->frameTimer >= 30)
         {
             this->frameTimer = 59;
-            this->resultScreenState = 11;
+            // A full stage reaches the prompt through the score name entry
+            // rather than directly, so it needs the same exit.
+            this->resultScreenState = ShouldSkipReplaySavePrompt() ? 18 : 11;
         }
         break;
     }
@@ -2625,8 +2629,11 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *arg)
                      [g_GameManager.currentStage - 1][g_GameManager.difficulty]
                 .score = g_GameManager.globals->score;
         }
-        arg->resultScreenState = 11;
-        strcpy(arg->replayName, arg->lsnmHeader.name);
+        if (!ShouldSkipReplaySavePrompt())
+        {
+            arg->resultScreenState = 11;
+            strcpy(arg->replayName, arg->lsnmHeader.name);
+        }
     }
     for (i = 0; i < 7; i++)
     {
@@ -2688,6 +2695,21 @@ ZunResult ResultScreen::DeletedCallback(ResultScreen *arg)
     arg = NULL;
 
     return ZUN_SUCCESS;
+}
+
+// A multiplayer run cannot be replayed. Netplay drops out of any replay it is
+// asked to play, because one recorded input lane cannot reproduce two or three
+// ships, so the file this prompt would write could never be opened. Asking
+// anyway, and holding everyone on the question until somebody answers it, is a
+// question with no useful answer.
+//
+// State 18 is the game's own way out: ResultScreen::OnUpdate turns it straight
+// into the title screen and takes the result screen off the chain. The practice
+// path already starts there and is converted into the prompt; this leaves it
+// alone instead.
+bool ShouldSkipReplaySavePrompt()
+{
+    return Netplay::IsMultiplayer();
 }
 
 // FUNCTION: TH07 0x0044a302

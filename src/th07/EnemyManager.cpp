@@ -555,6 +555,10 @@ i32 Enemy::HandleTimerCallback()
     }
     if (this->timer >= this->timerCallbackThreshold)
     {
+        if (Stage4ChainRestartPhase(this, 1))
+        {
+            return 1;
+        }
         max = 0;
         for (i = 0; i < 4; i++)
         {
@@ -723,7 +727,7 @@ void Enemy::CheckBulletPlayerCollision(D3DXVECTOR3 *bulletCenter,
 #pragma var_order(enemyDiff, stageFactor, collisionOut, damage, i, angle,   \
                   currentHitbox, grazeDamage, j, playedDamageSound, enemy,  \
                   cherryGain, diffToPlayer, timerLimit, k, removedScore, l, \
-                  bossMarkerPos)
+                  bossMarkerPos, damageTotal, damageAttributed, contribution)
 // FUNCTION: TH07 0x00420620
 u32 EnemyManager::OnUpdate(EnemyManager *arg)
 {
@@ -746,6 +750,9 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
     i32 playerCollision[TH07_MULTI_MAX_PLAYERS];
     i32 playerId;
     i32 damageOwnerId;
+    i32 damageTotal;
+    i32 damageAttributed;
+    i32 contribution;
     i32 collisionOut;
     i32 stageFactor;
     D3DXVECTOR3 enemyDiff;
@@ -883,6 +890,10 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
         }
         collisionOut = 0;
         playedDamageSound = 0;
+        damage = 0;
+        damageOwnerId = 0;
+        damageTotal = 0;
+        damageAttributed = 0;
         if (!enemy->hasNoCollision && !enemy->invisibleOnBomb)
         {
             if (enemy->canDie && enemy->hasContactHitbox)
@@ -951,6 +962,7 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                         damageOwnerId = playerId;
                     }
                 }
+                damageTotal = damage;
                 if (damage > 0)
                 {
                     if ((enemy->isBoss ||
@@ -1058,12 +1070,46 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                                 damage = 0;
                             }
                         }
-                        // Scale final boss damage from the current active
-                        // player count: 1P=1, 2P=.75, 3P=2/3.
-                        if (enemy->isBoss)
+                        // Scale boss damage from the active player count. A
+                        // chained Stage 4 card is fought once per distinct
+                        // character, so each copy keeps single-player life.
+                        if (enemy->isBoss && !IsStage4ChainedCardActive())
                         {
                             damage = (i32)((f32)damage *
                                 GetMultiplayerBossDamageMultiplier());
+                        }
+                        if (damage > 0 && damageTotal > 0)
+                        {
+                            damageAttributed = 0;
+                            for (playerId = 0;
+                                 playerId < TH07_MULTI_MAX_PLAYERS;
+                                 playerId++)
+                            {
+                                if (!IsPlayerSlotActive((u8)playerId) ||
+                                    playerDamage[playerId] <= 0)
+                                {
+                                    continue;
+                                }
+                                contribution = (i32)((i64)damage *
+                                    (i64)playerDamage[playerId] /
+                                    (i64)damageTotal);
+                                if (contribution > 0)
+                                {
+                                    AddPlayerDamageDealt(
+                                        (u8)playerId,
+                                        (u32)contribution);
+                                    damageAttributed += contribution;
+                                }
+                            }
+                            // Integer division can leave a few points
+                            // undistributed. Give them to the same player
+                            // that receives deterministic cherry attribution.
+                            if (damageAttributed < damage)
+                            {
+                                AddPlayerDamageDealt(
+                                    (u8)damageOwnerId,
+                                    (u32)(damage - damageAttributed));
+                            }
                         }
                         enemy->life -= damage;
                         enemy->lastDamage = damage;
@@ -1148,6 +1194,11 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
         }
         if (enemy->life <= 0 && enemy->canDie)
         {
+            if (enemy->deathType != 3 && enemy->canBeDamaged &&
+                damage > 0)
+            {
+                AddPlayerEnemiesDefeated((u8)damageOwnerId, 1);
+            }
             // ZUN bloat: ?
             k = 0;
             for (k = 0; k < 4; k++)
@@ -1627,6 +1678,7 @@ ZunResult EnemyManager::AddedCallback(EnemyManager *arg)
         arg->randomItemTableIdx = (u16)((stageSeed >> 19) % 8);
     }
     arg->spellcardInfo.isActive = 0;
+    ResetStage4BossChain();
 
     D3DXVECTOR3 vec = D3DXVECTOR3(-999.0f, -999.0f, -999.0f);
     g_AsciiManager.GetBossMarker(0)->pos = vec;

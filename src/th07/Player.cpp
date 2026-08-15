@@ -987,14 +987,11 @@ static u8 GetPlayerProximityAlpha(const Player *player)
 
 u8 GetPlayerOverlapAlpha(const Player *player)
 {
-    // Secondary focus circles are part of the shared playfield presentation.
-    // Fade P2/P3 on every PC even when that slot is local; ship fading itself
-    // remains remote-only above.
-    if (GetActivePlayerCount() < 2 || !player || player->initParam == 0)
-    {
-        return 255;
-    }
-    return CalculatePlayerOverlapAlpha(player);
+    // A player's own focus circle is an input cue and must stay fully visible
+    // on that player's PC. Only remote focus circles follow the same
+    // close-player fade rule as remote ships. In local co-op P1 remains the
+    // local perspective, so P2/P3 still fade exactly as before.
+    return GetPlayerProximityAlpha(player);
 }
 
 static u32 ApplyPlayerProximityAlpha(u32 color, const Player *player)
@@ -1768,7 +1765,7 @@ void Player::StartFireBulletTimer()
     }
 }
 
-#pragma var_order(bullet, i, enemyBottomRight, bulletBottomRight, enemyTopLeft, damage, bulletTopLeft)
+#pragma var_order(bullet, i, enemyBottomRight, bulletBottomRight, enemyTopLeft, damage, bulletTopLeft, bombDamage)
 // FUNCTION: TH07 0x0043d9e0
 i32 Player::CalcDamageToEnemy(D3DXVECTOR3 *center, D3DXVECTOR3 *size,
                               i32 *param_3)
@@ -1780,8 +1777,10 @@ i32 Player::CalcDamageToEnemy(D3DXVECTOR3 *center, D3DXVECTOR3 *size,
     D3DXVECTOR3 enemyBottomRight;
     i32 i;
     PlayerBullet *bullet;
+    i32 bombDamage;
 
     damage = 0;
+    bombDamage = 0;
     if (!this->invulnerabilityTimer.HasTicked())
     {
         return 0;
@@ -1870,7 +1869,7 @@ i32 Player::CalcDamageToEnemy(D3DXVECTOR3 *center, D3DXVECTOR3 *size,
             continue;
         }
 
-        damage += this->bombDamageBoxes[i].lifetime;
+        bombDamage += this->bombDamageBoxes[i].lifetime;
         this->bombDamageBoxes[i].damage += this->bombDamageBoxes[i].lifetime;
         this->bombParticleTime++;
         if (this->bombParticleTime % 4 == 0)
@@ -1889,6 +1888,8 @@ i32 Player::CalcDamageToEnemy(D3DXVECTOR3 *center, D3DXVECTOR3 *size,
             *param_3 = 1;
         }
     }
+    damage += (i32)((f32)bombDamage *
+                    GetMultiplayerBombDamageMultiplier());
     return damage;
 }
 
@@ -3483,8 +3484,8 @@ WHY:
     // The proximity smoke test deliberately keeps the two local players
     // close enough to exercise the TH06 display rule. It is test-only and
     // never runs for network peers or normal gameplay.
-    if (Netplay::IsProximityTestEnabled() && !Netplay::IsNetworked() &&
-        arg->initParam == 0 && IsPlayerActiveForProximity(arg) &&
+    if (Netplay::IsProximityTestEnabled() && arg->initParam == 0 &&
+        IsPlayerActiveForProximity(arg) &&
         IsPlayerActiveForProximity(&g_Player2))
     {
         g_Player2.positionCenter = arg->positionCenter;
@@ -3589,7 +3590,14 @@ u32 Player::OnDrawHighPrio(Player *arg)
         proximityAlpha = GetPlayerProximityAlpha(arg);
         if (Netplay::IsProximityTestEnabled() && arg->initParam != 0)
         {
-            Netplay::ReportProximityTestResult(proximityAlpha == 55);
+            i32 localPlayerId = Netplay::IsNetworked()
+                ? Netplay::GetLocalPlayerSlot() : 0;
+            i32 remotePlayerId = localPlayerId == 0 ? 1 : 0;
+            u8 expectedShipAlpha = arg->initParam == localPlayerId ? 255 : 55;
+            Netplay::ReportProximityTestResult(
+                proximityAlpha == expectedShipAlpha &&
+                GetPlayerOverlapAlpha(&g_Players[localPlayerId]) == 255 &&
+                GetPlayerOverlapAlpha(&g_Players[remotePlayerId]) == 55);
         }
         arg->playerSprite.color.color =
             ApplyPlayerProximityAlpha(arg->playerSprite.color.color, arg);
@@ -3984,6 +3992,11 @@ ZunResult Player::RegisterChain(u32 param_1)
     bool preserveResources = g_Supervisor.curState == 3;
     int playerId;
 
+    if (!preserveResources)
+    {
+        ResetPlayerContributionStats();
+    }
+
     for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
     {
         g_PlayerActive[playerId] = playerId == 0 ||
@@ -4001,16 +4014,23 @@ ZunResult Player::RegisterChain(u32 param_1)
         {
             continue;
         }
-        if (!preserveResources)
-        {
-            ResetMultiplayerPlayerResources((u8)playerId);
-        }
         if (RegisterOnePlayer(&g_Players[playerId], (u8)playerId) !=
             ZUN_SUCCESS)
         {
             return ZUN_ERROR;
         }
         g_Players[playerId].initParam = (u8)playerId;
+        // AddedCallback has now loaded this slot's own SHT data. Resetting the
+        // sidecar before registration copied P1's starting bomb count, which
+        // made a P2/P3 Sakuya start with Reimu's or Marisa's bombs instead of
+        // four.
+        if (!preserveResources)
+        {
+            ResetMultiplayerPlayerResources((u8)playerId);
+            g_GameErrorContext.Log(
+                "info : P%d resources initialized bombs %d\r\n",
+                playerId + 1, GetPlayerBombs((u8)playerId));
+        }
         g_GameErrorContext.Log(
             "info : P%d same-character tint %s (P1 character %d, P%d character %d)\r\n",
             playerId + 1,

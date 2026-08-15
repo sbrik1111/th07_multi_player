@@ -195,6 +195,9 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case VAR_CUR_TIME:
         return enemy->timer.current;
     case VAR_LIFE:
+        // Stage 4's coordinator observes the end of its character-specific
+        // card through this script variable rather than a life callback.
+        Stage4ChainRestartPhase(enemy, enemy->life <= 0 ? 1 : 0);
         return enemy->life;
     case VAR_PLAYER_SHOTTYPE:
         TraceShotTypeRead(enemy);
@@ -407,6 +410,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case VAR_CUR_TIME:
         return (f32)enemy->timer.current;
     case VAR_LIFE:
+        Stage4ChainRestartPhase(enemy, enemy->life <= 0 ? 1 : 0);
         return (f32)enemy->life;
     case VAR_PLAYER_SHOTTYPE:
         TraceShotTypeRead(enemy);
@@ -702,6 +706,260 @@ void EclManager::MathCubicInterp(Enemy *enemy, EclInterp *interp, f32 t)
                                                      h11 * m1;
 }
 
+// The subroutine declaring Stage 4's character-specific second boss card.
+// Rows are Reimu, Marisa and Sakuya; columns are Easy through Lunatic. These
+// values were measured from th07.dat on every difficulty. Reimu changes at
+// Hard, while the other two happen to retain one subroutine number.
+const i32 STAGE4_DIFFICULTY_COUNT = 4;
+const i32 g_stage4ChainSpellSub[3][STAGE4_DIFFICULTY_COUNT] = {
+    { 127, 127, 128, 128 },
+    { 145, 145, 145, 145 },
+    { 138, 138, 138, 138 },
+};
+
+i32 Stage4ChainDifficulty()
+{
+    i32 difficulty = (i32)g_GameManager.difficulty;
+
+    return difficulty >= 0 && difficulty < STAGE4_DIFFICULTY_COUNT
+        ? difficulty : -1;
+}
+
+i32 g_stage4ChainQueue[3];
+i32 g_stage4ChainCount = 0;
+i32 g_stage4ChainPos = 0;
+i32 g_stage4ChainBossId = -1;
+i32 g_stage4ChainCardActive = 0;
+i32 g_stage4ChainPhaseLife = 0;
+// Store what the ECL actually declared. Spell indices also vary by
+// difficulty, so a Normal-only lookup is not safe here.
+i32 g_stage4ChainSpellIdx = -1;
+
+void ResetStage4BossChain()
+{
+    g_stage4ChainQueue[0] = 0;
+    g_stage4ChainQueue[1] = 0;
+    g_stage4ChainQueue[2] = 0;
+    g_stage4ChainCount = 0;
+    g_stage4ChainPos = 0;
+    g_stage4ChainBossId = -1;
+    g_stage4ChainCardActive = 0;
+    g_stage4ChainPhaseLife = 0;
+    g_stage4ChainSpellIdx = -1;
+}
+
+bool IsStage4ChainedCardActive()
+{
+    return g_stage4ChainCardActive != 0 &&
+           g_EnemyManager.spellcardInfo.isActive != 0;
+}
+
+void TraceStage4Bosses(const char *when)
+{
+    char line[256];
+    i32 i;
+    Enemy *boss;
+
+    for (i = 0; i < 8; i++)
+    {
+        boss = g_EnemyManager.bosses[i];
+        if (!boss)
+        {
+            continue;
+        }
+        sprintf(line,
+                "info : stage4 chain slot %ld %s life %ld max %ld"
+                " timer %ld/%ld sub %ld thr %ld,%ld,%ld,%ld"
+                " cb %ld,%ld,%ld,%ld frame %ld\r\n",
+                (long)i, when, (long)boss->life, (long)boss->maxLife,
+                (long)boss->timer.current,
+                (long)boss->timerCallbackThreshold,
+                (long)boss->currentContext.subId,
+                (long)boss->lifeCallbackThreshold[0],
+                (long)boss->lifeCallbackThreshold[1],
+                (long)boss->lifeCallbackThreshold[2],
+                (long)boss->lifeCallbackThreshold[3],
+                (long)boss->lifeCallbackSub[0],
+                (long)boss->lifeCallbackSub[1],
+                (long)boss->lifeCallbackSub[2],
+                (long)boss->lifeCallbackSub[3],
+                (long)g_GameManager.framesThisStage);
+        Netplay::WriteTraceLine(line);
+    }
+}
+
+i32 Stage4CharacterForSpellSub(i32 subId)
+{
+    i32 character;
+    i32 difficulty = Stage4ChainDifficulty();
+
+    if (difficulty < 0)
+    {
+        return -1;
+    }
+    for (character = 0; character < 3; character++)
+    {
+        if (g_stage4ChainSpellSub[character][difficulty] == subId)
+        {
+            return character;
+        }
+    }
+    return -1;
+}
+
+void NoteStage4ChainedSpellcard(Enemy *enemy)
+{
+    char line[160];
+    i32 character;
+    i32 playerId;
+    i32 queued;
+    i32 candidate;
+    i32 slot;
+
+    if (!Netplay::IsStage4BossChainEnabled() || !enemy->isBoss ||
+        g_GameManager.currentStage != 4)
+    {
+        return;
+    }
+    character = Stage4CharacterForSpellSub(enemy->currentContext.subId);
+    if (character < 0)
+    {
+        return;
+    }
+    if (g_stage4ChainCardActive)
+    {
+        // The chain started this declaration. Keep its queue, but record the
+        // actual difficulty-specific spell index it declared.
+        g_stage4ChainSpellIdx =
+            (i32)g_EnemyManager.spellcardInfo.spellcardIdx;
+        return;
+    }
+
+    // The card selected naturally by P1 leads. Append the other active
+    // players in slot order, fighting duplicate characters only once.
+    g_stage4ChainQueue[0] = character;
+    queued = 1;
+    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    {
+        if (!IsPlayerSlotActive((u8)playerId))
+        {
+            continue;
+        }
+        candidate = Netplay::GetPlayerCharacter((u8)playerId);
+        if (candidate < 0 || candidate > 2)
+        {
+            continue;
+        }
+        for (slot = 0; slot < queued; slot++)
+        {
+            if (g_stage4ChainQueue[slot] == candidate)
+            {
+                break;
+            }
+        }
+        if (slot == queued && queued < 3)
+        {
+            g_stage4ChainQueue[queued] = candidate;
+            queued++;
+        }
+    }
+    g_stage4ChainCount = queued;
+    g_stage4ChainPos = 0;
+    g_stage4ChainBossId = enemy->bossId;
+    // Stage 4's coordinator in boss slot zero owns the phase life and timer,
+    // even when another sister is the one declaring the card.
+    g_stage4ChainPhaseLife =
+        g_EnemyManager.bosses[0] ? g_EnemyManager.bosses[0]->life : 0;
+    g_stage4ChainSpellIdx = (i32)g_EnemyManager.spellcardInfo.spellcardIdx;
+    g_stage4ChainCardActive =
+        queued > 1 && g_stage4ChainPhaseLife > 0 ? 1 : 0;
+    if (g_stage4ChainCardActive)
+    {
+        sprintf(line,
+                "info : stage4 chain begin boss %ld count %ld life %ld"
+                " order %ld %ld %ld\r\n",
+                (long)enemy->bossId, (long)queued,
+                (long)g_stage4ChainPhaseLife,
+                (long)g_stage4ChainQueue[0],
+                queued > 1 ? (long)g_stage4ChainQueue[1] : -1L,
+                queued > 2 ? (long)g_stage4ChainQueue[2] : -1L);
+        Netplay::WriteTraceLine(line);
+        TraceStage4Bosses("first");
+    }
+}
+
+// Hold Stage 4's coordinator on the character-specific phase, end the current
+// declaration cleanly, and start the next distinct character's version. The
+// coordinator sees a broken phase only after the final queued card, leaving
+// all later shared spellcards intact.
+bool Stage4ChainRestartPhase(Enemy *enemy, i32 phaseOver)
+{
+    char line[192];
+    Enemy *sister;
+    i32 difficulty;
+    i32 next;
+
+    if (!phaseOver || !g_stage4ChainCardActive || !enemy->isBoss)
+    {
+        return false;
+    }
+    sprintf(line,
+            "info : stage4 chain over boss %ld life %ld pos %ld/%ld"
+            " spell %ld want %ld frame %ld\r\n",
+            (long)enemy->bossId, (long)enemy->life, (long)g_stage4ChainPos,
+            (long)g_stage4ChainCount,
+            g_EnemyManager.spellcardInfo.isActive
+                ? (long)g_EnemyManager.spellcardInfo.spellcardIdx : -1L,
+            (long)g_stage4ChainSpellIdx,
+            (long)g_GameManager.framesThisStage);
+    Netplay::WriteTraceLine(line);
+    if (enemy->bossId != 0)
+    {
+        return false;
+    }
+    if (!g_EnemyManager.spellcardInfo.isActive ||
+        g_stage4ChainSpellIdx < 0 ||
+        (i32)g_EnemyManager.spellcardInfo.spellcardIdx !=
+            g_stage4ChainSpellIdx)
+    {
+        // Do not leave the damage exemption armed if an unexpected script
+        // transition invalidated the chain.
+        g_stage4ChainCardActive = 0;
+        return false;
+    }
+    if (g_stage4ChainPos + 1 >= g_stage4ChainCount)
+    {
+        g_stage4ChainCardActive = 0;
+        return false;
+    }
+    sister = g_EnemyManager.bosses[g_stage4ChainBossId];
+    difficulty = Stage4ChainDifficulty();
+    if (!sister || !sister->active || difficulty < 0)
+    {
+        g_stage4ChainCardActive = 0;
+        return false;
+    }
+
+    g_stage4ChainPos++;
+    next = g_stage4ChainSpellSub[g_stage4ChainQueue[g_stage4ChainPos]]
+                               [difficulty];
+    enemy->life = g_stage4ChainPhaseLife;
+    enemy->timer = 0;
+    EclManager::EndSpellcard(sister, NULL);
+    sister->stackDepth = 0;
+    g_EclManager.CallEclSub(&sister->currentContext, (i16)next);
+    sprintf(line,
+            "info : stage4 chain advance pos %ld character %ld sub %ld"
+            " life %ld frame %ld\r\n",
+            (long)g_stage4ChainPos,
+            (long)g_stage4ChainQueue[g_stage4ChainPos], (long)next,
+            (long)g_stage4ChainPhaseLife,
+            (long)g_GameManager.framesThisStage);
+    Netplay::WriteTraceLine(line);
+    TraceStage4Bosses("advance");
+    return true;
+}
+
 #pragma var_order(i, spellcardName, catk, j, nameCsum, newCsum)
 // FUNCTION: TH07 0x0040fc90
 void EclManager::BeginSpellcard(Enemy *enemy, EclRawInstr *instr)
@@ -744,6 +1002,7 @@ void EclManager::BeginSpellcard(Enemy *enemy, EclRawInstr *instr)
                 (int)g_GameManager.shotTypeAndCharacter);
         Netplay::WriteTraceLine(line);
     }
+    NoteStage4ChainedSpellcard(enemy);
     g_EnemyManager.spellcardInfo.captureScore =
         g_SpellcardScore[g_EnemyManager.spellcardInfo.spellcardIdx];
     g_EnemyManager.spellcardInfo.grazeBonusScore = 0;
