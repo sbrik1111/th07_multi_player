@@ -141,7 +141,7 @@ def main():
 
     i18n = SRC / "i18n.hpp"
     csv = ROOT / "resources" / "csv" / "i18n.csv"
-    if not i18n.exists() or i18n.stat().st_mtime < csv.stat().st_mtime:
+    if csv.exists() and (not i18n.exists() or i18n.stat().st_mtime < csv.stat().st_mtime):
         subprocess.check_call([sys.executable, str(ROOT / "scripts" / "generate_i18n.py"), str(csv), str(i18n)])
 
     sources = sorted(p for ext in ("*.cpp", "*.c") for p in SRC.rglob(ext))
