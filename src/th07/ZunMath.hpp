@@ -53,9 +53,6 @@ struct Float3
 
     void FromAngleMagnitude(f32 angle, f32 magnitude)
     {
-        /* this->x = cosf(angle) * magnitude;
-         * this->y = sinf(angle) * magnitude;
-         */
         __asm {
             mov eax, this
             fld [angle]

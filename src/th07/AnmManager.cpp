@@ -839,22 +839,6 @@ ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
 
     if ((drawFlags & 1) != 0)
     {
-        /*g_QuadVertices[0].pos.x =
-            roundf(g_QuadVertices[0].pos.x) - 0.5f;
-        g_QuadVertices[1].pos.x =
-            roundf(g_QuadVertices[1].pos.x) - 0.5f;
-        g_QuadVertices[0].pos.y =
-            roundf(g_QuadVertices[0].pos.y) - 0.5f;
-        g_QuadVertices[2].pos.y =
-            roundf(g_QuadVertices[2].pos.y) - 0.5f;
-        g_QuadVertices[1].pos.y =
-            g_QuadVertices[0].pos.y;
-        g_QuadVertices[2].pos.x =
-            g_QuadVertices[0].pos.x;
-        g_QuadVertices[3].pos.x =
-            g_QuadVertices[1].pos.x;
-        g_QuadVertices[3].pos.y =
-        g_QuadVertices[2].pos.y;*/
         __asm {
         fld g_QuadVertices[0 * TYPE g_QuadVertices].pos.x
         frndint

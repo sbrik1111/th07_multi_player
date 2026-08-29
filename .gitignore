@@ -8,3 +8,9 @@ reccmp-user.yml
 reccmp-build.yml
 scripts/__pycache__/
 compile_commands.json
+prefix/
+run/
+wk/
+*.[mM][dD]
+!/README.md
+!/CONTRIBUTING.md

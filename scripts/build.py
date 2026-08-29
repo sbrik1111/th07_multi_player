@@ -1,3 +1,18 @@
+"""Build build/th07.exe (the multiplayer fork) with cl 19.10 (VS2017, prefix/msvc1410),
+the Windows 10 SDK and the DirectX 8 SDK (thirdparty/dx8).
+
+Usage:
+    python scripts/build.py            # incremental build
+    python scripts/build.py --clean    # rebuild everything
+
+The matching build with ZUN's compiler (VS.NET 2002, ninja) is scripts/build_vc7.py. This
+fork does not aim at matching: src/multi is C++14, which VC7 cannot compile (the same choice
+as th16_multi / th14_multi).
+
+Toolchain: prefix/msvc1410 (cl 19.10.25017, copied from th16_multi's prefix, or
+TH07_PREFIX=<another checkout's prefix>), the DirectX 8 SDK from scripts/download_deps.py.
+"""
+
 import argparse
 import os
 import shutil
@@ -5,390 +20,179 @@ import subprocess
 import sys
 from pathlib import Path
 
-from download_deps import conv_path, download_dx8, download_msvc, install_hackery
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
 
-SCRIPT_PATH = Path(os.path.abspath(__file__))
-PROJ_DIR = Path(os.path.dirname(SCRIPT_PATH)).parent
+SRC = ROOT / "src" / "th07"
+BUILD = ROOT / "build"
+OBJ = BUILD / "obj"
+MSVC = Path(os.environ.get("TH07_PREFIX", str(ROOT / "prefix"))) / "msvc1410"
+DX8 = ROOT / "thirdparty" / "dx8"
+KITS = Path(r"C:\Program Files (x86)\Windows Kits\10")
+KITS_VER = "10.0.19041.0"
 
-os.chdir(PROJ_DIR)
+EXE = BUILD / "th07.exe"
+PDB = BUILD / "th07.pdb"
 
-SRC_DIR = PROJ_DIR / "src"
-BUILD_DIR = PROJ_DIR / "build"
-RESOURCE_DIR = PROJ_DIR / "resources"
-CUSTOM_RESOURCE_DIR = PROJ_DIR / "resources" / "custom"
-MSVC_PATH = PROJ_DIR / "thirdparty" / "msvc"
-DX8_PATH = PROJ_DIR / "thirdparty" / "dx8"
-EXE_PATH = RESOURCE_DIR / "th07.exe"
-CUSTOM_EXE_PATH = RESOURCE_DIR / "custom.exe"
-
-VS_PATH = MSVC_PATH / "Program Files" / "Microsoft Visual Studio .NET"
-VC_PATH = VS_PATH / "Vc7"
-CL_PATH = VC_PATH / "bin" / "cl.exe"
-LINK_PATH = VC_PATH / "bin" / "link.exe"
-RC_PATH = VC_PATH / "bin" / "rc.exe"
-
-TH07_SOURCES = [
-    "AsciiManager.cpp",
-    "Stage.cpp",
-    "BombData.cpp",
-    "EclManager.cpp",
-    "EnemyEclInstr.cpp",
-    "EffectManager.cpp",
-    "Ending.cpp",
-    "EnemyManager.cpp",
-    "BulletManager.cpp",
-    "Gui.cpp",
-    "GameManager.cpp",
-    "Chain.cpp",
-    "Controller.cpp",
-    "FileSystem.cpp",
-    "GameErrorContext.cpp",
-    "Rng.cpp",
-    "utils.cpp",
-    "TextHelper.cpp",
-    "ItemManager.cpp",
-    "main.cpp",
-    "GameWindow.cpp",
-    "MidiOutput.cpp",
-    "Supervisor.cpp",
-    "MusicRoom.cpp",
-    "Player.cpp",
-    "ReplayManager.cpp",
-    "ResultScreen.cpp",
-    "ScreenEffect.cpp",
-    "SoundPlayer.cpp",
-    "AnmManager.cpp",
-    "MainMenu.cpp",
-    "dsutil.cpp",
-    "pbg4/Pbg4File.cpp",
-    "pbg4/Lzss.cpp",
-    "pbg4/Pbg4Archive.cpp",
-]
-
-TH07_SMALL = [
-    "GameManager.cpp",
-    "Gui.cpp",
-    "MainMenu.cpp",
-    "MusicRoom.cpp",
-    "ResultScreen.cpp",
-    "Supervisor.cpp",
-    "TextHelper.cpp",
-]
-
-TH07_SMALL_NON_INTRINSIC = [
-    "MainMenu.cpp",
-    "ResultScreen.cpp",
-    "TextHelper.cpp",
-]
-
-CUSTOM_SOURCES = [
-    "init.cpp",
-    "main.cpp",
-]
-
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--no-icon",
-    action="store_true",
-    help="build without requiring an icon from the original executable",
-)
-parser.add_argument(
-    "--no-matching", action="store_true", help="build without attempting matching"
-)
-parser.add_argument(
-    "--with-custom",
-    action="store_true",
-    help="use reccmp on custom (configuration tool) as well",
-)
-subparsers = parser.add_subparsers(dest="command")
-
-parser_reccmp = subparsers.add_parser("reccmp", help="output reccmp output")
-parser_stackcmp = subparsers.add_parser(
-    "stackcmp", help="compare stack layout with stackcmp"
-)
-parser_datacmp = subparsers.add_parser("datacmp", help="compare globals with datacmp")
-parser_roadmap = subparsers.add_parser(
-    "roadmap", help="compare symbol locations with roadmap"
-)
-
-parser_reccmp.add_argument(
-    "address",
-    nargs="?",
-    default=None,
-    help="optional function address for displaying diff",
-)
-parser_reccmp.add_argument(
-    "--init", action="store_true", help="initialize reccmp project"
-)
-parser_reccmp.add_argument("--svg", action="store_true", help="generate progress svg")
-parser_stackcmp.add_argument(
-    "address", help="function address for displaying stack layout"
-)
-args = parser.parse_args()
-
-
-def extract_icon(path: Path, id: int, output: Path):
-    cmd = ["icoextract", "-i", str(id), str(path), output]
-    subprocess.check_call(cmd)
-
-
-if not CUSTOM_EXE_PATH.exists():
-    if args.with_custom:
-        sys.exit("custom.exe should exist when building custom.exe")
-
-if not EXE_PATH.exists():
-    if args.command:
-        sys.exit("th07.exe should exist when using any reccmp tools")
-    elif not args.no_icon:
-        sys.exit("th07.exe should exist when building with icon")
-
-if not shutil.which("ninja"):
-    sys.exit("ninja must be installed when building")
-
-download_dx8(DX8_PATH)
-download_msvc(MSVC_PATH, VS_PATH, VC_PATH)
-install_hackery(CL_PATH, MSVC_PATH, VC_PATH)
-
-INCLUDES = [
-    VC_PATH / "include",
-    VC_PATH / "PlatformSDK" / "include",
-    DX8_PATH / "include",
-    SRC_DIR / "th07",
-    SRC_DIR / "custom",
-    BUILD_DIR / "obj" / "custom",
-]
-
-LIB_PATHS = [
-    VC_PATH / "lib",
-    VC_PATH / "PlatformSDK" / "lib",
-    DX8_PATH / "lib",
-]
-
-cflags_base = ["/nologo", "/W3", "/GF", "/Zi"] + [
-    f'/I"{conv_path(p)}"' for p in INCLUDES
-]
-
-lflags_base = [f'/LIBPATH:"{conv_path(p)}"' for p in LIB_PATHS] + [
-    "/INCREMENTAL:NO",
-    "/MAP",
-    "/DEBUG",
-    "/OPT:REF",
-    "/OPT:ICF",
-]
-
-libs_base = ["dinput8.lib", "user32.lib"]
-
-cflags_th07 = cflags_base + [
-    "/Ob1",
+CFLAGS = [
+    "/nologo",
+    "/c",
+    "/O2",
+    "/Oy-",
+    "/GL",
     "/MT",
     "/EHsc",
-    "/Gr",
-    "/GL",
-    "/Gy",
-    "/DNDEBUG",
+    "/Zi",
+    "/W3",
+    "/wd4996",
     "/wd4060",
     "/wd4101",
     "/wd4244",
+    "/wd4838",
+    "/wd4068",  # #pragma var_order (the matching build's patched VC7)
+    "/DDIRECTINPUT_VERSION=0x0800",
+    "/DWIN32",
+    "/D_WINDOWS",
+    "/DNDEBUG",
+    "/DNON_MATCHING",
+    # Narrow string literals in Shift-JIS as the original's (the game's are escaped bytes;
+    # src/multi's new sources are UTF-8 with a BOM).
+    "/execution-charset:.932",
+    f"/Fd{BUILD / 'th07_cl.pdb'}",
+    f"/I{SRC}",
 ]
 
-if args.no_matching:
-    cflags_th07.append("/DNON_MATCHING")
+LDFLAGS = [
+    "/nologo",
+    "/LTCG",
+    "/DEBUG",
+    f"/PDB:{PDB}",
+    f"/OUT:{EXE}",
+    "/SUBSYSTEM:WINDOWS",
+    "/MACHINE:X86",
+    "/INCREMENTAL:NO",
+    "/OPT:REF",
+    "/DYNAMICBASE:NO",
+    "/LARGEADDRESSAWARE",
+    f"/MAP:{BUILD / 'th07.map'}",
+]
 
-lflags_th07 = lflags_base + ["/LTCG"]
-
-libs_th07 = libs_base + [
-    "dsound.lib",
+LIBS = [
     "d3d8.lib",
     "d3dx8.lib",
+    "dinput8.lib",
+    "dsound.lib",
     "dxguid.lib",
-    "gdi32.lib",
     "winmm.lib",
+    "kernel32.lib",
+    "user32.lib",
+    "gdi32.lib",
     "ole32.lib",
+    "shell32.lib",
+    "advapi32.lib",
+    "ws2_32.lib",  # the launcher's lobby socket and the session (src/th07/multi)
+    "legacy_stdio_definitions.lib",  # d3dx8.lib was built with an older CRT
 ]
 
-cflags_custom = cflags_base + ["/ML", "/O1", "/Ob0", "/GS"]
-lflags_custom = lflags_base
-libs_custom = libs_base
 
-rcflags = [f'/i "{conv_path(p)}"' for p in INCLUDES]
+def toolchain_env():
+    if not (MSVC / "bin" / "cl.exe").is_file():
+        sys.exit(f"cl 19.10.25017 not found in {MSVC} (copy th16_multi's prefix/msvc1410 or set TH07_PREFIX)")
+    if not (DX8 / "include" / "d3d8.h").is_file():
+        from download_deps import download_dx8
 
-os.makedirs(BUILD_DIR, exist_ok=True)
-os.chdir(BUILD_DIR)
+        download_dx8(DX8)
+    env = os.environ.copy()
+    env["PATH"] = f"{MSVC / 'bin'};{env['PATH']}"
+    inc = KITS / "Include" / KITS_VER
+    lib = KITS / "Lib" / KITS_VER
+    # The DirectX 8 SDK last: its old copies of the SDK's headers (basetsd.h, dinput.h, ...)
+    # lose to the Windows 10 SDK's; d3d8.h and d3dx8.h are only there.
+    env["INCLUDE"] = ";".join(map(str, [MSVC / "include", inc / "ucrt", inc / "um", inc / "shared", DX8 / "include"]))
+    env["LIB"] = ";".join(map(str, [MSVC / "lib", lib / "ucrt" / "x86", lib / "um" / "x86", DX8 / "lib"]))
+    env.pop("LIBPATH", None)
+    return env
 
-with open("build.ninja", "w") as f:
-    f.write("ninja_required_version = 1.3\n\n")
 
-    if sys.platform != "win32":
-        wine_cmd = "env LANG=ja_JP.UTF-8 WINEDEBUG=fixme-all wine "
-        f.write(
-            f'cl = "{sys.executable}" ../scripts/cl_wrapper.py "{conv_path(CL_PATH)}"\n'
-        )
-    else:
-        wine_cmd = ""
-        f.write(f'cl = "{conv_path(CL_PATH)}"\n')
+def run(cmd, env, show=True):
+    proc = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="mbcs", errors="replace")
+    out = (proc.stdout + proc.stderr).strip()
+    if out and show:
+        print(out)
+    return proc.returncode, out
 
-    f.write(f'link = {wine_cmd}"{conv_path(LINK_PATH)}"\n')
-    f.write(f'rc = {wine_cmd}"{conv_path(RC_PATH)}"\n\n')
 
-    f.write(f"cflags_th07 = {' '.join(cflags_th07)}\n")
-    f.write(f"cflags_th07_normal = /Od /Oi $cflags_th07\n")
-    f.write(f"cflags_th07_small = /Os /Oi $cflags_th07\n")
-    f.write(f"cflags_th07_small_nonintrinsic = /Os $cflags_th07\n")
-    f.write(f"cflags_custom = {' '.join(cflags_custom)}\n\n")
+def must(cmd, env):
+    code, _ = run(cmd, env)
+    if code:
+        sys.exit(code)
 
-    f.write(f"lflags_th07 = {' '.join(lflags_th07)}\n")
-    f.write(f"lflags_custom = {' '.join(lflags_custom)}\n\n")
 
-    f.write(f"libs_th07 = {' '.join(libs_th07)}\n")
-    f.write(f"libs_custom = {' '.join(libs_custom)}\n\n")
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--clean", action="store_true")
+    ap.add_argument("--keep-going", action="store_true", help="compile every file even after errors")
+    args = ap.parse_args()
 
-    f.write(f"rcflags = {' '.join(rcflags)}\n\n")
+    if args.clean and BUILD.exists():
+        shutil.rmtree(BUILD)
+    OBJ.mkdir(parents=True, exist_ok=True)
+    env = toolchain_env()
 
-    f.write("rule cxx\n")
-    f.write("  command = $cl /showIncludes $in_cflags /c $in /Fo$out /Fd$pdb\n")
-    f.write("  description = cxx $out\n")
-    f.write("  deps = msvc\n\n")
+    i18n = SRC / "i18n.hpp"
+    csv = ROOT / "resources" / "csv" / "i18n.csv"
+    if not i18n.exists() or i18n.stat().st_mtime < csv.stat().st_mtime:
+        subprocess.check_call([sys.executable, str(ROOT / "scripts" / "generate_i18n.py"), str(csv), str(i18n)])
 
-    f.write("rule rc\n")
-    f.write("  command = $rc $rcflags /fo$out $in\n")
-    f.write("  description = rc $out\n\n")
+    sources = sorted(p for ext in ("*.cpp", "*.c") for p in SRC.rglob(ext))
+    headers = sorted(p for ext in ("*.h", "*.hpp", "*.inl", "*.inc") for p in SRC.rglob(ext))
+    headers_mtime = max((p.stat().st_mtime for p in headers), default=0)
 
-    f.write("rule link\n")
-    f.write("  command = $link $in $in_lflags $in_libs /OUT:$out\n")
-    f.write("  description = link $out\n\n")
+    objs = []
+    failed = []
+    for src in sources:
+        obj = OBJ / src.relative_to(SRC).with_suffix(".obj")
+        obj.parent.mkdir(parents=True, exist_ok=True)
+        objs.append(obj)
+        flags = list(CFLAGS)
+        stamp = obj.with_suffix(".flags")
+        if (
+            obj.exists()
+            and obj.stat().st_mtime >= max(src.stat().st_mtime, headers_mtime)
+            and stamp.exists()
+            and stamp.read_text() == " ".join(flags)
+        ):
+            continue
+        code, _ = run([str(MSVC / "bin" / "cl.exe"), *flags, f"/Fo{obj}", str(src)], env)
+        if code:
+            failed.append(src.name)
+            if not args.keep_going:
+                sys.exit(code)
+            continue
+        stamp.write_text(" ".join(flags))
+    if failed:
+        sys.exit(f"build: {len(failed)} file(s) failed: {' '.join(failed)}")
 
-    th07_objects = []
-    for src in TH07_SOURCES:
-        src_path = f"../src/th07/{src}"
-        obj_path = f"obj/th07/{Path(src).with_suffix('.obj').as_posix()}"
-        pdb_path = f"obj/th07/{Path(src).with_suffix('.pdb').as_posix()}"
+    rc_src = SRC / "th07.rc"
+    if rc_src.exists():
+        res = BUILD / "th07.res"
+        rc_inputs = [rc_src, *SRC.glob("*.manifest")]
+        if not res.exists() or res.stat().st_mtime < max(p.stat().st_mtime for p in rc_inputs):
+            must([str(KITS / "bin" / KITS_VER / "x86" / "rc.exe"), "/nologo", f"/fo{res}", str(rc_src)], env)
+        objs.append(res)
 
-        cflags_to_use = "$cflags_th07_normal"
-        if src in TH07_SMALL_NON_INTRINSIC:
-            cflags_to_use = "$cflags_th07_small_nonintrinsic"
-        elif src in TH07_SMALL:
-            cflags_to_use = "$cflags_th07_small"
+    if EXE.exists():
+        EXE.unlink()
+    code, out = run([str(MSVC / "bin" / "link.exe"), *LDFLAGS, *map(str, objs), *LIBS], env, show=False)
+    shown = [l for l in out.splitlines() if l.strip() and "Generating code" not in l and "Finished generating code" not in l]
+    if code or not EXE.exists():
+        print("\n".join(shown))
+        sys.exit("build: link failed")
+    for l in shown:
+        if "warning" in l:
+            print(l)
+    print(f"built {EXE.relative_to(ROOT).as_posix()} ({len(sources)} source files)")
 
-        f.write(f"build {obj_path}: cxx {src_path}\n")
-        f.write(f"  in_cflags = {cflags_to_use}\n")
-        f.write(f"  pdb = {pdb_path}\n")
-        th07_objects.append(obj_path)
-    f.write("\n")
 
-    if not args.no_icon:
-        icon_path = BUILD_DIR / EXE_PATH.with_suffix(".ico").name
-        extract_icon(EXE_PATH, 105, icon_path)
-        try:
-            with open("resources.rc", "x") as g:
-                g.write(f'105 ICON "{icon_path.name}"\n')
-        except FileExistsError:
-            pass
-
-        f.write("build resources.res: rc resources.rc\n\n")
-        th07_objects.append("resources.res")
-
-    f.write(f"build th07.exe: link {' '.join(th07_objects)}\n")
-    f.write(f"  in_lflags = $lflags_th07\n")
-    f.write(f"  in_libs = $libs_th07\n")
-
-    if args.with_custom:
-        custom_objects = []
-        for src in CUSTOM_SOURCES:
-            src_path = f"../src/custom/{src}"
-            obj_path = f"obj/custom/{Path(src).with_suffix('.obj').as_posix()}"
-            pdb_path = f"obj/custom/{Path(src).with_suffix('.pdb').as_posix()}"
-
-            f.write(f"build {obj_path}: cxx {src_path}\n")
-            f.write("  in_cflags = $cflags_custom\n")
-            f.write(f"  pdb = {pdb_path}\n")
-            custom_objects.append(obj_path)
-        f.write("\n")
-
-        os.makedirs(BUILD_DIR / "obj" / "custom", exist_ok=True)
-
-        icon107_path = BUILD_DIR / "obj" / "custom" / "ICON107_1.ico"
-        icon108_path = BUILD_DIR / "obj" / "custom" / "ICON108_1.ico"
-        extract_icon(CUSTOM_EXE_PATH, 107, icon107_path)
-        extract_icon(CUSTOM_EXE_PATH, 108, icon108_path)
-
-        f.write("build obj/custom/resource.res: rc ../src/custom/resource.rc\n")
-        custom_objects.append("obj/custom/resource.res")
-
-        f.write(f"build custom.exe: link {' '.join(custom_objects)}\n")
-        f.write(f"  in_lflags = $lflags_custom\n")
-        f.write(f"  in_libs = $libs_custom\n")
-
-subprocess.check_call(["ninja"])
-
-match args.command:
-    case "reccmp":
-        if args.init:
-            os.chdir(PROJ_DIR)
-            subprocess.check_call(
-                ["reccmp-project", "detect", "--search-path", RESOURCE_DIR]
-            )
-            os.chdir(BUILD_DIR)
-            subprocess.check_call(["reccmp-project", "detect", "--what", "recompiled"])
-        elif args.svg:
-            subprocess.check_call(
-                [
-                    "reccmp-reccmp",
-                    "--target",
-                    "TH07",
-                    "--svg",
-                    RESOURCE_DIR / "progress.svg",
-                    "--svg-icon",
-                    RESOURCE_DIR / "svgicon.png",
-                    "--nolib",
-                ]
-            )
-            if args.with_custom:
-                subprocess.check_call(
-                    [
-                        "reccmp-reccmp",
-                        "--target",
-                        "CUSTOM",
-                        "--svg",
-                        CUSTOM_RESOURCE_DIR / "progress.svg",
-                        "--svg-icon",
-                        CUSTOM_RESOURCE_DIR / "svgicon.png",
-                        "--nolib",
-                    ]
-                )
-        elif args.address:
-            target = "CUSTOM" if args.with_custom else "TH07"
-            subprocess.check_call(
-                [
-                    "reccmp-reccmp",
-                    "--target",
-                    target,
-                    "--html",
-                    "index.html",
-                    "--nolib",
-                    "--verbose",
-                    args.address,
-                ]
-            )
-        else:
-            subprocess.check_call(
-                ["reccmp-reccmp", "--target", "TH07", "--html", "index.html", "--nolib"]
-            )
-            if args.with_custom:
-                subprocess.check_call(
-                    [
-                        "reccmp-reccmp",
-                        "--target",
-                        "CUSTOM",
-                        "--html",
-                        "custom.html",
-                        "--nolib",
-                    ]
-                )
-    case "stackcmp":
-        subprocess.call(["reccmp-stackcmp", "--target", "TH07", args.address])
-    case "datacmp":
-        subprocess.call(["reccmp-datacmp", "--target", "TH07"])
-    case "roadmap":
-        subprocess.call(["reccmp-roadmap", "--target", "TH07"])
-    case _:
-        pass
+if __name__ == "__main__":
+    main()
