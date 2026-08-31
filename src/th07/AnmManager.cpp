@@ -186,7 +186,7 @@ ZunResult AnmManager::LoadTexture(i32 textureIdx, const char *texturePath,
             g_TextureFormatD3D8Mapping[formatIdx], D3DPOOL_MANAGED, 3, 0xffffffff,
             colorKey, NULL, NULL, this->textures + textureIdx))
     {
-        free(srcData);
+        GameFree(srcData);
         return ZUN_ERROR;
     }
     this->imageDataArray[textureIdx] = srcData;
@@ -376,11 +376,11 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx,
     textureSrc->UnlockRect(0);
     this->textures[textureIdx]->UnlockRect(0);
     SAFE_RELEASE(textureSrc);
-    free(data);
+    GameFree(data);
     return ZUN_SUCCESS;
 err:
     SAFE_RELEASE(textureSrc);
-    free(data);
+    GameFree(data);
     return ZUN_ERROR;
 }
 
@@ -606,7 +606,7 @@ void AnmManager::ReleaseAnm(i32 anmIdx)
         ReleaseTexture(rawEntry->textureIdx);
         if (rawEntry->ownsMemory)
         {
-            free(rawEntry);
+            GameFree(rawEntry);
         }
         this->anmFiles[anmIdx].raw = NULL;
         this->currentBlendMode = 255;
@@ -2452,12 +2452,12 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
     }
 
     SAFE_RELEASE(surface);
-    free(data);
+    GameFree(data);
     return ZUN_SUCCESS;
 
 err:
     SAFE_RELEASE(surface);
-    free(data);
+    GameFree(data);
     return ZUN_ERROR;
 }
 

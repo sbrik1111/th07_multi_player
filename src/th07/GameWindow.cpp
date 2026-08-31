@@ -925,7 +925,7 @@ i32 GameWindow::ChecksumExecutable()
         }
         // STRING: TH07 0x004972fc
         DebugPrint("main sum %d\r\n", checksum);
-        free(dataBase);
+        GameFree(dataBase);
         g_Supervisor.exeChecksum = checksum;
         g_Supervisor.exeSize = g_LastFileSize;
         return checksum;

@@ -60,6 +60,7 @@ CFLAGS = [
     "/execution-charset:.932",
     f"/Fd{BUILD / 'th07_cl.pdb'}",
     f"/I{SRC}",
+    f"/I{SRC / 'multi'}",
 ]
 
 LDFLAGS = [
@@ -155,6 +156,9 @@ def main():
         obj.parent.mkdir(parents=True, exist_ok=True)
         objs.append(obj)
         flags = list(CFLAGS)
+        if src.relative_to(SRC).parts[0] != "multi":
+            # the game's sources: their globals in .gdata / .gbss, GameAlloc declared
+            flags.append(f"/FI{SRC / 'MpCommon.hpp'}")
         stamp = obj.with_suffix(".flags")
         if (
             obj.exists()

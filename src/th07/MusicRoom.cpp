@@ -378,7 +378,7 @@ LAB_0043b195:
             arg->descriptionSprites[offset].active = 0;
         }
     }
-    free(firstChar);
+    GameFree(firstChar);
     return ZUN_SUCCESS;
 }
 

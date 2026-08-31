@@ -2017,7 +2017,7 @@ u32 MainMenu::OnUpdateSelectReplay()
                     // STRING: TH07 0x00496460
                     sprintf(this->replayLabels[local_10], "No.%.2d", i + 1);
                     local_10++;
-                    free(file);
+                    GameFree(file);
                 }
             }
             // STRING: TH07 0x00495674
@@ -2047,7 +2047,7 @@ u32 MainMenu::OnUpdateSelectReplay()
                                     local_194.cFileName);
                             // STRING: TH07 0x00495650
                             sprintf(this->replayLabels[local_10], "User ");
-                            free(file);
+                            GameFree(file);
                             local_10++;
                         }
                         if (FindNextFileA(local_c, &local_194) == 0)

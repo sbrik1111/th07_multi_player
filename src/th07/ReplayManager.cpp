@@ -662,7 +662,7 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                 replayCopy.head.sizeWithoutHeader = replaySize - sizeof(ReplayHeader);
                 lpBuffer = Lzss::Compress(replayData, replayCopy.head.sizeWithoutHeader,
                                           &replayCopy.head.compressedSize);
-                free(replayData);
+                GameFree(replayData);
                 compressedSize = replayCopy.head.compressedSize;
                 csumPtr = &replayCopy.head.key;
                 csum = 0x3f000318;
@@ -812,7 +812,7 @@ void ReplayManager::SaveReplay2(const char *filename)
             replayCopy.head.sizeWithoutHeader = replaySize - sizeof(ReplayHeader);
             lpBuffer = Lzss::Compress(replayData, replayCopy.head.sizeWithoutHeader,
                                       &replayCopy.head.compressedSize);
-            free(replayData);
+            GameFree(replayData);
             compressedSize = replayCopy.head.compressedSize;
             csumPtr = &replayCopy.head.key;
             csum = 0x3f000318;

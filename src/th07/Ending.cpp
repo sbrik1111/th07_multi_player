@@ -448,7 +448,7 @@ ZunResult Ending::LoadEnding(const char *endFilePath)
     this->timer1 = 0;
     if (endFileDat)
     {
-        free(endFileDat);
+        GameFree(endFileDat);
     }
     return ZUN_SUCCESS;
 }

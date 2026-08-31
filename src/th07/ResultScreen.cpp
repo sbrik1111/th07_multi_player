@@ -107,7 +107,7 @@ void ResultScreen::FreeAllScores(ScoreListNode *scores)
     while (scores)
     {
         next = scores->next;
-        free(scores);
+        GameFree(scores);
         scores = next;
     }
 }
@@ -139,7 +139,7 @@ ScoreDat *ResultScreen::OpenScore(const char *path)
         Supervisor::DebugPrint2("info : score recreate\r\n");
         if (scoreData)
         {
-            free(scoreData);
+            GameFree(scoreData);
         }
         scoreData = (ScoreDat *)ZunMemory::Alloc2(sizeof(ScoreDat));
         scoreData->dataOffset = sizeof(ScoreDat);
@@ -150,7 +150,7 @@ ScoreDat *ResultScreen::OpenScore(const char *path)
     if (g_LastFileSize < sizeof(ScoreDat))
     {
         Supervisor::DebugPrint2("warning : score.dat size is short\r\n");
-        free(scoreData);
+        GameFree(scoreData);
         goto RECREATE_SCORE;
     }
 
@@ -196,7 +196,7 @@ ScoreDat *ResultScreen::OpenScore(const char *path)
     Lzss::Decompress(
         (u8 *)scoreData + sizeof(ScoreDat), scoreData->srcLen,
         (u8 *)uncompressedData + sizeof(ScoreDat), scoreData->dstLen);
-    free(scoreData);
+    GameFree(scoreData);
     scoreData = uncompressedData;
 
     cursor = scoreData->fileLength;
@@ -483,7 +483,7 @@ void ResultScreen::ReleaseScoreDat(ScoreDat *scoreDat)
 {
     FreeAllScores(scoreDat->scores);
     ZunMemory::Free(scoreDat->scores);
-    free(scoreDat);
+    GameFree(scoreDat);
 }
 
 #pragma var_order(difficulty, characterSlot, fileBuffer, sizeOfFile,         \
@@ -671,7 +671,7 @@ void ResultScreen::WriteScore()
         remainingSize--;
     }
     FileSystem::WriteDataToFile("score.dat", fileBuffer, sizeOfFile);
-    free(fileBuffer);
+    GameFree(fileBuffer);
 }
 
 // FUNCTION: TH07 0x00445a57
@@ -1473,7 +1473,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
                 if (replayFile)
                 {
                     this->replays[vmIdx] = *replayFile;
-                    free(replayFile);
+                    GameFree(replayFile);
                 }
             }
         }

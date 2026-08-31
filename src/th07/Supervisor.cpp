@@ -1100,7 +1100,7 @@ i32 Supervisor::SnapshotScreen(const char *filename)
 
         memset(bitmapInfo, 0, sizeof(BITMAPINFO));
         stride = 1920;
-        bitmapData = malloc(stride * 480);
+        bitmapData = GameAlloc(stride * 480);
         if (!bitmapData)
         {
             g_GameErrorContext.Log("snapShotScreen : Šm•Û‚µ‚­‚è\r\n");
@@ -1151,8 +1151,8 @@ i32 Supervisor::SnapshotScreen(const char *filename)
         return 1;
     }
     SAFE_RELEASE(backBuffer);
-    free(bitmapInfo);
-    free(bitmapData);
+    GameFree(bitmapInfo);
+    GameFree(bitmapData);
     return 0;
 }
 
@@ -1213,7 +1213,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
     else
     {
         g_Supervisor.cfg = *(GameConfiguration *)configFile;
-        free(configFile);
+        GameFree(configFile);
 
         bgm = CreateFileA("./thbgm.dat", GENERIC_READ, 1, NULL, 3, FILE_FLAG_SEQUENTIAL_SCAN | FILE_ATTRIBUTE_NORMAL, NULL);
         if (bgm != INVALID_HANDLE_VALUE)

@@ -504,7 +504,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         SAFE_DELETE(arg->globals);
 
         size = g_Rng.GetRandomU32InRange(65535) + 16;
-        arg->tmpBuffer = malloc(size);
+        arg->tmpBuffer = GameAlloc(size);
         arg->defaultCfg = new GameConfiguration;
         arg->globals = new ZunGlobals;
         InitializeRngAndCsum();
