@@ -462,7 +462,7 @@ ZunResult Ending::AddedCallback(Ending *arg)
     u32 unusedShotType;
     const char *endingPath;
 
-    unusedShotType = g_GameManager.shotTypeAndCharacter;
+    unusedShotType = g_GameManager.ShotTypeAndCharacter(0);
     g_GameManager.finished = 1;
     g_Supervisor.isInEnding = 1;
     g_AnmManager->LoadAnms(ANM_FILE_STAFF, "data/staff01.anm", ANM_OFFSET_STAFF);
@@ -470,7 +470,7 @@ ZunResult Ending::AddedCallback(Ending *arg)
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetBlendMode(255);
     g_AnmManager->SetVertexShader(255);
-    shotType = g_GameManager.shotTypeAndCharacter;
+    shotType = g_GameManager.ShotTypeAndCharacter(0);
     arg->hasSeenEnding = 0;
     if (g_GameManager.globals->numRetries == 0)
     {
@@ -498,11 +498,11 @@ ZunResult Ending::AddedCallback(Ending *arg)
     }
     if (g_GameManager.globals->numRetries != 0)
     {
-        endingPath = g_BadEndingPaths[g_GameManager.character];
+        endingPath = g_BadEndingPaths[g_GameManager.Character(0)];
     }
     else
     {
-        endingPath = g_NormalEndingPaths[g_GameManager.shotTypeAndCharacter];
+        endingPath = g_NormalEndingPaths[g_GameManager.ShotTypeAndCharacter(0)];
     }
 
     if (arg->LoadEnding(endingPath))

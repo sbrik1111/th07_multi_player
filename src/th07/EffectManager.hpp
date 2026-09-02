@@ -26,7 +26,8 @@ struct Effect
     u8 isFadingOut;
     i8 fadeOutTime;
     i8 is2D;
-    // pad 3
+    i8 ownerSeat;
+    // pad 2
     Effect *next;
 };
 C_ASSERT(sizeof(Effect) == 0x2d8);

@@ -1,4 +1,5 @@
 #include "EffectManager.hpp"
+#include "Coop.hpp"
 
 #include "AnmManager.hpp"
 #include "GameManager.hpp"
@@ -216,7 +217,7 @@ i32 EffectManager::UpdateAttachToPlayer(Effect *effect)
         return false;
     }
 
-    effect->pos1 = g_Player.positionCenter;
+    effect->pos1 = g_Players[effect->ownerSeat].positionCenter;
     return true;
 }
 
@@ -531,6 +532,7 @@ Effect *EffectManager::SpawnEffect(i32 effectId, Float3 *pos,
         }
 
         effect->is2D = 0;
+        effect->ownerSeat = (i8)g_CoopActiveSeat;
         effect->inUseFlag = 1;
         effect->effectId = (u8)effectId;
         effect->pos1 = *pos;
@@ -597,6 +599,7 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, Float3 *pos,
         }
 
         effect->is2D = 0;
+        effect->ownerSeat = (i8)g_CoopActiveSeat;
         effect->inUseFlag = 1;
         effect->effectId = effectId;
         effect->pos1 = *pos;
@@ -638,6 +641,7 @@ Effect *EffectManager::SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectI
 
     effect = &this->effects[effectIdx + MAX_NORMAL_EFFECTS];
     effect->is2D = 0;
+    effect->ownerSeat = (i8)g_CoopActiveSeat;
     effect->inUseFlag = 1;
     effect->effectId = effectId;
     effect->pos1 = *pos;

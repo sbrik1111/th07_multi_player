@@ -23,17 +23,17 @@ struct Item
 {
     i32 IsBelowPoc()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY;
+        return this->currentPosition.y < g_Players[this->collector].shooterData->pocY;
     }
 
     i32 OffsetFromPoc()
     {
-        return this->currentPosition.y - g_Player.shooterData->pocY;
+        return this->currentPosition.y - g_Players[this->collector].shooterData->pocY;
     }
 
     i32 ShouldAwardMaxScore()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY ||
+        return this->currentPosition.y < g_Players[this->collector].shooterData->pocY ||
                this->autoCollect;
     }
 
@@ -47,7 +47,8 @@ struct Item
     i8 isOnscreen;
     i8 state;
     i8 autoCollect;
-    // pad 3
+    i8 collector;
+    // pad 2
     struct Item *next;
 };
 C_ASSERT(sizeof(Item) == 0x288);

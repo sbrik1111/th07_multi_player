@@ -616,15 +616,16 @@ struct AnmManager
     u32 flushesThisFrame;
     Float2 offset;
     D3DXMATRIX matrix;
-    AnmLoadedSprite sprites[2560];
+    // Seats 1-3: player sprites/scripts at 0xa00.
+    AnmLoadedSprite sprites[0xd00];
     AnmVm vm;
     IDirect3DTexture8 *textures[264];
     void *imageDataArray[256];
     char *textureNames[264];
     i32 loadedSpriteCount;
-    AnmRawInstr *scripts[2560];
-    i32 spriteIndices[2560];
-    AnmEntry anmFiles[50];
+    AnmRawInstr *scripts[0xd00];
+    i32 spriteIndices[0xd00];
+    AnmEntry anmFiles[53]; // 50-52: players
     IDirect3DSurface8 *surfaces[32];
     IDirect3DSurface8 *surfacesBis[32];
     ZunImageInfo surfaceSourceInfo[32];
@@ -653,5 +654,4 @@ struct AnmManager
     i32 screenshotDstWidth;
     i32 screenshotDstHeight;
 };
-C_ASSERT(sizeof(AnmManager) == 0x17e560);
 extern AnmManager *g_AnmManager;

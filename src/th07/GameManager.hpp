@@ -26,14 +26,15 @@ struct ZunGlobals
     i32 extendsFromPointItems;
     i32 nextNeededPointItemsForExtend;
     i32 rng1[7];
-    f32 deaths; // ZUN quirk: Why the fuck are these stored as floats
+    // Per seat in GameManager::seats.
+    f32 unusedDeaths;
     f32 rngFloat1[2];
-    f32 livesRemaining;
+    f32 unusedLivesRemaining;
     f32 rngFloat2[2];
-    f32 bombsRemaining;
-    f32 bombsUsed;
+    f32 unusedBombsRemaining;
+    f32 unusedBombsUsed;
     f32 rngFloat3[3];
-    f32 currentPower;
+    f32 unusedCurrentPower;
     f32 rngFloat4[2];
     i32 cherryStart;
     i32 rng2[8];
@@ -48,6 +49,23 @@ struct Rank
     i32 rank;
     i32 maxRank;
     i32 minRank;
+};
+
+// The score, graze, point items, cherry, rank and continues are shared.
+#define MAX_PLAYERS 4
+
+struct SeatStock
+{
+    f32 lives;
+    f32 bombs;
+    f32 power;
+    f32 bombsUsed;
+    f32 deaths;
+    i32 cherryPlus;
+    i8 powerItemCountForScore;
+    u8 character;
+    u8 shotType;
+    u8 shotTypeAndCharacter;
 };
 
 struct GameManager
@@ -73,16 +91,6 @@ struct GameManager
 
         this->globals->csumAsSum = ComputeGameIntegrityCsum();
         this->csumFloat = (f32)(this->globals->csumAsSum + this->globals->rng2[3]);
-    }
-
-    // FUNCTION: TH07 0x00401390
-    void SetBombsRemainingAndComputeCsum(i32 param_1)
-    {
-        this->globals->bombsRemaining = (f32)param_1;
-        this->globals->curCsum = this->globals->rng1[2];
-        this->globals->csumAsSum = ComputeGameIntegrityCsum();
-        this->csumFloat =
-            (f32)(this->globals->csumAsSum + this->globals->rng2[3]);
     }
 
     // FUNCTION: TH07 0x00404fe0
@@ -116,58 +124,65 @@ struct GameManager
         this->globals->rngFloat3[2] = g_Rng.GetRandomFloatInRange(100000.0f) + 6543.0f;
     }
 
-    // FUNCTION: TH07 0x0043b750
-    void CheckGameIntegrityOnDeath(i32 amount)
+    f32 &Lives(i32 seat)
+    {
+        return this->seats[seat].lives;
+    }
+    f32 &Bombs(i32 seat)
+    {
+        return this->seats[seat].bombs;
+    }
+    f32 &Power(i32 seat)
+    {
+        return this->seats[seat].power;
+    }
+    f32 &BombsUsed(i32 seat)
+    {
+        return this->seats[seat].bombsUsed;
+    }
+    f32 &Deaths(i32 seat)
+    {
+        return this->seats[seat].deaths;
+    }
+    i32 &CherryPlus(i32 seat)
+    {
+        return this->seats[seat].cherryPlus;
+    }
+    i8 &PowerItemCount(i32 seat)
+    {
+        return this->seats[seat].powerItemCountForScore;
+    }
+    u8 &Character(i32 seat)
+    {
+        return this->seats[seat].character;
+    }
+    u8 &ShotType(i32 seat)
+    {
+        return this->seats[seat].shotType;
+    }
+    u8 &ShotTypeAndCharacter(i32 seat)
+    {
+        return this->seats[seat].shotTypeAndCharacter;
+    }
+    void AddSeatStock(f32 &value, i32 amount)
     {
         if (CheckGameIntegrity())
         {
             NUKE_SUPERVISOR();
         }
-        this->globals->deaths += (f32)amount;
+        value += (f32)amount;
         RegenerateGameIntegrityCsum();
     }
-
-    void AddCurrentPower(i32 amount)
+    void SetSeatBombs(i32 seat, i32 amount)
     {
-        if (CheckGameIntegrity())
-        {
-            NUKE_SUPERVISOR();
-        }
-        this->globals->currentPower += (f32)amount;
-        RegenerateGameIntegrityCsum();
+        this->Bombs(seat) = (f32)amount;
+        this->globals->curCsum = this->globals->rng1[2];
+        this->globals->csumAsSum = ComputeGameIntegrityCsum();
+        this->csumFloat = (f32)(this->globals->csumAsSum + this->globals->rng2[3]);
     }
-
-    // FUNCTION: TH07 0x0043b7a0
-    void AddBombsUsed(i32 amount)
+    i32 PlayerCount()
     {
-        if (CheckGameIntegrity())
-        {
-            NUKE_SUPERVISOR();
-        }
-        this->globals->bombsUsed += (f32)amount;
-        RegenerateGameIntegrityCsum();
-    }
-
-    // FUNCTION: TH07 0x0042d5cd
-    void AddLivesRemaining(i32 amount)
-    {
-        if (CheckGameIntegrity())
-        {
-            NUKE_SUPERVISOR();
-        }
-        this->globals->livesRemaining += (f32)amount;
-        RegenerateGameIntegrityCsum();
-    }
-
-    // FUNCTION: TH07 0x0042d612
-    void AddBombsRemaining(i32 amount)
-    {
-        if (CheckGameIntegrity())
-        {
-            NUKE_SUPERVISOR();
-        }
-        this->globals->bombsRemaining += (f32)amount;
-        RegenerateGameIntegrityCsum();
+        return this->playerCount > 1 ? this->playerCount : 1;
     }
 
     void SetReplay(i32 replay)
@@ -183,16 +198,6 @@ struct GameManager
     i32 IsCherryAtMax()
     {
         return this->cherry >= this->cherryMax;
-    }
-
-    void SetCurrentPower(i32 amount)
-    {
-        this->globals->currentPower = (f32)amount;
-    }
-
-    void SetLivesRemaining(i32 amount)
-    {
-        this->globals->livesRemaining = (f32)amount;
     }
 
     // FUNCTION: TH07 0x0042d657
@@ -224,9 +229,10 @@ struct GameManager
     i32 HasUnlockedPhantom(i32 shotType);
     i32 HasUnlockedPhantomAndMaxClears();
 
-    void AddCherryPlus(i32 amount);
+    void AddCherryPlus(i32 amount, i32 seat);
+    void AddCherryGauge(i32 amount, i32 seat);
     void AddCherry(i32 amount);
-    void ExtendFromPoints();
+    void ExtendSeat(i32 seat);
 
     void DecreaseSubrank(i32 amount);
     void IncreaseCherry(i32 amount);
@@ -252,10 +258,6 @@ struct GameManager
     struct Pscr pscr[6][6][4];
     struct Plst plst;
     i32 isPaused;
-    i8 powerItemCountForScore;
-    u8 character;
-    u8 shotType;
-    u8 shotTypeAndCharacter;
     union {
         u32 flags;
         struct
@@ -285,13 +287,20 @@ struct GameManager
     f32 csumFloat;
     i32 cherryMax;
     i32 cherry;
-    i32 cherryPlus;
     i32 phantasmUnlocked;
     i32 playTimeAll; // ZUN name: PlayTimeAll
     u32 bulletLagTime;
     i32 maxRetries;
     Rank rank;
     i32 subrank;
+    SeatStock seats[MAX_PLAYERS];
+    i32 playerCount;
+    u32 sessionSeed;
+    u32 gamesStarted;
 };
-C_ASSERT(sizeof(GameManager) == 0x9644);
 extern GameManager g_GameManager;
+
+inline i32 PlayerCount()
+{
+    return g_GameManager.PlayerCount();
+}

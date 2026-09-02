@@ -18,7 +18,8 @@ typedef enum PlayerState
     PLAYER_STATE_SPAWNING = 1,
     PLAYER_STATE_DEAD = 2,
     PLAYER_STATE_INVULNERABLE = 3,
-    PLAYER_STATE_BORDER = 4
+    PLAYER_STATE_BORDER = 4,
+    PLAYER_STATE_GHOST = 5
 } PlayerState;
 
 typedef enum PlayerDirection
@@ -175,6 +176,7 @@ struct Player
     static ZunResult AddedCallback(Player *arg);
     static ZunResult DeletedCallback(Player *arg);
     static u32 OnUpdate(Player *arg);
+    static void OnUpdateSeat(Player *arg);
     static u32 OnDrawHighPrio(Player *arg);
     static u32 OnDrawLowPrio(Player *arg);
 
@@ -307,9 +309,44 @@ struct Player
     Effect *borderEffect;
     struct ShtData *shooterData;
     struct ShtData *shooterDataFocus;
+    i32 seat;
+    i32 hitSounds;
+    // lifeGiveTarget: the receiver's seat + 1
+    i32 lifeGiveTimer;
+    i32 lifeGiveTarget;
+    i32 powerGiveTaps;
+    i32 powerGiveWindow;
+
+    u16 GameInput();
+    u16 LastGameInput();
+    i32 IsPressed(u16 key)
+    {
+        return (GameInput() & key) != 0;
+    }
+    i32 WasPressed(u16 key)
+    {
+        return IsPressed(key) && (GameInput() & key) != (LastGameInput() & key);
+    }
+    // Seat 0 uses th07's 0x400 slot, seats 1-3 0xa00..
+    i32 AnmShift()
+    {
+        return PlayerAnmShift(this->seat);
+    }
+    static i32 PlayerAnmShift(i32 seat)
+    {
+        static const i32 shifts[MAX_PLAYERS] = {0, 0x600, 0x700, 0x800};
+        return shifts[seat];
+    }
+    static i32 PlayerAnmFile(i32 seat)
+    {
+        static const i32 files[MAX_PLAYERS] = {ANM_FILE_PLAYER, 50, 51, 52};
+        return files[seat];
+    }
 };
-C_ASSERT(sizeof(Player) == 0xb7e78);
-extern Player g_Player;
+C_ASSERT(offsetof(Player, seat) == 0xb7e78);
+extern Player g_Players[MAX_PLAYERS];
+extern u16 g_SeatGameInput[MAX_PLAYERS];
+extern u16 g_SeatLastGameInput[MAX_PLAYERS];
 
 typedef i32 (*ShtFunc1)(Player *, PlayerBullet *, i32, struct ShtEntry *);
 extern ShtFunc1 g_ShtFireFuncs[6];

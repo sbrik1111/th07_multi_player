@@ -1,4 +1,5 @@
 #include "Gui.hpp"
+#include "Coop.hpp"
 
 #include <stdio.h>
 
@@ -197,12 +198,12 @@ u32 Gui::OnDraw(Gui *arg)
             stringPos.y = stringPos.y + 16.0f;
             g_AsciiManager.color = 0xffffff80;
             AsciiManager::AddFormatText(&g_AsciiManager, &stringPos, "Player =%9d",
-                                        (i32)g_GameManager.globals->livesRemaining *
+                                        (i32)g_GameManager.Lives(0) *
                                             20000000);
             stringPos.y = stringPos.y + 16.0f;
             g_AsciiManager.color = 0xffffff80;
             AsciiManager::AddFormatText(&g_AsciiManager, &stringPos, "Bomb   = %8d",
-                                        (i32)g_GameManager.globals->bombsRemaining *
+                                        (i32)g_GameManager.Bombs(0) *
                                             4000000);
         }
         stringPos.y = stringPos.y + 32.0f;
@@ -415,7 +416,7 @@ ZunResult Gui::ActualAddedCallback()
             return ZUN_ERROR;
         }
         ClearActiveSprites();
-        switch (g_GameManager.character)
+        switch (g_GameManager.Character(0))
         {
         case CHAR_REIMU:
             if (g_AnmManager->LoadAnms(ANM_FILE_FACE, "data/face_rm00.anm", ANM_OFFSET_FACE) !=
@@ -812,11 +813,19 @@ ZunResult GuiImpl::RunMsg()
     {
         this->msg.timer = (u32)this->msg.curInstr->time;
     }
-    if (g_Player.hasBorder != BORDER_NONE)
+    i32 anyUp = 0;
+    for (i32 seat = 0; seat < PlayerCount(); seat++)
     {
-        g_Player.BreakBorderNaturally();
+        if (g_Players[seat].hasBorder != BORDER_NONE)
+        {
+            g_Players[seat].BreakBorderNaturally();
+        }
+        if (g_Players[seat].playerState != PLAYER_STATE_DEAD && !IsGhost(&g_Players[seat]))
+        {
+            anyUp = 1;
+        }
     }
-    if (g_Player.playerState != PLAYER_STATE_DEAD)
+    if (anyUp)
     {
         g_ItemManager.RemoveAllItems();
     }
@@ -970,7 +979,7 @@ ZunResult GuiImpl::RunMsg()
             this->msg.framesElapsedDuringPause = 0;
             break;
         case MSG_STAGERESULTS:
-            this->clearPower = g_GameManager.globals->currentPower;
+            this->clearPower = g_GameManager.Power(0);
             this->clearPointItems =
                 g_GameManager.globals->pointItemsCollectedThisStage;
             this->clearCherryMax =
@@ -1030,7 +1039,7 @@ ZunResult GuiImpl::RunMsg()
                 {
                     if (g_GameManager.difficulty == DIFF_EXTRA)
                     {
-                        g_GameManager.clrd[g_GameManager.shotTypeAndCharacter]
+                        g_GameManager.clrd[g_GameManager.ShotTypeAndCharacter(0)]
                             .difficultyClearedWithRetries[g_GameManager.difficulty] = 99;
                     }
                     ((Plst *)(g_GameManager.pscr + 6))
@@ -1367,8 +1376,8 @@ void Gui::UpdateGui()
              (!g_GameManager.replay ||
               g_ReplayManager->data->head.stageReplayData[4].data)))
         {
-            scoreBonus += (i32)g_GameManager.globals->livesRemaining * 2000000;
-            scoreBonus += (i32)g_GameManager.globals->bombsRemaining * 400000;
+            scoreBonus += (i32)g_GameManager.Lives(0) * 2000000;
+            scoreBonus += (i32)g_GameManager.Bombs(0) * 400000;
         }
         switch (g_GameManager.difficulty)
         {
@@ -1516,7 +1525,7 @@ void Gui::DrawGameScene()
     {
         vm = &this->impl->vms0[9];
         for (i = 0, x = 496.0f;
-             i < (i32)g_GameManager.globals->livesRemaining;
+             i < (i32)g_GameManager.Lives(0);
              i++, x += 16.0f)
         {
             vm->pos = Float3(x, 96.0f, 0.46f);
@@ -1527,7 +1536,7 @@ void Gui::DrawGameScene()
     {
         vm = &this->impl->vms0[10];
         for (i = 0, x = 496.0f;
-             i < (i32)g_GameManager.globals->bombsRemaining;
+             i < (i32)g_GameManager.Bombs(0);
              i++, x += 16.0f)
         {
             vm->pos = Float3(x, 112.0f, 0.46f);
@@ -1608,13 +1617,13 @@ void Gui::DrawGameScene()
     {
         VertexDiffuseXyzrhw powerBarVerts[4];
 
-        if (0 < (i32)g_GameManager.globals->currentPower)
+        if (0 < (i32)g_GameManager.Power(0))
         {
             powerBarVerts[0].pos = Float3(496.0f, 144.0f, 0.1f);
             powerBarVerts[1].pos =
-                Float3((f32)((i32)g_GameManager.globals->currentPower + 0x1f0) + 0.0f, 144.0f, 0.1f);
+                Float3((f32)((i32)g_GameManager.Power(0) + 0x1f0) + 0.0f, 144.0f, 0.1f);
             powerBarVerts[2].pos = Float3(496.0f, 160.0f, 0.1f);
-            powerBarVerts[3].pos = Float3((f32)((i32)g_GameManager.globals->currentPower + 0x1f0) + 0.0f, 160.0f, 0.1f);
+            powerBarVerts[3].pos = Float3((f32)((i32)g_GameManager.Power(0) + 0x1f0) + 0.0f, 160.0f, 0.1f);
             powerBarVerts[0].diffuse.color = powerBarVerts[2].diffuse.color = 0xe0e0e0ff;
             powerBarVerts[1].diffuse.color = powerBarVerts[3].diffuse.color = 0x80e0e0ff;
 
@@ -1645,12 +1654,12 @@ void Gui::DrawGameScene()
             g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, 2);
             g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_COLORARG1, 2);
         }
-        if ((i32)g_GameManager.globals->currentPower < 128)
+        if ((i32)g_GameManager.Power(0) < 128)
         {
             AsciiManager::AddFormatText(&g_AsciiManager,
                                         &Float3(496.0f, 144.0f, 0.0f),
                                         "%d",
-                                        (i32)g_GameManager.globals->currentPower);
+                                        (i32)g_GameManager.Power(0));
         }
         else
         {
@@ -1759,7 +1768,7 @@ void Gui::DrawStageElements()
             remainingBonus %= digitDivisor;
             digitDivisor /= 10;
         }
-        digit = catk->numSuccessesPerShot[g_GameManager.shotTypeAndCharacter];
+        digit = catk->numSuccessesPerShot[g_GameManager.ShotTypeAndCharacter(0)];
         if (99 < digit)
         {
             digit = 99;
@@ -1776,7 +1785,7 @@ void Gui::DrawStageElements()
             g_AnmManager->GetSprite(digit % 10 + 132);
         g_AnmManager->DrawNoRotation(&this->impl->captureBonusVm);
 
-        digit = catk->numAttemptsPerShot[g_GameManager.shotTypeAndCharacter];
+        digit = catk->numAttemptsPerShot[g_GameManager.ShotTypeAndCharacter(0)];
         if (99 < digit)
         {
             digit = 99;

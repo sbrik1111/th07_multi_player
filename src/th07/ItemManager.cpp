@@ -5,6 +5,7 @@
 #include "BulletManager.hpp"
 #include "EffectManager.hpp"
 #include "EnemyManager.hpp"
+#include "Coop.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
@@ -37,7 +38,7 @@ Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
     i32 i;
 
     item = &this->items[this->nextIndex];
-    if ((i32)g_GameManager.globals->currentPower >= 128)
+    if (CoopAllSeatsFullPower())
     {
         if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
         {
@@ -92,6 +93,7 @@ Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
         item->sprite.color.color = 0xffffffff;
         item->sprite.zWriteDisable = 1;
         item->autoCollect = 0;
+        item->collector = 0;
         item->isOnscreen = 1;
         break;
     }
@@ -116,8 +118,11 @@ void ItemManager::OnUpdate()
     i32 i;
 
     item = this->items;
-    Float3 local_20(g_Player.shooterData->itemCollectRadius,
-                    g_Player.shooterData->itemCollectRadius, 16.0f);
+    Player *player = &g_Players[0];
+    Float3 local_20(player->shooterData->itemCollectRadius,
+                    player->shooterData->itemCollectRadius, 16.0f);
+    // (uninitialized in th07)
+    itemScore = 0;
     itemAcquired = 0;
     this->activeItemCount = 0;
     this->listTail = &this->listHead;
@@ -131,6 +136,10 @@ void ItemManager::OnUpdate()
         }
 
         this->activeItemCount++;
+        player = ItemCollector(item);
+        item->collector = (i8)player->seat;
+        local_20.x = player->shooterData->itemCollectRadius;
+        local_20.y = player->shooterData->itemCollectRadius;
         if (item->state == 2)
         {
             if (item->timer < 60)
@@ -149,27 +158,34 @@ void ItemManager::OnUpdate()
         }
         else
         {
-            if (item->state == 1 || ((128.0 <= (f64)(i32)g_GameManager.globals->currentPower || g_GameManager.difficulty >= 4) && g_Player.positionCenter.y < g_Player.shooterData->pocY) || g_Player.hasBorder == 1)
+            if (item->state == 1 || ((128.0 <= (f64)(i32)g_GameManager.Power(player->seat) || g_GameManager.difficulty >= 4) && player->positionCenter.y < player->shooterData->pocY) || player->hasBorder == 1)
             {
-                if (g_Player.playerState != 1)
+                if (player->playerState != 1)
                 {
-                    playerAngle = g_Player.AngleToPlayer(&item->currentPosition);
-                    item->startPosition.FromAngleMagnitude(playerAngle, g_Player.shooterData->itemCollectSpeed);
+                    playerAngle = player->AngleToPlayer(&item->currentPosition);
+                    item->startPosition.FromAngleMagnitude(playerAngle, player->shooterData->itemCollectSpeed);
                     item->state = 1;
-                    if (g_Player.hasBorder == 1)
+                    if (player->hasBorder == 1)
                     {
                         item->autoCollect = 1;
                     }
                 }
                 else
                 {
+                    item->startPosition.x = 0.0f;
                     item->startPosition.y = -0.5f;
                     item->state = 0;
                 }
             }
             else
             {
-                item->startPosition.x = 0.0f;
+                // Fanned drop copies slow down instead of stopping.
+                item->startPosition.x *= 0.95f;
+                if ((item->currentPosition.x < 16.0f && item->startPosition.x < 0.0f) ||
+                    (item->currentPosition.x > 368.0f && item->startPosition.x > 0.0f))
+                {
+                    item->startPosition.x = 0.0f;
+                }
                 item->startPosition.z = 0.0f;
                 if (item->startPosition.y < -2.2f)
                 {
@@ -193,36 +209,36 @@ void ItemManager::OnUpdate()
             item->startPosition.y = 3.0f;
         }
     check_collision:
-        if (g_Player.CalcItemBoxCollision(&item->currentPosition, &local_20))
+        if (player->CalcItemBoxCollision(&item->currentPosition, &local_20))
         {
             g_ReplayManager->replayEventFlags |= 0x40;
             switch (item->itemType)
             {
             case ITEM_POWER_SMALL:
-                if ((i32)g_GameManager.globals->currentPower >= 128)
+                if ((i32)g_GameManager.Power(player->seat) >= 128)
                 {
-                    g_GameManager.powerItemCountForScore++;
-                    if ((u32)g_GameManager.powerItemCountForScore >= 31)
+                    g_GameManager.PowerItemCount(player->seat)++;
+                    if ((u32)g_GameManager.PowerItemCount(player->seat) >= 31)
                     {
-                        g_GameManager.powerItemCountForScore = 30;
+                        g_GameManager.PowerItemCount(player->seat) = 30;
                     }
-                    itemScore = g_FullPowerScoreBonus[g_GameManager.powerItemCountForScore];
+                    itemScore = g_FullPowerScoreBonus[g_GameManager.PowerItemCount(player->seat)];
                     g_GameManager.AddScore(itemScore);
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, itemScore >= 12800 ? 0xffffff00 : 0xffffffff);
                 }
                 else
                 {
                     j = 0;
-                    while ((i32)g_GameManager.globals->currentPower >= g_PowerLevels[j])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[j])
                     {
                         j++;
                     }
                     prevPowerIdx = j;
-                    g_GameManager.powerItemCountForScore = 0;
-                    g_GameManager.AddCurrentPower(1);
-                    if ((i32)g_GameManager.globals->currentPower >= 128)
+                    g_GameManager.PowerItemCount(player->seat) = 0;
+                    g_GameManager.AddSeatStock(g_GameManager.Power(player->seat), 1);
+                    if ((i32)g_GameManager.Power(player->seat) >= 128)
                     {
-                        g_GameManager.globals->currentPower = 128.0f;
+                        g_GameManager.Power(player->seat) = 128.0f;
                         g_GameManager.RegenerateGameIntegrityCsum();
                         if (!g_EnemyManager.spellcardInfo.isActive)
                         {
@@ -233,7 +249,7 @@ void ItemManager::OnUpdate()
                     }
                     g_GameManager.AddScore(10);
                     g_Gui.powerDisplayUpdateFrames = 2;
-                    while ((i32)g_GameManager.globals->currentPower >= g_PowerLevels[j])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[j])
                     {
                         j++;
                     }
@@ -269,7 +285,7 @@ void ItemManager::OnUpdate()
                     itemScore += (g_GameManager.cherry - g_GameManager.globals->cherryStart - 50000) / 5;
                 }
                 itemScore -= itemScore % 10;
-                g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < g_Player.shooterData->pocY || item->autoCollect == 1 ? 0xffffff00 : 0xffffffff);
+                g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < player->shooterData->pocY || item->autoCollect == 1 ? 0xffffff00 : 0xffffffff);
                 g_GameManager.AddScore(itemScore);
                 g_GameManager.globals->pointItemsCollectedThisStage++;
                 g_GameManager.globals->pointItemsCollectedForExtend++;
@@ -316,7 +332,7 @@ void ItemManager::OnUpdate()
 
                         if (g_GameManager.globals->pointItemsCollectedForExtend >= g_GameManager.globals->nextNeededPointItemsForExtend)
                         {
-                            g_GameManager.ExtendFromPoints();
+                            CoopExtendFromPoints();
                             g_GameManager.globals->extendsFromPointItems++;
                             continue;
                         }
@@ -325,22 +341,22 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_POWER_BIG:
-                if ((i32)g_GameManager.globals->currentPower >= 128)
+                if ((i32)g_GameManager.Power(player->seat) >= 128)
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, itemScore >= 1000 ? 0xffffff00 : 0xffffffff);
                 }
                 else
                 {
                     k = 0;
-                    while ((i32)g_GameManager.globals->currentPower >= g_PowerLevels[k])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[k])
                     {
                         k++;
                     }
                     prevPowerLevel2 = k;
-                    g_GameManager.AddCurrentPower(8);
-                    if ((i32)g_GameManager.globals->currentPower >= 128)
+                    g_GameManager.AddSeatStock(g_GameManager.Power(player->seat), 8);
+                    if ((i32)g_GameManager.Power(player->seat) >= 128)
                     {
-                        g_GameManager.globals->currentPower = 128.0f;
+                        g_GameManager.Power(player->seat) = 128.0f;
                         g_GameManager.RegenerateGameIntegrityCsum();
                         if (!g_EnemyManager.spellcardInfo.isActive)
                         {
@@ -351,7 +367,7 @@ void ItemManager::OnUpdate()
                     }
                     g_Gui.powerDisplayUpdateFrames = 2;
                     g_GameManager.AddScore(10);
-                    while ((i32)g_GameManager.globals->currentPower >= g_PowerLevels[k])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[k])
                     {
                         k++;
                     }
@@ -367,18 +383,18 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_BOMB:
-                if ((i32)g_GameManager.globals->bombsRemaining < 8)
+                if ((i32)g_GameManager.Bombs(player->seat) < 8)
                 {
-                    g_GameManager.AddBombsRemaining(1);
+                    g_GameManager.AddSeatStock(g_GameManager.Bombs(player->seat), 1);
                     g_Gui.bombDisplayUpdateFrames = 2;
                 }
                 g_GameManager.IncreaseSubrank(5);
                 break;
             case ITEM_LIFE:
-                g_GameManager.ExtendFromPoints();
+                g_GameManager.ExtendSeat(player->seat);
                 break;
             case ITEM_FULL_POWER:
-                if ((i32)g_GameManager.globals->currentPower < 128)
+                if ((i32)g_GameManager.Power(player->seat) < 128)
                 {
                     g_BulletManager.RemoveAllBullets(1);
                     g_Gui.ShowStatusPopup(0, 1);
@@ -386,14 +402,14 @@ void ItemManager::OnUpdate()
                     g_AsciiManager.CreatePopup1(&item->currentPosition, -1, 0xffffc0a0);
                     this->DespawnAllItems(i);
                 }
-                g_GameManager.globals->currentPower = 128.0f;
+                g_GameManager.Power(player->seat) = 128.0f;
                 g_GameManager.RegenerateGameIntegrityCsum();
                 g_GameManager.AddScore(1000);
                 g_AsciiManager.CreatePopup1(&item->currentPosition, 1000, 0xffffffff);
                 g_Gui.powerDisplayUpdateFrames = 2;
                 break;
             case ITEM_POINT_BULLET:
-                if (!g_Player.isBombing)
+                if (!player->isBombing)
                 {
                     itemScore = g_GameManager.globals->grazeInTotal / 40 * 10 + 300;
                     if (itemScore <= 0)
@@ -407,13 +423,13 @@ void ItemManager::OnUpdate()
                 }
                 g_AsciiManager.CreatePopup2(&item->currentPosition, itemScore, -1);
                 g_GameManager.AddScore(itemScore);
-                if (!g_Player.bombInfo.isInUse)
+                if (!player->bombInfo.isInUse)
                 {
-                    g_GameManager.AddCherryPlus(20);
+                    g_GameManager.AddCherryPlus(20, player->seat);
                 }
                 else if ((i & 1) == 0)
                 {
-                    g_GameManager.AddCherryPlus(10);
+                    g_GameManager.AddCherryPlus(10, player->seat);
                 }
                 else
                 {
@@ -421,7 +437,7 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_CHERRY_SMALL:
-                g_GameManager.AddCherryPlus(30);
+                g_GameManager.AddCherryPlus(30, player->seat);
                 g_GameManager.AddCherry(70);
                 break;
             case ITEM_CHERRY:
@@ -431,7 +447,7 @@ void ItemManager::OnUpdate()
                                     ? 50000
                                     : 50000 - item->OffsetFromPoc() * 100;
                     itemScore -= itemScore % 10;
-                    g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < g_Player.shooterData->pocY || item->autoCollect ? 0xffffff00 : 0xffffffff);
+                    g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < player->shooterData->pocY || item->autoCollect ? 0xffffff00 : 0xffffffff);
                     g_GameManager.AddScore(itemScore);
                 }
                 itemScore = 1000;
@@ -440,7 +456,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlus(itemScore);
+                g_GameManager.AddCherryPlus(itemScore, player->seat);
                 break;
             case ITEM_STAR:
                 itemScore = g_GameManager.globals->grazeInTotal / 40 * 10 + 300;
@@ -458,7 +474,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlus(itemScore);
+                g_GameManager.AddCherryPlus(itemScore, player->seat);
                 break;
             }
             item->isInUse = 0;

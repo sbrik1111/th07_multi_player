@@ -1,4 +1,5 @@
 #include "BulletManager.hpp"
+#include "Coop.hpp"
 
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
@@ -597,7 +598,7 @@ i32 BulletManager::SpawnBulletPattern(EnemyBulletShooter *bulletProps)
     }
 
     bulletProps->sprites = this->bulletTypeTemplates + bulletProps->sprite;
-    angle = g_Player.AngleToPlayer(&bulletProps->pos);
+    angle = AimTarget(&bulletProps->pos)->AngleToPlayer(&bulletProps->pos);
     for (x = 0; x < bulletProps->count2; x++)
     {
         for (y = 0; y < bulletProps->count1; y++)
@@ -649,7 +650,7 @@ Laser *BulletManager::SpawnLaserPattern(EnemyLaserShooter *laserShooter)
         if (laserShooter->type == 0)
         {
             laser->angle =
-                g_Player.AngleToPlayer(&laserShooter->pos) + laser->angle;
+                AimTarget(&laserShooter->pos)->AngleToPlayer(&laserShooter->pos) + laser->angle;
         }
         laser->flags = laserShooter->flags;
         laser->timer = 0;
@@ -810,7 +811,7 @@ void Bullet::UpdateBulletDirChangeAimAtPlayer()
         {
             this->exFlags = this->exFlags & 0xffffff7f;
         }
-        this->angle = utils::AddNormalizeAngle(g_Player.AngleToPlayer(&this->pos),
+        this->angle = utils::AddNormalizeAngle(AimTarget(&this->pos)->AngleToPlayer(&this->pos),
                                                this->commandStates[3].angle);
         this->speed = this->commandStates[3].speed;
         local_8 = this->speed;
@@ -877,6 +878,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
     f32 width;
     i32 i;
     i32 collisionRes;
+    i32 hitSeat = 0;
 
     blockIdx = 0;
     bullet = arg->bullets;
@@ -981,7 +983,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
         do_collision:
             if (!bullet->grazed && bullet->timer2.GetCurrent() >= 16)
             {
-                collisionRes = g_Player.CheckGraze(&bullet->pos, &bullet->sprites.grazeSize);
+                collisionRes = CoopCheckGraze(&bullet->pos, &bullet->sprites.grazeSize, &hitSeat);
                 if (collisionRes == 1)
                 {
                     bullet->grazed = 1;
@@ -992,14 +994,14 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     if ((bullet->moreFlags & 0x1000) == 0)
                     {
                         bullet->state = BULLET_DESPAWN;
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(&bullet->pos, g_Players[hitSeat].itemType, 1);
                     }
                 }
                 goto do_sprite_anim;
             }
 
         do_player_collision:
-            collisionRes = g_Player.CalcKillboxCollision(&bullet->pos, &bullet->sprites.grazeSize);
+            collisionRes = CoopKillbox(&bullet->pos, &bullet->sprites.grazeSize, &hitSeat);
             if (collisionRes != 0)
             {
                 if (collisionRes != 2 || (bullet->moreFlags & 0x1000) == 0)
@@ -1007,7 +1009,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     bullet->state = BULLET_DESPAWN;
                     if (collisionRes == 2)
                     {
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(&bullet->pos, g_Players[hitSeat].itemType, 1);
                     }
                 }
             }
@@ -1139,7 +1141,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer >= laser->hitboxStartTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+                CoopLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
             }
             if (laser->timer < laser->startTime)
             {
@@ -1149,7 +1151,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             laser->state++;
             laser->targetWidth = laser->width;
         case LASER_ACTIVE:
-            g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+            CoopLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
             if (laser->timer < laser->duration)
             {
                 break;
@@ -1185,7 +1187,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer < laser->hitboxEndTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
+                CoopLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle, laser->timer.GetCurrent() % 12 == 0);
             }
             if (laser->timer < laser->endTime)
             {

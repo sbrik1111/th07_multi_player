@@ -1,4 +1,5 @@
 #include "EclManager.hpp"
+#include "Coop.hpp"
 
 #include <stdio.h>
 
@@ -150,7 +151,7 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case ECL_VAR_LIFE:
         return enemy->life;
     case ECL_VAR_PLAYER_SHOTTYPE:
-        return g_GameManager.shotTypeAndCharacter;
+        return g_GameManager.ShotTypeAndCharacter(0);
     case ECL_VAR_LOCAL_FLOAT2_1:
         return enemy->currentContext.eclContextArgs.floatVars2[0];
     case ECL_VAR_LOCAL_FLOAT2_2:
@@ -202,11 +203,11 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case ECL_VAR_POS_Z:
         return enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return AimTarget(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return AimTarget(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return AimTarget(&enemy->pos)->positionCenter.z;
     case ECL_VAR_MOVE_INTERP_ORIGIN_X:
         return enemy->moveInterpStartPos.x;
     case ECL_VAR_MOVE_INTERP_ORIGIN_Y:
@@ -256,9 +257,9 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case ECL_VAR_SCORE:
         return enemy->score;
     case ECL_VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->pos);
+        return AimTarget(&enemy->pos)->AngleToPlayer(&enemy->pos);
     case ECL_VAR_DISTANCE_FROM_PLAYER:
-        return D3DXVec3Length((g_Player.positionCenter - enemy->pos).asD3DX());
+        return D3DXVec3Length((AimTarget(&enemy->pos)->positionCenter - enemy->pos).asD3DX());
     default:
         return eclVar;
     }
@@ -361,7 +362,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_LIFE:
         return (f32)enemy->life;
     case ECL_VAR_PLAYER_SHOTTYPE:
-        return (f32)g_GameManager.shotTypeAndCharacter;
+        return (f32)g_GameManager.ShotTypeAndCharacter(0);
     case ECL_VAR_ITEMDROP:
         return (f32)enemy->itemDrop;
     case ECL_VAR_SCORE:
@@ -413,11 +414,11 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_POS_Z:
         return enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return AimTarget(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return AimTarget(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return AimTarget(&enemy->pos)->positionCenter.z;
     case ECL_VAR_LOCAL_FLOAT2_1:
         return enemy->currentContext.eclContextArgs.floatVars2[0];
     case ECL_VAR_LOCAL_FLOAT2_2:
@@ -449,7 +450,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_BOSS_LIFE_THRESHOLD4:
         return (f32)enemy->lifeCallbackThreshold[3];
     case ECL_VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->pos);
+        return AimTarget(&enemy->pos)->AngleToPlayer(&enemy->pos);
     case ECL_VAR_ANGLE:
         return enemy->angle;
     case ECL_VAR_ANGULAR_VELOCITY:
@@ -476,7 +477,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_LAST_DAMAGE:
         return (f32)enemy->lastDamage;
     case ECL_VAR_DISTANCE_FROM_PLAYER:
-        return D3DXVec3Length((g_Player.positionCenter - enemy->pos).asD3DX());
+        return D3DXVec3Length((AimTarget(&enemy->pos)->positionCenter - enemy->pos).asD3DX());
     default:
         return eclVar;
     }
@@ -524,11 +525,11 @@ f32 *EclManager::GetFloatVar(Enemy *enemy, f32 *eclVar, u16 paramMask,
     case ECL_VAR_POS_Z:
         return &enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return &g_Player.positionCenter.x;
+        return &AimTarget(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return &g_Player.positionCenter.y;
+        return &AimTarget(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return &g_Player.positionCenter.z;
+        return &AimTarget(&enemy->pos)->positionCenter.z;
     case ECL_VAR_LOCAL_FLOAT2_1:
         return &enemy->currentContext.eclContextArgs.floatVars2[0];
     case ECL_VAR_LOCAL_FLOAT2_2:
@@ -732,9 +733,9 @@ void EclManager::BeginSpellcard(Enemy *enemy, EclRawInstr *instr)
                 catk->highScorePerShot[j] = 0;
             }
         }
-        if (catk->numAttemptsPerShot[g_GameManager.shotTypeAndCharacter] < 9999)
+        if (catk->numAttemptsPerShot[g_GameManager.ShotTypeAndCharacter(0)] < 9999)
         {
-            catk->numAttemptsPerShot[g_GameManager.shotTypeAndCharacter]++;
+            catk->numAttemptsPerShot[g_GameManager.ShotTypeAndCharacter(0)]++;
         }
         if (catk->numAttemptsPerShot[SHOT_COUNT] < 9999)
         {
@@ -806,7 +807,7 @@ void EclManager::EndSpellcard(Enemy *enemy, EclRawInstr *instr)
                             catk->highScorePerShot[i] = 0;
                         }
                     }
-                    character = g_GameManager.shotTypeAndCharacter;
+                    character = g_GameManager.ShotTypeAndCharacter(0);
                     if (catk->highScorePerShot[character] < (u32)score)
                     {
                         catk->highScorePerShot[character] = score;
@@ -1231,7 +1232,7 @@ restart:
                 enemy->moveMode = 1;
                 break;
             case ECL_MOVE_AT_PLAYER:
-                enemy->angle = g_Player.AngleToPlayer(&enemy->pos) +
+                enemy->angle = AimTarget(&enemy->pos)->AngleToPlayer(&enemy->pos) +
                                GET_FLOAT_VALUE(enemy, 0);
                 enemy->moveSpeed = GET_FLOAT_VALUE(enemy, 1);
                 enemy->moveMode = 1;
@@ -1428,7 +1429,7 @@ restart:
                 if (enemy->lasers[arg])
                 {
                     enemy->lasers[arg]->angle =
-                        g_Player.AngleToPlayer(&enemy->lasers[arg]->pos) +
+                        AimTarget(&enemy->lasers[arg]->pos)->AngleToPlayer(&enemy->lasers[arg]->pos) +
                         GET_FLOAT_VALUE(enemy, 1);
                 }
                 break;
@@ -1589,7 +1590,7 @@ restart:
                     GET_FLOAT_VALUE(enemy, 1);
                 break;
             case ECL_GET_EXIT_ANGLE:
-                if (g_Player.positionCenter.x < enemy->pos.x)
+                if (AimTarget(&enemy->pos)->positionCenter.x < enemy->pos.x)
                 {
                     exitAngle = utils::AddNormalizeAngle(
                         g_Rng.GetRandomFloatInRange(1.5707964f) + 2.3561945f, 0.0f);
@@ -1770,10 +1771,10 @@ restart:
                     itemDropPos = enemy->pos;
                     itemDropPos[0] += g_Rng.GetRandomFloatInRange(128.0f) - 64.0f;
                     itemDropPos[1] += g_Rng.GetRandomFloatInRange(128.0f) - 64.0f;
-                    if ((i32)g_GameManager.globals->currentPower < 128)
+                    if (!CoopAllSeatsFullPower())
                     {
-                        g_ItemManager.SpawnItem(&itemDropPos,
-                                                itemDropIdx == 0 ? ITEM_POWER_BIG : ITEM_POWER_SMALL, 0);
+                        CoopSpawnDrop(&itemDropPos,
+                                      itemDropIdx == 0 ? ITEM_POWER_BIG : ITEM_POWER_SMALL, 0, enemy->isBoss);
                     }
                     else
                     {
@@ -1813,8 +1814,7 @@ restart:
                 enemy->currentContext.time += GET_INT_VALUE(enemy, 0);
                 break;
             case ECL_SPAWN_ITEM:
-                g_ItemManager.SpawnItem(&enemy->pos,
-                                        GET_INT_VALUE(enemy, 0), 0);
+                CoopSpawnDrop(&enemy->pos, GET_INT_VALUE(enemy, 0), 0, enemy->isBoss);
                 break;
             case ECL_SET_SCRIPT_WAIT_TIME:
                 g_Stage.scriptWaitTime = GET_INT_VALUE(enemy, 0);
@@ -1961,7 +1961,7 @@ restart:
                     cosf(GET_FLOAT_VALUE(enemy, 2)) * GET_FLOAT_VALUE(enemy, 3);
                 break;
             case ECL_RAND_EXIT_ANGLE:
-                if ((g_Player.positionCenter.x < enemy->pos.x &&
+                if ((AimTarget(&enemy->pos)->positionCenter.x < enemy->pos.x &&
                      enemy->pos.x > 96.0f) ||
                     enemy->pos.x > 288.0f)
                 {
@@ -1976,7 +1976,11 @@ restart:
                 }
                 break;
             case ECL_ADD_CHERRY_PLUS:
-                g_GameManager.AddCherryPlus(GET_INT_VALUE(enemy, 0));
+                g_GameManager.AddCherry(GET_INT_VALUE(enemy, 0));
+                for (i32 seat = 0; seat < PlayerCount(); seat++)
+                {
+                    g_GameManager.AddCherryGauge(GET_INT_VALUE(enemy, 0), seat);
+                }
                 break;
             case ECL_FREEZE_ECL_DURING_BOMB:
                 enemy->freezeEclDuringBombs = GET_INT_VALUE(enemy, 0);
@@ -2259,7 +2263,7 @@ restart:
             }
             if (enemy->isBoss && g_GameManager.currentStage >= 7)
             {
-                if (g_Player.bombInfo.isInUse &&
+                if (AnyBombInUse() &&
                     g_EnemyManager.spellcardInfo.isActive &&
                     g_EnemyManager.spellcardInfo.spellcardIdx >= SPELLCARD_EX_BOSS_1)
                 {

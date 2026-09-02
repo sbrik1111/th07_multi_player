@@ -175,7 +175,7 @@ void BombData::BombReimuACalc(Player *player)
         vm = subInfo->vms;
         for (j = 0; j < 4; j++, vm++)
         {
-            g_AnmManager->ExecuteAnmIdx(vm, j + ANM_SCRIPT_REIMU_A_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, j + ANM_SCRIPT_REIMU_A_BOMB_ARRAY + player->AnmShift());
         }
         g_SoundPlayer.PlaySoundByIdx(SOUND_BOMB_REIMU_A, 0);
     }
@@ -369,7 +369,7 @@ void BombData::BombReimuACalcFocus(Player *player)
                 vm = subInfo->vms;
                 for (j = 0; j < 4; j++, vm++)
                 {
-                    g_AnmManager->ExecuteAnmIdx(vm, j + ANM_SCRIPT_REIMU_A_BOMB_ARRAY);
+                    g_AnmManager->ExecuteAnmIdx(vm, j + ANM_SCRIPT_REIMU_A_BOMB_ARRAY + player->AnmShift());
                 }
                 g_SoundPlayer.PlaySoundByIdx(SOUND_BOMB_REIMU_A, 0);
             }
@@ -537,7 +537,7 @@ void BombData::BombReimuBCalc(Player *player)
         for (i = 0; i < 4; i++)
         {
             vm = player->bombInfo.subInfo[i].vms;
-            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_REIMU_B_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_REIMU_B_BOMB_ARRAY + player->AnmShift());
         }
         g_SoundPlayer.PlaySoundByIdx(SOUND_BOMB_REIMARI, 0);
         player->bombInfo.subInfo[0].bombRegionPositions.x =
@@ -648,7 +648,7 @@ void BombData::BombReimuBCalcFocus(Player *player)
         vm = player->bombInfo.subInfo[0].vms;
         for (i = 0; i < 3; i++, vm++)
         {
-            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_REIMU_B_FOCUS_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_REIMU_B_FOCUS_BOMB_ARRAY + player->AnmShift());
         }
         g_SoundPlayer.PlaySoundByIdx(SOUND_BOMB_REIMARI, 0);
         BombEffects::RegisterChain(1, 60, 2, 6, 0);
@@ -726,7 +726,7 @@ void BombData::BombMarisaACalc(Player *player)
         for (i = 0; i < 8; i++, vm++)
         {
             vm = player->bombInfo.subInfo[i].vms;
-            g_AnmManager->ExecuteAnmIdx(vm, i % 3 + ANM_SCRIPT_MARISA_A_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i % 3 + ANM_SCRIPT_MARISA_A_BOMB_ARRAY + player->AnmShift());
             player->bombInfo.subInfo[i].bombRegionPositions =
                 player->positionCenter;
 
@@ -847,7 +847,7 @@ void BombData::BombMarisaACalcFocus(Player *player)
         if (i < 24)
         {
             vm = player->bombInfo.subInfo[i].vms;
-            g_AnmManager->ExecuteAnmIdx(vm, i % 3 + ANM_SCRIPT_MARISA_A_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i % 3 + ANM_SCRIPT_MARISA_A_BOMB_ARRAY + player->AnmShift());
 
             player->bombInfo.subInfo[i].bombRegionPositions =
                 player->positionCenter;
@@ -983,7 +983,7 @@ void BombData::BombMarisaBCalc(Player *player)
         subInfo = player->bombInfo.subInfo;
         for (i = 0; i < 3; i++, subInfo++)
         {
-            g_AnmManager->ExecuteAnmIdx(subInfo->vms, i + ANM_SCRIPT_MARISA_B_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(subInfo->vms, i + ANM_SCRIPT_MARISA_B_BOMB_ARRAY + player->AnmShift());
             subInfo->bombRegionPositions = player->positionCenter;
             subInfo->accel = (f32)i * ZUN_2PI / 3.0f + -1.5707964f;
         }
@@ -1110,7 +1110,7 @@ void BombData::BombMarisaBCalcFocus(Player *player)
         vm = player->bombInfo.subInfo[0].vms;
         for (i = 0; i < 4; i++, vm++)
         {
-            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_MARISA_B_FOCUS_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_MARISA_B_FOCUS_BOMB_ARRAY + player->AnmShift());
             player->bombInfo.subInfo[i].bombRegionPositions =
                 player->positionCenter;
         }
@@ -1230,7 +1230,7 @@ void BombData::BombSakuyaACalc(Player *player)
                 {
                     subInfo->state = 1;
                     vm = subInfo->vms;
-                    g_AnmManager->ExecuteAnmIdx(vm, ANM_SCRIPT_SAKUYA_A_BOMB_ARRAY + (i & 1));
+                    g_AnmManager->ExecuteAnmIdx(vm, ANM_SCRIPT_SAKUYA_A_BOMB_ARRAY + (i & 1) + player->AnmShift());
                     angle = g_Rng.GetRandomFloatInRange(ZUN_2PI) - ZUN_PI;
                     subInfo->angle = angle;
                     subInfo->speed = g_Rng.GetRandomFloatInRange(6.0f) + 5.5f;
@@ -1269,7 +1269,7 @@ void BombData::BombSakuyaACalc(Player *player)
             }
             else if (player->bombDamageBoxes[i].damage < 999)
             {
-                g_AnmManager->ExecuteAnmIdx(subInfo->vms, 1120);
+                g_AnmManager->ExecuteAnmIdx(subInfo->vms, 1120 + player->AnmShift());
                 player->bombDamageBoxes[i].damage = 999;
             }
             if (g_GameManager.IsInBounds(subInfo->bombRegionPositions.x,
@@ -1369,7 +1369,7 @@ void BombData::BombSakuyaACalcFocus(Player *player)
 
             subInfo->state = 1;
             vm = subInfo->vms;
-            g_AnmManager->ExecuteAnmIdx(vm, (i & 1) + ANM_SCRIPT_SAKUYA_A_FOCUS_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, (i & 1) + ANM_SCRIPT_SAKUYA_A_FOCUS_BOMB_ARRAY + player->AnmShift());
             angle = (f32)i * ZUN_2PI / 96.0f - ZUN_PI;
             subInfo->angle = angle;
             subInfo->speed = g_Rng.GetRandomFloatInRange(1.0f) + 0.5f;
@@ -1439,7 +1439,7 @@ void BombData::BombSakuyaACalcFocus(Player *player)
         }
         else if (player->bombDamageBoxes[i].damage < 999)
         {
-            g_AnmManager->ExecuteAnmIdx(subInfo->vms, 1120);
+            g_AnmManager->ExecuteAnmIdx(subInfo->vms, 1120 + player->AnmShift());
             player->bombDamageBoxes[i].damage = 999;
             g_EffectManager.SpawnEffect(
                 0, &player->bombInfo.subInfo[i].bombRegionPositions, 1,
@@ -1534,7 +1534,7 @@ void BombData::BombSakuyaBCalc(Player *player)
         {
             subInfo->state = 1;
             vm = subInfo->vms;
-            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_SAKUYA_B_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_SAKUYA_B_BOMB_ARRAY + player->AnmShift());
             vm->pos.x = 192.0f + ((i & 1) != 0 ? 128.0f : -128.0f);
             vm->pos.y = 224.0f + (i / 2 != 0 ? 128.0f : -128.0f);
             vm->pos.z = 0.49f;
@@ -1639,7 +1639,7 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
         {
             subInfo->state = 1;
             vm = subInfo->vms;
-            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_SAKUYA_B_FOCUS_BOMB_ARRAY);
+            g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_SAKUYA_B_FOCUS_BOMB_ARRAY + player->AnmShift());
             subInfo->bombRegionPositions = player->positionCenter;
             for (j = 31; j >= 0; j--)
             {

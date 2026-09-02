@@ -40,8 +40,11 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
 
+    // Seat 0's game buttons are th07's.
     g_LastFrameGameInput = g_CurFrameGameInput;
     g_CurFrameGameInput = g_CurFrameRawInput;
+    g_SeatLastGameInput[0] = g_SeatGameInput[0];
+    g_SeatGameInput[0] = g_CurFrameGameInput;
     if (g_GameManager.defaultCfg->slowMode)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -116,6 +119,8 @@ u32 ReplayManager::OnUpdateDemoHighPrio(ReplayManager *arg)
     i32 idk = 0;
     g_LastFrameGameInput = g_CurFrameGameInput;
     g_CurFrameGameInput = arg->replayInputs->frameNum;
+    g_SeatLastGameInput[0] = g_LastFrameGameInput;
+    g_SeatGameInput[0] = g_CurFrameGameInput;
     arg->replayInputs = arg->replayInputs + 1;
     g_IsEighthFrameOfHeldInput = 0;
     if (g_LastFrameGameInput == g_CurFrameGameInput)
@@ -166,7 +171,7 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
         arg->data = new ReplayFile;
         // STRING: TH07 0x00496aa8
         arg->data->head.magic = *(u32 *)&"T7RP";
-        arg->data->data.shotType = g_GameManager.shotTypeAndCharacter;
+        arg->data->data.shotType = g_GameManager.ShotTypeAndCharacter(0);
         arg->data->head.version = 0x1100;
         arg->data->data.replayVersion = 256;
         arg->data->data.versionChar1 = 'b';
@@ -214,16 +219,16 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
     endData = arg->data->head.stageEndData[i].data;
 
     replayData->grazeInTotal = g_GameManager.globals->grazeInTotal;
-    replayData->bombsRemaining = g_GameManager.globals->bombsRemaining;
-    replayData->livesRemaining = g_GameManager.globals->livesRemaining;
-    replayData->currentPower = g_GameManager.globals->currentPower;
+    replayData->bombsRemaining = g_GameManager.Bombs(0);
+    replayData->livesRemaining = g_GameManager.Lives(0);
+    replayData->currentPower = g_GameManager.Power(0);
     replayData->rank = g_GameManager.rank.rank;
     replayData->pointItemsCollectedForExtend = g_GameManager.globals->pointItemsCollectedForExtend;
     replayData->stageRngSeed = g_GameManager.stageRngSeed;
-    replayData->powerItemCountForScore = g_GameManager.powerItemCountForScore;
+    replayData->powerItemCountForScore = g_GameManager.PowerItemCount(0);
     replayData->cherry = g_GameManager.cherry - g_GameManager.globals->cherryStart;
     replayData->cherryMax = g_GameManager.cherryMax - g_GameManager.globals->cherryStart;
-    replayData->cherryPlus = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
+    replayData->cherryPlus = g_GameManager.CherryPlus(0) - g_GameManager.globals->cherryStart;
     replayData->spellCardsCaptured = (u8)g_GameManager.globals->spellCardsCaptured;
     replayData->extendsFromPointItems = g_GameManager.globals->extendsFromPointItems;
     replayData->nextNeededPointItemsForExtend = g_GameManager.globals->nextNeededPointItemsForExtend;
@@ -386,31 +391,31 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
     replayData = arg->data->head.stageReplayData[i].data;
     endData = arg->data->head.stageEndData[i].data;
 
-    g_GameManager.character = arg->data->data.shotType / 2;
-    g_GameManager.shotType = arg->data->data.shotType % 2;
-    g_GameManager.shotTypeAndCharacter = arg->data->data.shotType;
+    g_GameManager.Character(0) = arg->data->data.shotType / 2;
+    g_GameManager.ShotType(0) = arg->data->data.shotType % 2;
+    g_GameManager.ShotTypeAndCharacter(0) = arg->data->data.shotType;
     g_GameManager.difficulty = arg->data->data.difficulty;
     g_GameManager.globals->pointItemsCollectedForExtend =
         replayData->pointItemsCollectedForExtend;
     g_GameManager.rank.rank = replayData->rank;
-    g_GameManager.SetLivesRemaining(replayData->livesRemaining);
+    g_GameManager.Lives(0) = replayData->livesRemaining;
     g_GameManager.RegenerateGameIntegrityCsum();
-    g_GameManager.SetBombsRemainingAndComputeCsum(replayData->bombsRemaining);
-    g_GameManager.SetCurrentPower(replayData->currentPower);
+    g_GameManager.SetSeatBombs(0, replayData->bombsRemaining);
+    g_GameManager.Power(0) = replayData->currentPower;
     g_GameManager.RegenerateGameIntegrityCsum();
     g_GameManager.globals->grazeInTotal = replayData->grazeInTotal;
     arg->replayInputs = replayData->replayInputs;
-    g_GameManager.powerItemCountForScore = replayData->powerItemCountForScore;
+    g_GameManager.PowerItemCount(0) = replayData->powerItemCountForScore;
     g_GameManager.cherry = replayData->cherry +
                            g_GameManager.globals->cherryStart;
     g_GameManager.cherryMax = replayData->cherryMax +
                               g_GameManager.globals->cherryStart;
-    g_GameManager.cherryPlus = replayData->cherryPlus +
+    g_GameManager.CherryPlus(0) = replayData->cherryPlus +
                                g_GameManager.globals->cherryStart;
-    if (g_GameManager.cherryPlus >= g_GameManager.globals->cherryStart + 50000)
+    if (g_GameManager.CherryPlus(0) >= g_GameManager.globals->cherryStart + 50000)
     {
-        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + 50000;
-        g_Player.ActivateBorder();
+        g_GameManager.CherryPlus(0) = g_GameManager.globals->cherryStart + 50000;
+        g_Players[0].ActivateBorder();
     }
     *g_GameManager.defaultCfg = arg->data->data.cfg;
     g_Rng.SetSeed(replayData->stageRngSeed);

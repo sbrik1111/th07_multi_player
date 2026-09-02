@@ -1156,7 +1156,7 @@ ZunResult ResultScreen::HandleResultKeyboard()
     if (this->frameTimer == 0)
     {
         this->charUsed =
-            (u32)g_GameManager.character * 2 + (u32)g_GameManager.shotType;
+            (u32)g_GameManager.Character(0) * 2 + (u32)g_GameManager.ShotType(0);
         this->diffPlayed = g_GameManager.difficulty;
         vm = this->vms;
         for (vmIdx = 0; vmIdx < 41; vmIdx++, vm++)
@@ -2102,13 +2102,13 @@ ZunResult ResultScreen::DrawFinalStats()
 
         pos.y += 22.0f;
         AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%9d",
-                                    (i32)g_GameManager.globals->deaths);
-        rankingProbably -= (f32)(i32)g_GameManager.globals->deaths * 5.0f - 10.0f;
+                                    (i32)g_GameManager.Deaths(0));
+        rankingProbably -= (f32)(i32)g_GameManager.Deaths(0) * 5.0f - 10.0f;
 
         pos.y += 22.0f;
         AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%9d",
-                                    (i32)g_GameManager.globals->bombsUsed);
-        rankingProbably -= (f32)(i32)g_GameManager.globals->bombsUsed * 2.0f - 10.0f;
+                                    (i32)g_GameManager.BombsUsed(0));
+        rankingProbably -= (f32)(i32)g_GameManager.BombsUsed(0) * 2.0f - 10.0f;
 
         pos.y += 22.0f;
         AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%9d",
@@ -2464,8 +2464,8 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
                     // STRING: TH07 0x00496400
                     &g_AsciiManager, &pos, "No.%.2d %8s %5s  %7s %9d0",
                     i + 1, arg->replayName, arg->defaultReplay.data.date,
-                    g_CharactersAndShotTypesStrings[(u32)g_GameManager.character * 2 +
-                                                    (u32)g_GameManager.shotType],
+                    g_CharactersAndShotTypesStrings[(u32)g_GameManager.Character(0) * 2 +
+                                                    (u32)g_GameManager.ShotType(0)],
                     arg->defaultReplay.data.score);
                 g_AsciiManager.color = 0xfff0f0ff;
                 *(u32 *)&name[0] = *(u32 *)"    ";
@@ -2606,12 +2606,12 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *arg)
     if (arg->resultScreenState == 18)
     {
         if ((u32)g_GameManager
-                .pscr[g_GameManager.character * 2 + g_GameManager.shotType]
+                .pscr[g_GameManager.Character(0) * 2 + g_GameManager.ShotType(0)]
                      [g_GameManager.currentStage - 1][g_GameManager.difficulty]
                 .score < g_GameManager.globals->score)
         {
             g_GameManager
-                .pscr[g_GameManager.character * 2 + g_GameManager.shotType]
+                .pscr[g_GameManager.Character(0) * 2 + g_GameManager.ShotType(0)]
                      [g_GameManager.currentStage - 1][g_GameManager.difficulty]
                 .score = g_GameManager.globals->score;
         }

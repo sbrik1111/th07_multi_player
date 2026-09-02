@@ -1,4 +1,5 @@
 #include "AsciiManager.hpp"
+#include "Coop.hpp"
 
 #include <stdio.h>
 
@@ -334,7 +335,7 @@ void AsciiManager::DrawStrings()
             this->bossMarkers[i].pos.x <= 392.0f)
         {
             charWidth = fabsf(this->bossMarkers[i].pos.x - 32.0f -
-                              g_Player.positionCenter.x);
+                              g_Players[0].positionCenter.x);
             if (charWidth < 64.0f)
             {
                 this->bossMarkers[i].color.bytes.a =
@@ -961,18 +962,14 @@ i32 RetryMenu::OnUpdate()
             g_GameManager.globals->guiScore = (u32)g_GameManager.globals->numRetries;
             g_GameManager.globals->guiScoreDifference = 0;
             g_GameManager.globals->score = g_GameManager.globals->guiScore;
-            g_GameManager.SetLivesRemaining(g_GameManager.defaultCfg->lifeCount);
-            g_GameManager.RegenerateGameIntegrityCsum();
-            g_GameManager.SetBombsRemainingAndComputeCsum(
-                g_Player.shooterData->initialBombs);
             g_GameManager.globals->grazeInStage = 0;
             g_GameManager.globals->pointItemsCollectedThisStage = 0;
             g_GameManager.globals->pointItemsCollectedForExtend = 0;
-            g_GameManager.globals->currentPower = 0.0f;
             g_GameManager.RegenerateGameIntegrityCsum();
             g_GameManager.globals->extendsFromPointItems = 0;
             g_GameManager.globals->nextNeededPointItemsForExtend = 50;
             g_GameManager.cherry = g_GameManager.globals->cherryStart;
+            CoopContinue();
             g_Gui.lifeDisplayUpdateFrames = 2;
             g_Gui.bombDisplayUpdateFrames = 2;
             g_Gui.grazeDisplayUpdateFrames = 2;
@@ -985,11 +982,11 @@ i32 RetryMenu::OnUpdate()
             IncrementCapped(&g_GameManager.plst.playDataByDifficulty[6].playCount, 999999);
             IncrementCapped(
                 &g_GameManager.plst.playDataByDifficulty[g_GameManager.difficulty]
-                     .playCountPerShotType[g_GameManager.shotTypeAndCharacter],
+                     .playCountPerShotType[g_GameManager.ShotTypeAndCharacter(0)],
                 999999);
             IncrementCapped(
                 &g_GameManager.plst.playDataByDifficulty[6]
-                     .playCountPerShotType[g_GameManager.shotTypeAndCharacter],
+                     .playCountPerShotType[g_GameManager.ShotTypeAndCharacter(0)],
                 999999);
             IncrementCapped(
                 &g_GameManager.plst.playDataByDifficulty[g_GameManager.difficulty]
@@ -1082,8 +1079,8 @@ void AsciiManager::DrawPopups()
         this->vm1.pos.y = popup->pos.y;
         this->vm1.color.color = popup->color;
 
-        dx = g_Player.positionCenter.x - popup->pos.x;
-        dy = g_Player.positionCenter.y - popup->pos.y;
+        dx = g_Players[0].positionCenter.x - popup->pos.x;
+        dy = g_Players[0].positionCenter.y - popup->pos.y;
         alpha = (i32)(dx * dx + dy * dy);
 
         if (alpha > 4096)
@@ -1225,9 +1222,9 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.pos.x = this->cherryGauge.pos.x + 40.0f + 6.0f + 7.0f;
         this->cherryDigit.pos.y = this->cherryGauge.pos.y + 2.0f;
 
-        cherry = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
+        cherry = g_GameManager.CherryPlus(0) - g_GameManager.globals->cherryStart;
 
-        if (g_Player.hasBorder)
+        if (g_Players[0].hasBorder)
         {
             this->cherryDigit.color.bytes.r = 255;
             divisor = cherry % 4000;
@@ -1272,7 +1269,7 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.scale.x = 1.0f;
         this->cherryDigit.scale.y = 1.0f;
 
-        if (g_Player.hasBorder == BORDER_ACTIVE)
+        if (g_Players[0].hasBorder == BORDER_ACTIVE)
         {
             this->cherryBorderActive.pos = this->cherryGauge.pos;
             this->cherryBorderActive.pos.x += 24.0f;

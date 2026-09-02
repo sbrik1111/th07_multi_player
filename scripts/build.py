@@ -159,6 +159,8 @@ def main():
         if src.relative_to(SRC).parts[0] != "multi":
             # the game's sources: their globals in .gdata / .gbss, GameAlloc declared
             flags.append(f"/FI{SRC / 'MpCommon.hpp'}")
+            # their literals are Shift-JIS bytes (src/th07/multi is UTF-8 with a BOM)
+            flags.append("/source-charset:.932")
         stamp = obj.with_suffix(".flags")
         if (
             obj.exists()

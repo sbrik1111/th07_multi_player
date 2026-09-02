@@ -96,20 +96,20 @@ i32 GameManager::ComputeGameIntegrityCsum()
 }
 
 // FUNCTION: TH07 0x0042d83a
-void GameManager::ExtendFromPoints()
+void GameManager::ExtendSeat(i32 seat)
 {
-    if ((i32)this->globals->livesRemaining < 8)
+    if ((i32)this->Lives(seat) < 8)
     {
-        AddLivesRemaining(1);
+        AddSeatStock(this->Lives(seat), 1);
         g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
         IncreaseSubrank(200);
         g_Gui.lifeDisplayUpdateFrames = 2;
     }
     else
     {
-        if ((i32)this->globals->bombsRemaining < 8)
+        if ((i32)this->Bombs(seat) < 8)
         {
-            AddBombsRemaining(1);
+            AddSeatStock(this->Bombs(seat), 1);
             g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
             IncreaseSubrank(200);
             g_Gui.bombDisplayUpdateFrames = 2;
@@ -450,7 +450,7 @@ ZunResult ResultScreen::ParseScores()
         return ZUN_ERROR;
     }
 
-    g_GameManager.globals->highScore = GetHighScore(scoreDat, NULL, (u32)g_GameManager.shotTypeAndCharacter,
+    g_GameManager.globals->highScore = GetHighScore(scoreDat, NULL, (u32)g_GameManager.ShotTypeAndCharacter(0),
                                                     g_GameManager.difficulty,
                                                     &g_GameManager.globals->highScoreNumContinues);
     ParseCatk(scoreDat, g_GameManager.catk);
@@ -460,11 +460,11 @@ ZunResult ResultScreen::ParseScores()
     {
         g_GameManager.globals->highScore =
             g_GameManager
-                .pscr[g_GameManager.shotTypeAndCharacter]
+                .pscr[g_GameManager.ShotTypeAndCharacter(0)]
                      [g_GameManager.currentStage][g_GameManager.difficulty]
                 .score;
         g_GameManager
-            .pscr[g_GameManager.shotTypeAndCharacter][g_GameManager.currentStage]
+            .pscr[g_GameManager.ShotTypeAndCharacter(0)][g_GameManager.currentStage]
                  [g_GameManager.difficulty]
             .playCount++;
         g_GameManager.globals->highScoreNumContinues = 0;
@@ -494,7 +494,10 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
 
     g_Supervisor.checkTiming = 0;
     arg->difficultyMask = 1 << arg->difficulty;
-    arg->shotTypeAndCharacter = arg->character * 2 + arg->shotType;
+    for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+    {
+        arg->seats[seat].shotTypeAndCharacter = arg->seats[seat].character * 2 + arg->seats[seat].shotType;
+    }
     g_Supervisor.currentTime = timeGetTime();
     g_Supervisor.effectiveFramerateMultiplier = 1.0f;
     if (g_Supervisor.curState != 3)
@@ -510,9 +513,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         InitializeRngAndCsum();
         *arg->defaultCfg = g_Supervisor.cfg;
         ZunMemory::Free(arg->tmpBuffer);
-        arg->powerItemCountForScore = 0;
         arg->cherry = arg->globals->cherryStart;
-        arg->cherryPlus = arg->globals->cherryStart;
         if (g_GameManager.difficulty >= 4)
         {
             arg->defaultCfg->lifeCount = 2;
@@ -528,13 +529,26 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         }
         if (!g_GameManager.replay)
         {
-            g_GameManager.SetLivesRemaining(arg->defaultCfg->lifeCount);
+            for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+            {
+                arg->Lives(seat) = arg->defaultCfg->lifeCount;
+            }
             g_GameManager.RegenerateGameIntegrityCsum();
-            g_GameManager.SetBombsRemainingAndComputeCsum(
-                g_Player.shooterData->initialBombs);
+            for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+            {
+                arg->SetSeatBombs(seat, seat < arg->PlayerCount() ? g_Players[seat].shooterData->initialBombs : 0);
+            }
+        }
+        for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+        {
+            SeatStock &stock = arg->seats[seat];
+            stock.power = 0.0f;
+            stock.bombsUsed = 0.0f;
+            stock.deaths = 0.0f;
+            stock.cherryPlus = arg->globals->cherryStart;
+            stock.powerItemCountForScore = 0;
         }
         arg->ResetRegionsPos();
-        arg->globals->currentPower = 0.0f;
         arg->RegenerateGameIntegrityCsum();
         arg->playTimeAll = 0;
         arg->globals->guiScore = 0;
@@ -559,10 +573,6 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
             return ZUN_ERROR;
         }
         arg->InitializeRank();
-        arg->globals->deaths = 0.0f;
-        arg->RegenerateGameIntegrityCsum();
-        arg->globals->bombsUsed = 0.0f;
-        arg->RegenerateGameIntegrityCsum();
         arg->globals->spellCardsCaptured = 0;
         if (!g_GameManager.practice)
         {
@@ -642,11 +652,11 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
                                      999999);
                 IncrementCappedAgain(
                     &g_GameManager.plst.playDataByDifficulty[g_GameManager.difficulty]
-                         .playCountPerShotType[arg->shotTypeAndCharacter],
+                         .playCountPerShotType[arg->ShotTypeAndCharacter(0)],
                     999999);
                 IncrementCappedAgain(
                     g_GameManager.plst.playDataByDifficulty[6].playCountPerShotType +
-                        arg->shotTypeAndCharacter,
+                        arg->ShotTypeAndCharacter(0),
                     999999);
                 if (g_Supervisor.curState == 10)
                 {
@@ -693,7 +703,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     arg->currentStage = arg->currentStage + 1;
     if (!g_GameManager.replay)
     {
-        shotTypeAndChar = g_GameManager.shotTypeAndCharacter;
+        shotTypeAndChar = g_GameManager.ShotTypeAndCharacter(0);
         if (arg->globals->numRetries == 0 &&
             (i32)(u32)arg->clrd[shotTypeAndChar]
                     .difficultyClearedWithRetries[g_GameManager.difficulty] <
@@ -719,7 +729,10 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         case 1:
             break;
         default:
-            arg->globals->currentPower = 128.0f;
+            for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+            {
+                arg->Power(seat) = 128.0f;
+            }
             arg->RegenerateGameIntegrityCsum();
             break;
         }
@@ -914,7 +927,7 @@ void GameManager::DecreaseSubrank(i32 amount)
 }
 
 // FUNCTION: TH07 0x0042f5a2
-void GameManager::AddCherryPlus(i32 amount)
+void GameManager::AddCherryPlus(i32 amount, i32 seat)
 {
     i32 oldCherry = this->cherry;
     this->cherry = this->cherry + amount;
@@ -922,18 +935,24 @@ void GameManager::AddCherryPlus(i32 amount)
     {
         this->cherry = this->cherryMax;
     }
-    if (0 < amount && g_Player.hasBorder == BORDER_NONE)
-    {
-        this->cherryPlus = this->cherryPlus + amount;
-        if (this->cherryPlus >= this->globals->cherryStart + 50000)
-        {
-            this->cherryPlus = this->globals->cherryStart + 50000;
-            g_Player.ActivateBorder();
-        }
-    }
+    this->AddCherryGauge(amount, seat);
     if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
     {
         g_Gui.ShowStatusPopup(this->cherry - this->globals->cherryStart, 3);
+    }
+}
+
+void GameManager::AddCherryGauge(i32 amount, i32 seat)
+{
+    Player *player = &g_Players[seat];
+    if (0 < amount && player->hasBorder == BORDER_NONE && player->playerState != PLAYER_STATE_GHOST)
+    {
+        this->CherryPlus(seat) = this->CherryPlus(seat) + amount;
+        if (this->CherryPlus(seat) >= this->globals->cherryStart + 50000)
+        {
+            this->CherryPlus(seat) = this->globals->cherryStart + 50000;
+            player->ActivateBorder();
+        }
     }
 }
 
