@@ -1,4 +1,6 @@
 #include "ReplayManager.hpp"
+#include "FrameInput.hpp"
+#include "Player.hpp"
 
 #include "Chain.hpp"
 #include "EffectManager.hpp"
@@ -40,11 +42,14 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
 
-    // Seat 0's game buttons are th07's.
+    // th07's (the dialogue's) buttons are seat 0's.
     g_LastFrameGameInput = g_CurFrameGameInput;
-    g_CurFrameGameInput = g_CurFrameRawInput;
-    g_SeatLastGameInput[0] = g_SeatGameInput[0];
-    g_SeatGameInput[0] = g_CurFrameGameInput;
+    g_CurFrameGameInput = g_FrameInputs->held[0];
+    for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+    {
+        g_SeatLastGameInput[seat] = g_SeatGameInput[seat];
+        g_SeatGameInput[seat] = g_FrameInputs->held[seat];
+    }
     if (g_GameManager.defaultCfg->slowMode)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -59,7 +64,7 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
     {
         stage = 6;
     }
-    g_CurFrameGameInput = curInput = g_CurFrameRawInput;
+    g_CurFrameGameInput = curInput = g_FrameInputs->held[0];
     arg->replayInputs++;
     arg->replayInputsByStage[stage] = arg->replayInputs + 1;
     arg->replayInputs->frameNum = curInput;

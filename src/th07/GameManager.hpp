@@ -182,7 +182,7 @@ struct GameManager
     }
     i32 PlayerCount()
     {
-        return this->playerCount > 1 ? this->playerCount : 1;
+        return this->playerCount;
     }
 
     void SetReplay(i32 replay)

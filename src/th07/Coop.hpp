@@ -60,7 +60,7 @@ extern i32 g_FrameMayRollBack;
 extern i32 g_CoopActiveSeat;
 
 void CoopRefreshFadeSet();
-u32 CoopVmFade(AnmVm *vm);
+u32 CoopPlayerAlpha(Player *player);
 extern i32 g_CoopFadeActive;
 extern i32 g_CoopViewSeat;
 

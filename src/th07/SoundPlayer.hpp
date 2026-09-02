@@ -127,3 +127,6 @@ struct SoundPlayer
 };
 C_ASSERT(sizeof(SoundPlayer) == 0x39cc);
 extern SoundPlayer g_SoundPlayer;
+
+extern i32 g_SoundSilenced;
+extern i32 (*g_BgmCommandFilter)(i32 opcode, i32 arg1, const char *name);

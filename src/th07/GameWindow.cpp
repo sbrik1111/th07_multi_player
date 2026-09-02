@@ -21,21 +21,20 @@ typedef __w64 long SHANDLE_PTR; // i dont know anymore bro
 #include "Supervisor.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
+#include "Coop.hpp"
+#include "multi/MpConfig.h"
+#include "multi/RollbackHeap.h"
+#include "multi/Session.h"
+#include <float.h>
+#include "multi/Launcher.h"
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
 
 // GLOBAL: TH07 0x00575c20
 GameWindow g_GameWindow;
 
 // GLOBAL: TH07 0x0135e1f4
 HANDLE g_Mutex;
-
-// GLOBAL: TH07 0x0135e1f8
-i32 g_FrameCount;
-
-// GLOBAL: TH07 0x0135e200
-f64 g_LastFrameTime;
-
-// GLOBAL: TH07 0x0135e208
-LARGE_INTEGER g_LastPerfCounter;
 
 // winmain should probably be here
 
@@ -86,6 +85,7 @@ LRESULT __stdcall GameWindow::WindowProc(HWND hWnd, u32 uMsg, WPARAM wParam,
         return 1;
     case WM_CLOSE:
         g_GameWindow.isAppClosing = 1;
+        MpRequestShutdown();
         return 1;
     }
     return DefWindowProcA(hWnd, uMsg, wParam, lParam);
@@ -130,131 +130,177 @@ void GameWindow::Present()
     }
 }
 
-#pragma var_order(chainRes, perfCounter, perfDiff, curTime, timeDiff)
-// FUNCTION: TH07 0x004346e0
-RenderResult GameWindow::Render()
+// Every frame starts with the same FPU state (D3D and sounds change it).
+#pragma data_seg(push)
+#pragma bss_seg(push)
+#pragma data_seg()
+#pragma bss_seg()
+static i32 s_MpFpuPinned;
+static u32 s_MpFpuSse;
+static unsigned long long s_TickUs, s_DrawUs;
+static unsigned s_Ticks, s_Draws;
+// Runtime state: not rolled back.
+static f64 s_MpNextFrameTime = -1.0;
+static f64 s_MpFpsSecond = -1.0;
+static i32 s_MpFpsFrames;
+static f32 s_MpFps;
+#pragma bss_seg(pop)
+#pragma data_seg(pop)
+
+static void MpPinFpu()
 {
-    f64 timeDiff;
-    f64 curTime;
-    f64 perfDiff;
-    LARGE_INTEGER perfCounter;
-    i32 chainRes;
-
-    if (!this->isAppActive)
+    unsigned int x87 = 0;
+    unsigned int sse = 0;
+    __control87_2(0, 0, &x87, &sse);
+    if (!s_MpFpuPinned)
     {
-        return RENDER_RESULT_KEEP_RUNNING;
+        s_MpFpuPinned = 1;
+        s_MpFpuSse = sse;
+        th07::mp::Log("FPU_PINNED x87=%08X sse=%08X", x87, sse);
     }
-
-    if (this->curFrame == 0)
+    __asm { finit }
+    if (sse != s_MpFpuSse)
     {
-    begin_loop:
-        if ((i32)g_Supervisor.cfg.frameskipConfig <= (i32)this->curFrame)
-        {
-            g_Supervisor.d3dDevice->BeginScene();
-            g_AnmManager->ResetVertexBuffer();
-            g_Supervisor.fogEnabled = 255;
-            g_Supervisor.DisableFog();
-            g_Chain.RunDrawChain();
-            g_AnmManager->Flush();
-            g_Supervisor.d3dDevice->SetTexture(0, NULL);
-            g_Supervisor.d3dDevice->EndScene();
-        }
+        unsigned int ignored;
+        __control87_2(s_MpFpuSse, _MCW_EM | _MCW_RC | _MCW_DN, NULL, &ignored);
+    }
+}
 
+static f64 MpNow()
+{
+    static LARGE_INTEGER frequency;
+    if (frequency.QuadPart == 0)
+    {
+        QueryPerformanceFrequency(&frequency);
+    }
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (f64)now.QuadPart / (f64)frequency.QuadPart;
+}
+
+static unsigned long long CostNow()
+{
+    return (unsigned long long)(MpNow() * 1000000.0);
+}
+
+void TakeFrameCosts(unsigned long long *tickUs, unsigned *ticks, unsigned long long *drawUs, unsigned *draws)
+{
+    *tickUs = s_TickUs;
+    *ticks = s_Ticks;
+    *drawUs = s_DrawUs;
+    *draws = s_Draws;
+    s_TickUs = s_DrawUs = 0;
+    s_Ticks = s_Draws = 0;
+}
+
+i32 RunLogicalFrame(i32 draw)
+{
+    MpPinFpu();
+    unsigned long long tickBegin = CostNow();
+    i32 chainRes;
+    {
+        th07::rollback::heap::SimulationScope scope;
         g_AnmManager->Flush();
         g_Supervisor.viewport.X = 0;
         g_Supervisor.viewport.Y = 0;
         g_Supervisor.viewport.Width = 640;
         g_Supervisor.viewport.Height = 480;
         g_Supervisor.d3dDevice->SetViewport(&g_Supervisor.viewport);
-
         chainRes = g_Chain.RunCalcChain();
+    }
+    {
+        th07::rollback::heap::RuntimeScope runtime;
         g_SoundPlayer.ProcessQueues();
-
-        if (!chainRes)
-        {
-            return RENDER_RESULT_EXIT_SUCCESS;
-        }
-        if (chainRes == -1)
-        {
-            return RENDER_RESULT_EXIT_ERROR;
-        }
-
-        this->curFrame++;
     }
-
-    if (g_Supervisor.cfg.windowed || g_Supervisor.VsyncEnabled())
+    unsigned long long tickEnd = CostNow();
+    s_TickUs += tickEnd - tickBegin;
+    s_Ticks++;
+    if (!chainRes)
     {
-        if (this->curFrame != 0)
-        {
-            if (g_GameWindow.lpFrequency.LowPart != 0)
-            {
-                QueryPerformanceCounter(&perfCounter);
-                perfDiff = (f64)(perfCounter.LowPart - g_LastPerfCounter.LowPart) / (f64)g_GameWindow.lpFrequency.LowPart;
-
-                if (perfDiff < 0.0)
-                {
-                    g_LastPerfCounter.LowPart = perfCounter.LowPart;
-                    g_LastPerfCounter.HighPart = perfCounter.HighPart;
-                }
-
-                if (perfDiff >= 1.0 / 60.0 || g_GameWindow.usesRelativePath)
-                {
-                    while (perfDiff >= 1.0 / 60.0)
-                    {
-                        g_LastPerfCounter.LowPart += g_GameWindow.lpFrequency.LowPart / 60;
-                        perfDiff -= 1.0 / 60.0;
-                    }
-                    if ((i32)g_Supervisor.cfg.frameskipConfig < (i32)this->curFrame)
-                    {
-                        goto LAB_00434a18;
-                    }
-                    goto begin_loop;
-                }
-            }
-            else
-            {
-                timeBeginPeriod(1);
-                curTime = (f64)timeGetTime();
-
-                if (curTime < g_LastFrameTime)
-                {
-                    g_LastFrameTime = curTime;
-                }
-
-                timeDiff = fabs(curTime - g_LastFrameTime);
-                timeEndPeriod(1);
-
-                if (timeDiff >= 50.0 / 3.0 || g_GameWindow.usesRelativePath)
-                {
-                    while (timeDiff >= 50.0 / 3.0)
-                    {
-                        g_LastFrameTime += 50.0 / 3.0;
-                        timeDiff -= 50.0 / 3.0;
-                    }
-                    if ((i32)g_Supervisor.cfg.frameskipConfig < (i32)this->curFrame)
-                    {
-                        goto LAB_00434a18;
-                    }
-                    goto begin_loop;
-                }
-            }
-        }
+        return 0;
     }
-
-    if (!g_Supervisor.cfg.windowed && !g_Supervisor.VsyncEnabled())
+    if (chainRes == -1)
     {
-        if ((i32)g_Supervisor.cfg.frameskipConfig >= (i32)this->curFrame)
+        return -1;
+    }
+    if (draw)
+    {
+        th07::rollback::heap::SimulationScope scope;
+        CoopRefreshFadeSet();
+        g_Supervisor.d3dDevice->BeginScene();
+        g_AnmManager->ResetVertexBuffer();
+        g_Supervisor.fogEnabled = 255;
+        g_Supervisor.DisableFog();
+        g_Chain.RunDrawChain();
+        g_AnmManager->Flush();
+        g_Supervisor.d3dDevice->SetTexture(0, NULL);
+        g_Supervisor.d3dDevice->EndScene();
+        s_DrawUs += CostNow() - tickEnd;
+        s_Draws++;
+    }
+    return 1;
+}
+
+f32 MpDisplayedFps()
+{
+    return s_MpFps;
+}
+
+// FUNCTION: TH07 0x004346e0
+RenderResult GameWindow::Render()
+{
+    f64 now = MpNow();
+    if (s_MpNextFrameTime < 0.0 || now - s_MpNextFrameTime > 0.25)
+    {
+        s_MpNextFrameTime = now;
+    }
+    if (now < s_MpNextFrameTime)
+    {
+        if ((s_MpNextFrameTime - now) * 1000.0 >= 1.5)
         {
+            Sleep(1);
+        }
+        return RENDER_RESULT_KEEP_RUNNING;
+    }
+    i32 present = 0;
+    i32 status = MpRunHostTick(&present);
+    if (status == 0)
+    {
+        return RENDER_RESULT_EXIT_SUCCESS;
+    }
+    if (status == -1)
+    {
+        return RENDER_RESULT_EXIT_ERROR;
+    }
+    if (present == 2)
+    {
+        s_MpNextFrameTime += 1.0 / 60.0;
+    }
+    else if (present)
+    {
+        s_MpNextFrameTime += 1.0 / 60.0;
+        {
+            th07::rollback::heap::RuntimeScope runtime;
             Present();
-            goto begin_loop;
         }
-
-    LAB_00434a18:
-        Present();
-        this->curFrame = 0;
-        g_FrameCount++;
+        s_MpFpsFrames++;
+        f64 shown = MpNow();
+        if (s_MpFpsSecond < 0.0 || shown < s_MpFpsSecond)
+        {
+            s_MpFpsSecond = shown;
+            s_MpFpsFrames = 0;
+        }
+        else if (shown - s_MpFpsSecond >= 1.0)
+        {
+            s_MpFps = (f32)(s_MpFpsFrames / (shown - s_MpFpsSecond));
+            s_MpFpsSecond = shown;
+            s_MpFpsFrames = 0;
+        }
     }
-
+    else
+    {
+        Sleep(1);
+    }
     return RENDER_RESULT_KEEP_RUNNING;
 }
 
@@ -301,8 +347,9 @@ i32 GameWindow::CreateGameWindow(HINSTANCE hInstance)
     }
     else
     {
-        width = GetSystemMetrics(SM_CXFIXEDFRAME) * 2 + 640;
-        height = 480 + GetSystemMetrics(SM_CYFIXEDFRAME) * 2 + GetSystemMetrics(SM_CYCAPTION);
+        width = GetSystemMetrics(SM_CXFIXEDFRAME) * 2 + 640 * th07::launcher::WindowScale() / 2;
+        height = 480 * th07::launcher::WindowScale() / 2 + GetSystemMetrics(SM_CYFIXEDFRAME) * 2 +
+                 GetSystemMetrics(SM_CYCAPTION);
         g_GameWindow.window = CreateWindowExA(
             0, "BASE", "ìåï˚ódÅXñ≤Å@Å` Perfect Cherry Blossom. ver 1.00b",
             WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX,
@@ -820,14 +867,7 @@ ZunResult GameWindow::CheckForRunningGameInstance(HINSTANCE hInstance)
     STARTUPINFO startupInfo;
     char exePath[264];
 
-    // STRING: TH07 0x0049732c
-    g_Mutex = CreateMutexA(NULL, 1, "Touhou YouYouMu App");
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
-        // STRING: TH07 0x00497314
-        g_GameErrorContext.Fatal("ìÒÇ¬ÇÕãNìÆÇ≈Ç´Ç‹ÇπÇÒ\r\n");
-        return ZUN_ERROR;
-    }
+    g_Mutex = CreateMutexA(NULL, 1, NULL);
 
     startupInfo.cb = sizeof(startupInfo);
     memset(&startupInfo.lpReserved, 0, sizeof(startupInfo) - 4);

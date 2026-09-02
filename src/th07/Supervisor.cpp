@@ -1,4 +1,8 @@
 #include "Supervisor.hpp"
+#include "FrameInput.hpp"
+#include "multi/RollbackHeap.h"
+#include "multi/Session.h"
+#include "GameWindow.hpp"
 
 #include <dinput.h>
 #include <stdio.h>
@@ -46,20 +50,8 @@ u16 g_NumOfFramesInputsWereHeld;
 // GLOBAL: TH07 0x00575950
 Supervisor g_Supervisor;
 
-// GLOBAL: TH07 0x0135dfec
-u32 g_FpsUpdateCounter;
-
-// GLOBAL: TH07 0x0135dff0
-char g_ReplayFpsBuffer[256];
-
 // GLOBAL: TH07 0x0135e0f0
 char g_FpsCounterBuffer[256];
-
-// GLOBAL: TH07 0x0135e1f0
-u32 g_NumFramesSinceLastTime;
-
-// GLOBAL: TH07 0x0135e298
-LARGE_INTEGER g_PerformanceCounter;
 
 // FUNCTION: TH07 0x00437903
 void Supervisor::DebugPrint2(const char *fmt, ...)
@@ -166,14 +158,15 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     g_AnmManager->offset.y = 0.0f;
     g_AnmManager->offset.x = 0.0f;
     g_Supervisor.fogEnabled = 255;
-    if (g_SoundPlayer.backgroundMusic)
+    if (g_SoundPlayer.backgroundMusic && !g_SoundSilenced)
     {
+        th07::rollback::heap::RuntimeScope runtime;
         g_SoundPlayer.backgroundMusic->UpdateFadeOut();
     }
     if (!g_GameManager.slowModeSlowActive)
     {
         g_LastFrameRawInput = g_CurFrameRawInput;
-        g_CurFrameRawInput = Controller::GetInput();
+        g_CurFrameRawInput = g_FrameInputs->menu;
         g_IsEighthFrameOfHeldInput = 0;
         if (g_LastFrameRawInput == g_CurFrameRawInput)
         {
@@ -197,7 +190,7 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     else
     {
-        g_CurFrameRawInput |= Controller::GetInput();
+        g_CurFrameRawInput |= g_FrameInputs->menu;
     }
     if (arg->wantedState != arg->curState)
     {
@@ -701,10 +694,11 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     arg->isInEnding = 0;
     arg->renderSkipFrames = 0;
     arg->lastTotalPlayTimeUpdate = timeGetTime();
-    g_Rng.SetSeed(arg->lastTotalPlayTimeUpdate);
+    g_Rng.SetSeed((u16)(g_GameManager.sessionSeed ^ (g_GameManager.sessionSeed >> 16)));
     arg->SetupDInput();
     if (!arg->midiOutput)
     {
+        th07::rollback::heap::RuntimeScope runtime;
         arg->midiOutput = new MidiOutput;
     }
     if (arg->midiOutput)
@@ -837,135 +831,23 @@ ZunResult Supervisor::RegisterChain()
     return ZUN_SUCCESS;
 }
 
-#pragma var_order(fps, elapsedTimeInSecs, curTime, targetFps, curPerfCounter, \
-                  fpsCounterPos, replayFpsCounterPos)
 // FUNCTION: TH07 0x004390a5
 void Supervisor::DrawFpsCounter(i32 param_1)
 {
-    Float3 replayFpsCounterPos;
-    Float3 fpsCounterPos;
-    LARGE_INTEGER curPerfCounter;
-    f32 targetFps;
-    DWORD curTime;
-    f32 elapsedTimeInSecs;
-    f32 fps;
-
-    if (!g_GameManager.slowModeSlowActive)
+    if (g_Supervisor.wantedState == 1)
     {
-        g_NumFramesSinceLastTime =
-            g_NumFramesSinceLastTime + 1 + (u32)g_Supervisor.cfg.frameskipConfig;
-
-        if (g_Supervisor.perfFrequency.LowPart == 0)
-        {
-            static DWORD g_LastTime = timeGetTime();
-
-            curTime = timeGetTime();
-            if (curTime < g_LastTime)
-            {
-                g_LastTime = curTime;
-                g_NumFramesSinceLastTime = 0;
-            }
-            if (curTime - g_LastTime >= 500)
-            {
-                elapsedTimeInSecs = (f32)(curTime - g_LastTime) / 1000.0f;
-                g_LastTime = curTime;
-
-            MERGE:
-                fps = (f32)g_NumFramesSinceLastTime / elapsedTimeInSecs;
-                g_NumFramesSinceLastTime = 0;
-                // STRING: TH07 0x00496fa0
-                sprintf(g_FpsCounterBuffer, "%.02ffps", (f64)fps);
-                if (g_GameManager.notInMenu && param_1 != 0)
-                {
-                    targetFps = 60.0f;
-                    g_Supervisor.fpsAccumulator = g_Supervisor.fpsAccumulator + targetFps;
-                    if (targetFps * 0.9f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps;
-                    }
-                    else if (targetFps * 0.7f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.8f;
-                    }
-                    else if (targetFps * 0.5f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.6f;
-                    }
-                    else
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.5f;
-                    }
-
-                    if (!g_GameManager.replay)
-                    {
-                        g_Supervisor.curFps = fps + 0.5f;
-                    }
-                    else
-                    {
-                        // STRING: TH07 0x00496f9c
-                        sprintf(g_ReplayFpsBuffer, "%2d", (i32)g_Supervisor.curFps);
-                    }
-                }
-            }
-            goto LAB_00439350;
-        }
-
-        if (g_PerformanceCounter.LowPart == 0)
-        {
-            QueryPerformanceCounter(&g_PerformanceCounter);
-        }
-        QueryPerformanceCounter(&curPerfCounter);
-        if (curPerfCounter.LowPart < g_PerformanceCounter.LowPart)
-        {
-            g_PerformanceCounter.LowPart = curPerfCounter.LowPart;
-            g_PerformanceCounter.HighPart = curPerfCounter.HighPart;
-            g_NumFramesSinceLastTime = 0;
-        }
-        if (curPerfCounter.LowPart >= g_PerformanceCounter.LowPart +
-                                          (g_Supervisor.perfFrequency.LowPart >> 1))
-        {
-            elapsedTimeInSecs =
-                (f32)(curPerfCounter.LowPart - g_PerformanceCounter.LowPart) /
-                (f32)g_Supervisor.perfFrequency.LowPart;
-            g_PerformanceCounter.LowPart = curPerfCounter.LowPart;
-            g_PerformanceCounter.HighPart = curPerfCounter.HighPart;
-            g_FpsUpdateCounter++;
-            if (g_FpsUpdateCounter % 8 == 0)
-            {
-                g_Supervisor.CheckTiming();
-            }
-            goto MERGE;
-        }
+        MpDrawTitleSession();
+        return;
     }
-
-LAB_00439350:
     if (!g_Supervisor.isInEnding && param_1 != 0)
     {
+        Float3 fpsCounterPos;
+        sprintf(g_FpsCounterBuffer, "%.02ffps", (f64)MpDisplayedFps());
         fpsCounterPos.x = 512.0f;
         fpsCounterPos.y = 464.0f;
         fpsCounterPos.z = 0.0f;
         g_AsciiManager.AddString(&fpsCounterPos, g_FpsCounterBuffer);
-        if (g_GameManager.replay &&
-            g_GameManager.notInMenu)
-        {
-            replayFpsCounterPos.x = 384.0f;
-            replayFpsCounterPos.y = 448.0f;
-            replayFpsCounterPos.z = 0.0f;
-            if (g_Supervisor.isFpsBad)
-            {
-                g_AsciiManager.color = 0xffff4040;
-            }
-            else
-            {
-                g_AsciiManager.color = 0xffffffd0;
-            }
-            g_AsciiManager.AddString(&replayFpsCounterPos, g_ReplayFpsBuffer);
-            g_AsciiManager.color = 0xffffffff;
-        }
+        MpDrawPlaySession();
     }
 }
 

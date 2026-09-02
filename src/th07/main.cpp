@@ -16,6 +16,10 @@
 #include "Supervisor.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
+#include "multi/Launcher.h"
+#include "multi/MpConfig.h"
+#include "multi/RollbackHeap.h"
+#include "multi/Session.h"
 
 // FUNCTION: TH07 0x00433f90
 void AnmManager::TakeScreenshotIfRequested()
@@ -40,6 +44,23 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     i32 res;
     tagMSG msg;
 
+    th07::mp::InstallCrashFilter();
+    {
+        th07::launcher::Selection launch = {};
+        if (!th07::launcher::Run(&launch) || launch.mode == th07::launcher::kCancelled)
+        {
+            return 0;
+        }
+        if (launch.mode != th07::launcher::kSkipped)
+        {
+            for (i32 seat = 0; seat < launch.playerCount; seat++)
+            {
+                th07::mp::SetPlayerName(seat, launch.playerName[seat]);
+            }
+        }
+    }
+    MpInitSession();
+
     res = RENDER_RESULT_KEEP_RUNNING;
     g_Supervisor.hInstance = hInstance;
     SystemParametersInfoA(SPI_GETSCREENSAVEACTIVE, 0,
@@ -61,6 +82,7 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     {
         goto stop;
     }
+    th07::launcher::ApplyGameConfig(); // after th07.cfg, which would overwrite it
 
     GameWindow::ChecksumExecutable();
     QueryPerformanceFrequency(&g_GameWindow.lpFrequency);
@@ -84,13 +106,17 @@ start:
     g_SoundPlayer.InitializeDSound(g_GameWindow.window);
     Controller::GetJoystickCaps();
     Controller::ResetKeyboard();
-    g_AnmManager = new AnmManager();
-    if (!g_Supervisor.cfg.windowed)
     {
-        WINNLSEnableIME(0, 0);
-        ShowCursor(0);
+        // Game objects from here on live in the rollback arena.
+        th07::rollback::heap::SimulationScope initScope;
+        g_AnmManager = new AnmManager();
+        if (!g_Supervisor.cfg.windowed)
+        {
+            WINNLSEnableIME(0, 0);
+            ShowCursor(0);
+        }
+        res = g_Supervisor.RegisterChain();
     }
-    res = g_Supervisor.RegisterChain();
     if (res != ZUN_SUCCESS)
     {
         if (res == ZUN_ERROR)
@@ -101,7 +127,6 @@ start:
         goto cleanup;
     }
     res = RENDER_RESULT_KEEP_RUNNING;
-    g_GameWindow.curFrame = -30;
     while (!g_GameWindow.isAppClosing)
     {
         if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
@@ -185,6 +210,7 @@ stop:
         }
         goto start;
     }
+    th07::launcher::RestoreGameConfig();
     FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
                                 sizeof(GameConfiguration));
     SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE,

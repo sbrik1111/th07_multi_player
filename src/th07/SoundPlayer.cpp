@@ -6,6 +6,13 @@
 #include "dsutil.hpp"
 #include "dxutil.hpp"
 #include "utils.hpp"
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
+#include "multi/RollbackHeap.h"
+#define SOUND_RUNTIME_SCOPE() th07::rollback::heap::RuntimeScope soundRuntimeScope
+
+i32 g_SoundSilenced;
+i32 (*g_BgmCommandFilter)(i32 opcode, i32 arg1, const char *name);
 
 // GLOBAL: TH07 0x0049ea88
 SoundBufferIdxVolume SOUND_BUFFER_IDX_VOL[38] = {
@@ -82,6 +89,7 @@ SoundPlayer g_SoundPlayer;
 // FUNCTION: TH07 0x0044b560
 ZunResult SoundPlayer::InitializeDSound(HWND gameWindow)
 {
+    SOUND_RUNTIME_SCOPE();
     WAVEFORMATEX wavFormat;
     LPVOID audioBuffer1Start;
     DWORD audioBuffer1Len;
@@ -145,6 +153,7 @@ ZunResult SoundPlayer::InitializeDSound(HWND gameWindow)
 // FUNCTION: TH07 0x0044b830
 ZunResult SoundPlayer::Release()
 {
+    SOUND_RUNTIME_SCOPE();
     i32 i;
 
     if (!this->manager)
@@ -181,6 +190,7 @@ WAVEFORMATEX *SoundPlayer::GetWavFormatData(u8 *soundData,
                                             i32 *formatSize,
                                             u32 fileSizeExcludingFormat)
 {
+    SOUND_RUNTIME_SCOPE();
     while (fileSizeExcludingFormat > 0)
     {
         *formatSize = *(i32 *)(soundData + 4);
@@ -198,6 +208,7 @@ WAVEFORMATEX *SoundPlayer::GetWavFormatData(u8 *soundData,
 // FUNCTION: TH07 0x0044baf0
 i32 SoundPlayer::GetFmtIndexByName(const char *param_1)
 {
+    SOUND_RUNTIME_SCOPE();
     char local_8c[128];
     i32 local_c;
     const char *local_8;
@@ -236,6 +247,7 @@ i32 SoundPlayer::GetFmtIndexByName(const char *param_1)
 // FUNCTION: TH07 0x0044bd00
 ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
 {
+    SOUND_RUNTIME_SCOPE();
     u8 *soundFileDat;
     WAVEFORMATEX wavData;
     WAVEFORMATEX *audioPtr1;
@@ -264,7 +276,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     {
         // STRING: TH07 0x00496000
         g_GameErrorContext.Log("Wav ファイルじゃない %s\r\n", path);
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -276,7 +288,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     if (strncmp((char *)cursor, "WAVE", 4) != 0)
     {
         g_GameErrorContext.Log("Wav ファイルじゃない? %s\r\n", path);
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -288,7 +300,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     {
         // STRING: TH07 0x00495fdc
         g_GameErrorContext.Log("Wav ファイルじゃない? %s\r\n", path);
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -299,7 +311,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     if (!wavDataPtr)
     {
         g_GameErrorContext.Log("Wav ファイルじゃない? %s\r\n", path);
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -311,7 +323,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     if (FAILED(this->directSoundHdl->CreateSoundBuffer(
             &dsBuffer, &this->soundBuffers[idx], NULL)))
     {
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -319,7 +331,7 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
             0, formatSize, (LPVOID *)&audioPtr1, &audioSize1,
             (LPVOID *)&audioPtr2, &audioSize2, 0)))
     {
-        free(soundFileDat);
+        GameFree(soundFileDat);
         return ZUN_ERROR;
     }
 
@@ -330,13 +342,14 @@ ZunResult SoundPlayer::LoadSound(i32 idx, const char *path)
     }
     this->soundBuffers[idx]->Unlock(audioPtr1, audioSize1, audioPtr2,
                                     audioSize2);
-    free(soundFileDat);
+    GameFree(soundFileDat);
     return ZUN_SUCCESS;
 }
 
 // FUNCTION: TH07 0x0044bff0
 ZunResult SoundPlayer::LoadFmt(const char *param_1)
 {
+    SOUND_RUNTIME_SCOPE();
     this->bgmFmtData = (ThBgmFormat *)FileSystem::OpenFile(param_1, 0);
     return this->bgmFmtData != NULL ? ZUN_SUCCESS : ZUN_ERROR;
 }
@@ -345,6 +358,7 @@ ZunResult SoundPlayer::LoadFmt(const char *param_1)
 // FUNCTION: TH07 0x0044c020
 ZunResult SoundPlayer::StartBGM(const char *path)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD blockAlign;
     DWORD samplesPerSec;
     HRESULT hr;
@@ -391,6 +405,7 @@ ZunResult SoundPlayer::StartBGM(const char *path)
 // FUNCTION: TH07 0x0044c1b0
 ZunResult SoundPlayer::ReopenBGM(const char *name)
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->backgroundMusic)
     {
         return ZUN_ERROR;
@@ -408,6 +423,7 @@ ZunResult SoundPlayer::ReopenBGM(const char *name)
 // FUNCTION: TH07 0x0044c220
 ZunResult SoundPlayer::PreloadBGM(i32 idx, const char *path)
 {
+    SOUND_RUNTIME_SCOPE();
     LPBYTE lpBuffer;
     HANDLE handle;
     DWORD bytesRead;
@@ -468,6 +484,7 @@ ZunResult SoundPlayer::PreloadBGM(i32 idx, const char *path)
 // FUNCTION: TH07 0x0044c4d0
 ZunResult SoundPlayer::LoadBGM(i32 idx)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD blockAlign;
     DWORD samplesPerSec;
     HRESULT hr;
@@ -528,6 +545,7 @@ ZunResult SoundPlayer::LoadBGM(i32 idx)
 // FUNCTION: TH07 0x0044c6b0
 void SoundPlayer::StopBGM()
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->backgroundMusic)
     {
         // STRING: TH07 0x00495ed8
@@ -556,6 +574,7 @@ void SoundPlayer::StopBGM()
 // FUNCTION: TH07 0x0044c7d0
 ZunResult SoundPlayer::InitSoundBuffers()
 {
+    SOUND_RUNTIME_SCOPE();
     i32 i;
 
     if (!this->manager)
@@ -597,6 +616,11 @@ ZunResult SoundPlayer::InitSoundBuffers()
 // FUNCTION: TH07 0x0044c930
 void SoundPlayer::PlaySoundByIdx(i32 idx, u32 param_2)
 {
+    SOUND_RUNTIME_SCOPE();
+    if (g_SoundSilenced)
+    {
+        return;
+    }
     i32 iVar1;
     i32 i;
 
@@ -626,6 +650,7 @@ void SoundPlayer::PlaySoundByIdx(i32 idx, u32 param_2)
 // FUNCTION: TH07 0x0044c9c0
 i32 SoundPlayer::ProcessQueues()
 {
+    SOUND_RUNTIME_SCOPE();
     LPDIRECTSOUNDBUFFER buffer2;
     i32 fmtIdx;
     char (*name)[256];
@@ -922,6 +947,7 @@ loop_breakout:
 // FUNCTION: TH07 0x0044d200
 DWORD __stdcall SoundPlayer::BackgroundMusicPlayerThread(LPVOID lpThreadParameter)
 {
+    SOUND_RUNTIME_SCOPE();
     u32 stopped;
     HRESULT hr;
     DWORD waitObj;
@@ -973,6 +999,12 @@ DWORD __stdcall SoundPlayer::BackgroundMusicPlayerThread(LPVOID lpThreadParamete
 // FUNCTION: TH07 0x0044d2f0
 void SoundPlayer::PushCommand(AudioOpcode opcode, i32 arg1, const char *arg2)
 {
+    SOUND_RUNTIME_SCOPE();
+    // Skip music commands the first run of this frame already sent.
+    if (g_BgmCommandFilter != NULL ? !g_BgmCommandFilter(opcode, arg1, arg2) : g_SoundSilenced != 0)
+    {
+        return;
+    }
     for (i32 i = 0; i < MAX_SOUND_COMMANDS; i++)
     {
         if (this->commandQueue[i].opcode != 0)

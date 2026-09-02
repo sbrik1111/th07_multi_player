@@ -7,6 +7,10 @@
 #include "ZunResult.hpp"
 #include "dsutil.hpp"
 #include "inttypes.hpp"
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
+#include "multi/RollbackHeap.h"
+#define SOUND_RUNTIME_SCOPE() th07::rollback::heap::RuntimeScope soundRuntimeScope
 
 // GLOBAL: TH07 0x0135e210
 LARGE_INTEGER g_PerfCounter;
@@ -14,6 +18,7 @@ LARGE_INTEGER g_PerfCounter;
 // FUNCTION: TH07 0x00436110
 MidiDevice::MidiDevice()
 {
+    SOUND_RUNTIME_SCOPE();
     this->handle = NULL;
     this->deviceID = 0;
 }
@@ -21,12 +26,14 @@ MidiDevice::MidiDevice()
 // FUNCTION: TH07 0x00436140
 MidiDevice::~MidiDevice()
 {
+    SOUND_RUNTIME_SCOPE();
     Close();
 }
 
 // FUNCTION: TH07 0x00436160
 u32 MidiDevice::OpenDevice(i32 deviceID)
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->handle)
     {
         if (this->deviceID != deviceID)
@@ -47,6 +54,7 @@ u32 MidiDevice::OpenDevice(i32 deviceID)
 // FUNCTION: TH07 0x004361c0
 ZunResult MidiDevice::Close()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->handle)
     {
         return ZUN_ERROR;
@@ -61,6 +69,7 @@ ZunResult MidiDevice::Close()
 // FUNCTION: TH07 0x00436200
 i32 MidiDevice::SendLongMsg(LPMIDIHDR pmh)
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->handle)
     {
         return 0;
@@ -89,6 +98,7 @@ union MidiShortMsg {
 // FUNCTION: TH07 0x00436250
 i32 MidiDevice::SendShortMsg(u8 midiStatus, u8 firstByte, u8 secondByte)
 {
+    SOUND_RUNTIME_SCOPE();
     MidiShortMsg pkt;
 
     if (!this->handle)
@@ -105,6 +115,7 @@ i32 MidiDevice::SendShortMsg(u8 midiStatus, u8 firstByte, u8 secondByte)
 // FUNCTION: TH07 0x004362a0
 MidiTimer::MidiTimer()
 {
+    SOUND_RUNTIME_SCOPE();
     timeGetDevCaps(&this->timeCaps, 8);
     this->timerId = 0;
 }
@@ -112,6 +123,7 @@ MidiTimer::MidiTimer()
 // FUNCTION: TH07 0x004362d0
 MidiTimer::~MidiTimer()
 {
+    SOUND_RUNTIME_SCOPE();
     StopTimer();
     timeEndPeriod(this->timeCaps.wPeriodMin);
 }
@@ -119,6 +131,7 @@ MidiTimer::~MidiTimer()
 // FUNCTION: TH07 0x00436300
 u32 MidiTimer::StartTimer(u32 delay, LPTIMECALLBACK cb, DWORD_PTR data)
 {
+    SOUND_RUNTIME_SCOPE();
     StopTimer();
     timeBeginPeriod(this->timeCaps.wPeriodMin);
     if (cb)
@@ -138,6 +151,7 @@ u32 MidiTimer::StartTimer(u32 delay, LPTIMECALLBACK cb, DWORD_PTR data)
 // FUNCTION: TH07 0x00436380
 i32 MidiTimer::StopTimer()
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->timerId != 0)
     {
         timeKillEvent(this->timerId);
@@ -152,6 +166,7 @@ void CALLBACK MidiTimer::DefaultTimerCallback(u32 delay, u32 wPeriodMin,
                                               DWORD_PTR dwUser, DWORD_PTR dw1,
                                               DWORD_PTR dw2)
 {
+    SOUND_RUNTIME_SCOPE();
     MidiTimer *timer = (MidiTimer *)dwUser;
 
     timer->OnTimerElapsed();
@@ -160,6 +175,7 @@ void CALLBACK MidiTimer::DefaultTimerCallback(u32 delay, u32 wPeriodMin,
 // FUNCTION: TH07 0x004363e0
 u16 MidiOutput::Ntohs(u16 x)
 {
+    SOUND_RUNTIME_SCOPE();
     u8 tmp[2];
     tmp[0] = ((u8 *)&x)[1];
     tmp[1] = ((u8 *)&x)[0];
@@ -170,6 +186,7 @@ u16 MidiOutput::Ntohs(u16 x)
 // FUNCTION: TH07 0x00436400
 u32 MidiOutput::SkipVariableLength(u8 **curTrackDataCursor)
 {
+    SOUND_RUNTIME_SCOPE();
     u32 length;
     u8 tmp;
 
@@ -186,6 +203,7 @@ u32 MidiOutput::SkipVariableLength(u8 **curTrackDataCursor)
 // FUNCTION: TH07 0x00436450
 MidiOutput::MidiOutput()
 {
+    SOUND_RUNTIME_SCOPE();
     i32 local_18;
     i32 local_14;
 
@@ -216,6 +234,7 @@ MidiOutput::MidiOutput()
 // FUNCTION: TH07 0x004365b0
 MidiOutput::~MidiOutput()
 {
+    SOUND_RUNTIME_SCOPE();
     StopPlayback();
     ClearTracks();
     for (i32 i = 0; i < 32; i++)
@@ -227,6 +246,7 @@ MidiOutput::~MidiOutput()
 // FUNCTION: TH07 0x00436650
 ZunResult MidiOutput::ReadFileData(i32 fileIdx, const char *path)
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->fileIdx == fileIdx)
     {
         StopPlayback();
@@ -248,6 +268,7 @@ ZunResult MidiOutput::ReadFileData(i32 fileIdx, const char *path)
 // FUNCTION: TH07 0x004366c0
 void MidiOutput::ReleaseFileData(u32 idx)
 {
+    SOUND_RUNTIME_SCOPE();
     ZunMemory::Free(this->midiFileData[idx]);
     this->midiFileData[idx] = NULL;
 }
@@ -255,6 +276,7 @@ void MidiOutput::ReleaseFileData(u32 idx)
 // FUNCTION: TH07 0x00436700
 void MidiOutput::ClearTracks()
 {
+    SOUND_RUNTIME_SCOPE();
     i32 i;
 
     for (i = 0; i < this->numTracks; i++)
@@ -271,6 +293,7 @@ void MidiOutput::ClearTracks()
 // FUNCTION: TH07 0x00436790
 ZunResult MidiOutput::ParseFile(i32 fileIdx)
 {
+    SOUND_RUNTIME_SCOPE();
     u8 hdrRaw[8];
     i32 i;
     u8 *currentCursor;
@@ -323,6 +346,7 @@ ZunResult MidiOutput::ParseFile(i32 fileIdx)
 // FUNCTION: TH07 0x004369c0
 ZunResult MidiOutput::LoadFile(const char *path)
 {
+    SOUND_RUNTIME_SCOPE();
     if (ReadFileData(31, path) != ZUN_SUCCESS)
     {
         return ZUN_ERROR;
@@ -336,6 +360,7 @@ ZunResult MidiOutput::LoadFile(const char *path)
 // FUNCTION: TH07 0x00436a00
 void MidiOutput::LoadTracks()
 {
+    SOUND_RUNTIME_SCOPE();
     MidiTrack *track;
     i32 i;
 
@@ -357,6 +382,7 @@ void MidiOutput::LoadTracks()
 // FUNCTION: TH07 0x00436ad0
 ZunResult MidiOutput::Play()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->tracks)
     {
         return ZUN_ERROR;
@@ -373,6 +399,7 @@ ZunResult MidiOutput::Play()
 // FUNCTION: TH07 0x00436b30
 ZunResult MidiOutput::StopPlayback()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->tracks)
     {
         return ZUN_ERROR;
@@ -394,6 +421,7 @@ ZunResult MidiOutput::StopPlayback()
 // FUNCTION: TH07 0x00436bc0
 ZunResult MidiOutput::UnprepareHeader(LPMIDIHDR pmh)
 {
+    SOUND_RUNTIME_SCOPE();
     i32 i;
 
     if (!pmh)
@@ -425,13 +453,14 @@ success:
     }
 
     ZunMemory::Free(pmh->lpData);
-    free(pmh);
+    GameFree(pmh);
     return ZUN_SUCCESS;
 }
 
 // FUNCTION: TH07 0x00436c90
 ZunResult MidiOutput::SetFadeOut(i32 interval)
 {
+    SOUND_RUNTIME_SCOPE();
     this->fadeOutVolumeMultiplier = 0.0f;
     this->fadeOutInterval = interval;
     this->fadeOutElapsedMs = 0;
@@ -444,6 +473,7 @@ ZunResult MidiOutput::SetFadeOut(i32 interval)
 // FUNCTION: TH07 0x00436ce0
 void MidiOutput::OnTimerElapsed()
 {
+    SOUND_RUNTIME_SCOPE();
     u64 local_14;
     i32 i;
     i32 trackLoaded;
@@ -503,6 +533,7 @@ void MidiOutput::OnTimerElapsed()
 // FUNCTION: TH07 0x00436f50
 void MidiOutput::ProcessMsg(MidiTrack *track)
 {
+    SOUND_RUNTIME_SCOPE();
     MidiTrack *curTrack2;
     MidiTrack *curTrack1;
     i32 bpm;
@@ -687,6 +718,7 @@ void MidiOutput::ProcessMsg(MidiTrack *track)
 // FUNCTION: TH07 0x004377f0
 void MidiOutput::FadeOutSetVolume(i32 vol)
 {
+    SOUND_RUNTIME_SCOPE();
     i32 volumeClamped;
     u32 midiStatus;
     u32 volumeByte;
@@ -721,22 +753,26 @@ void MidiOutput::FadeOutSetVolume(i32 vol)
 // FUNCTION: TH07 0x004378b0
 void DummyMidiTimer::OnTimerElapsed()
 {
+    SOUND_RUNTIME_SCOPE();
     QueryPerformanceCounter(&g_PerfCounter);
 }
 
 // FUNCTION: TH07 0x004378d0
 void MidiTimer::StartTimerDefault()
 {
+    SOUND_RUNTIME_SCOPE();
     StartTimer(6, NULL, 0);
 }
 
 // FUNCTION: TH07 0x004378f0
 void Supervisor::StopMidiTimer(MidiTimer *timer)
 {
+    SOUND_RUNTIME_SCOPE();
     timer->StopTimer();
 }
 
 // FUNCTION: TH07 0x0044d620 FOLDED
 void MidiTimer::OnTimerElapsed()
 {
+    SOUND_RUNTIME_SCOPE();
 }

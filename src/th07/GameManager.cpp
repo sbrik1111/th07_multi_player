@@ -11,6 +11,7 @@
 #include "GameErrorContext.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
+#include "multi/Session.h"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -506,12 +507,20 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         SAFE_DELETE(arg->defaultCfg);
         SAFE_DELETE(arg->globals);
 
+        // The same RNG on every peer.
+        u32 mixed = (arg->sessionSeed ^ (arg->gamesStarted * 0x9e3779b9u)) * 0x45d9f3bu;
+        g_Rng.SetSeed((u16)(mixed ^ (mixed >> 16)));
+        arg->gamesStarted++;
         size = g_Rng.GetRandomU32InRange(65535) + 16;
         arg->tmpBuffer = GameAlloc(size);
         arg->defaultCfg = new GameConfiguration;
         arg->globals = new ZunGlobals;
         InitializeRngAndCsum();
         *arg->defaultCfg = g_Supervisor.cfg;
+        // Peer-local settings must not affect the simulation.
+        arg->defaultCfg->lifeCount = 2;
+        arg->defaultCfg->bombCount = 3;
+        arg->defaultCfg->slowMode = 0;
         ZunMemory::Free(arg->tmpBuffer);
         arg->cherry = arg->globals->cherryStart;
         if (g_GameManager.difficulty >= 4)

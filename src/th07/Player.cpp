@@ -2338,6 +2338,16 @@ u32 Player::OnDrawHighPrio(Player *arg)
         arg->playerSprite.pos.y =
             g_GameManager.arcadeRegionTopLeftPos.y + arg->positionCenter.y;
         arg->playerSprite.pos.z = 0.0f;
+        u32 fade = CoopPlayerAlpha(arg);
+        D3DCOLOR bodyColor = arg->playerSprite.color.color;
+        D3DCOLOR optionColor0 = arg->optionsSprite[0].color.color;
+        D3DCOLOR optionColor1 = arg->optionsSprite[1].color.color;
+        if (fade < 255)
+        {
+            arg->playerSprite.color.bytes.a = (u8)(arg->playerSprite.color.bytes.a * fade / 255);
+            arg->optionsSprite[0].color.bytes.a = (u8)(arg->optionsSprite[0].color.bytes.a * fade / 255);
+            arg->optionsSprite[1].color.bytes.a = (u8)(arg->optionsSprite[1].color.bytes.a * fade / 255);
+        }
         g_AnmManager->DrawNoRotation(&arg->playerSprite);
         if (arg->optionState != OPTION_HIDDEN &&
             (arg->playerState == PLAYER_STATE_ALIVE ||
@@ -2357,6 +2367,9 @@ u32 Player::OnDrawHighPrio(Player *arg)
             g_AnmManager->Draw(&arg->optionsSprite[0]);
             g_AnmManager->Draw(&arg->optionsSprite[1]);
         }
+        arg->playerSprite.color.color = bodyColor;
+        arg->optionsSprite[0].color.color = optionColor0;
+        arg->optionsSprite[1].color.color = optionColor1;
     }
     if (arg->playerState == PLAYER_STATE_BORDER &&
         arg->invulnerabilityTimer.GetCurrent() > 0)

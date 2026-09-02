@@ -1,4 +1,5 @@
 #include "Controller.hpp"
+#include "FrameInput.hpp"
 
 #include <dinput.h>
 
@@ -7,12 +8,17 @@
 #include "dsutil.hpp"
 #include "inttypes.hpp"
 #include "utils.hpp"
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
 
 // GLOBAL: TH07 0x0049fc88
 static JOYCAPSA g_JoystickCaps;
 
 // GLOBAL: TH07 0x0049fe1c
 static u16 g_AutoFocusTimer;
+
+const FrameInputs *g_FrameInputs;
+static i32 g_KeyboardOnly;
 
 #define KEY_PRESSED(scancode, thButton) \
     ((keyboardState[scancode] & 0x80) != 0 ? thButton : 0)
@@ -377,7 +383,7 @@ u16 Controller::GetInput()
         if (hr == DIERR_INPUTLOST)
         {
             g_Supervisor.keyboard->Acquire();
-            return GetControllerInput(buttons);
+            return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
         }
         buttons |= KEY_PRESSED(DIK_UP, TH_BUTTON_UP);
         buttons |= KEY_PRESSED(DIK_DOWN, TH_BUTTON_DOWN);
@@ -405,7 +411,50 @@ u16 Controller::GetInput()
         buttons |= KEY_PRESSED(DIK_RETURN, TH_BUTTON_ENTER);
         buttons |= KEY_PRESSED(DIK_R, TH_BUTTON_RESET);
     }
-    return GetControllerInput(buttons);
+    return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
+}
+
+u16 ReadDeviceButtons(i32 keyboardOnly)
+{
+    g_KeyboardOnly = keyboardOnly;
+    u16 buttons = Controller::GetInput();
+    g_KeyboardOnly = 0;
+    return buttons;
+}
+
+#pragma var_order(caps, info, buttons, distance)
+u16 ReadJoypadButtonsOf(i32 index)
+{
+    JOYCAPSA caps;
+    JOYINFOEX info;
+    u16 buttons;
+    u32 distance;
+
+    memset(&info, 0, sizeof(info));
+    info.dwSize = sizeof(info);
+    info.dwFlags = JOY_RETURNALL;
+    if (joyGetPosEx(index, &info) != JOYERR_NOERROR || joyGetDevCapsA(index, &caps, sizeof(caps)) != JOYERR_NOERROR)
+    {
+        return 0;
+    }
+    buttons = 0;
+    ControllerMapping &m = g_Supervisor.cfg.controllerMapping;
+    Controller::SetButtonFromControllerInputs(&buttons, m.shootButton, TH_BUTTON_SHOOT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.bombButton, TH_BUTTON_BOMB, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.focusButton, TH_BUTTON_FOCUS, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.menuButton, TH_BUTTON_MENU, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.upButton, TH_BUTTON_UP, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.downButton, TH_BUTTON_DOWN, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.leftButton, TH_BUTTON_LEFT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.rightButton, TH_BUTTON_RIGHT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.skipButton, TH_BUTTON_SKIP, info.dwButtons);
+    distance = (caps.wXmax - caps.wXmin) / 2 / 2;
+    buttons |= JOYSTICK_MIDPOINT(caps.wXmin, caps.wXmax) + distance < info.dwXpos ? TH_BUTTON_RIGHT : 0;
+    buttons |= info.dwXpos < JOYSTICK_MIDPOINT(caps.wXmin, caps.wXmax) - distance ? TH_BUTTON_LEFT : 0;
+    distance = (caps.wYmax - caps.wYmin) / 2 / 2;
+    buttons |= JOYSTICK_MIDPOINT(caps.wYmin, caps.wYmax) + distance < info.dwYpos ? TH_BUTTON_DOWN : 0;
+    buttons |= info.dwYpos < JOYSTICK_MIDPOINT(caps.wYmin, caps.wYmax) - distance ? TH_BUTTON_UP : 0;
+    return buttons;
 }
 
 // FUNCTION: TH07 0x004312c0

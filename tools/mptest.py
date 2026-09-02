@@ -3,8 +3,8 @@
     py -3.10 tools/mptest.py local --players 2 --seconds 40 --shots 15,30 --out wk/local
     py -3.10 tools/mptest.py udp --players 2 [--rollback] --seconds 60 --out wk/udp
 
-Each instance gets run/mptest/<name>/ (the exe, th16.dat and thbgm.dat hard linked) and its
-own APPDATA (never the real one) with a windowed 640x480 th16.cfg. The seat logs, the
+Each instance gets run/mptest/<name>/ (the exe, th07.dat and thbgm.dat hard linked) and its
+own windowed th07.cfg (th07 keeps its cfg and score file beside the exe). The seat logs, the
 screenshots (--shots: seconds after the start) and a summary go to --out. Extra environment:
 --env NAME=VALUE (all instances), --seat-env SEAT:NAME=VALUE.
 """
@@ -23,30 +23,22 @@ RUN = ROOT / "run"
 def prepare(name, exe):
     d = RUN / "mptest" / name
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(exe, d / "th16.exe")
-    for data in ("th16.dat", "thbgm.dat"):
+    shutil.copy2(exe, d / "th07.exe")
+    for data in ("th07.dat", "thbgm.dat"):
         target = d / data
         if not target.exists():
             try:
                 os.link(RUN / data, target)
             except OSError:
                 shutil.copy2(RUN / data, target)
-    appdata = d / "appdata"
-    save = appdata / "ShanghaiAlice" / "th16"
-    if save.exists():
-        shutil.rmtree(save)
-    save.mkdir(parents=True)
-    # th16's defaults (GameConfig::SetDefaults), then the test's window and no startup dialog
-    cfg = bytearray(bytes.fromhex(
-        "020016000000010002000500ffffffffffffffffffff0300580258020001010500026450000200000001000000"
-        "0000800000008000000000").ljust(100, bytes(1)))
-    # th16.cfg is Config +4 (GameConfig): +0x1f window mode (3 = 640x480 windowed),
-    # +0x28 bit 0x100 the startup dialog (off)
-    cfg[0x1f] = 3
-    flags = int.from_bytes(cfg[0x28:0x2c], "little") & ~0x100
-    cfg[0x28:0x2c] = flags.to_bytes(4, "little")
-    (save / "th16.cfg").write_bytes(bytes(cfg))
-    return d, appdata
+    for old in ("score.dat", "log.txt"):
+        if (d / old).exists():
+            (d / old).unlink()
+    # th07.cfg (GameConfiguration, 0x38 bytes): the user's from run/th07.cfg, windowed (+0x22)
+    cfg = bytearray((RUN / "th07.cfg").read_bytes())
+    cfg[0x22] = 1
+    (d / "th07.cfg").write_bytes(bytes(cfg))
+    return d, None
 
 
 def main():
@@ -58,7 +50,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=40)
     ap.add_argument("--shots", default="")
     ap.add_argument("--out", default="wk/mptest")
-    ap.add_argument("--exe", default=str(ROOT / "build" / "th16.exe"))
+    ap.add_argument("--exe", default=str(ROOT / "build" / "th07.exe"))
     ap.add_argument("--port", type=int, default=28020)
     ap.add_argument("--env", action="append", default=[])
     ap.add_argument("--seat-env", action="append", default=[])
@@ -85,24 +77,23 @@ def main():
     for seat in range(count):
         d, appdata = prepare(args.tag + chr(ord("a") + seat), args.exe)
         env = dict(os.environ)
-        env["APPDATA"] = str(appdata)
-        env["TH16_MP_MODE"] = args.mode
-        env["TH16_MP_PLAYERS"] = str(args.players)
-        env["TH16_MP_SEAT"] = str(seat)
-        env["TH16_MP_LOG"] = str(out / f"seat{seat + 1}.log")
-        env["TH16_MP_TEST_TITLE_BOT"] = "1"
+        env["TH07_MP_MODE"] = args.mode
+        env["TH07_MP_PLAYERS"] = str(args.players)
+        env["TH07_MP_SEAT"] = str(seat)
+        env["TH07_MP_LOG"] = str(out / f"seat{seat + 1}.log")
+        env["TH07_MP_TEST_TITLE_BOT"] = "1"
         if not args.no_bot:
-            env["TH16_MP_TEST_BOT"] = "1"
+            env["TH07_MP_TEST_BOT"] = "1"
         if args.mode == "udp":
-            env["TH16_MP_SESSION"] = "0x20260913"
-            env["TH16_MP_ROLLBACK"] = "1" if args.rollback else "0"
-            env["TH16_MP_TEST_DELAY"] = "0" if args.rollback else str(args.delay)
-            env["TH16_MP_BIND"] = f"127.0.0.1:{args.port + seat}"
+            env["TH07_MP_SESSION"] = "0x20260913"
+            env["TH07_MP_ROLLBACK"] = "1" if args.rollback else "0"
+            env["TH07_MP_TEST_DELAY"] = "0" if args.rollback else str(args.delay)
+            env["TH07_MP_BIND"] = f"127.0.0.1:{args.port + seat}"
             # guests talk to the host; the host finds the guests at their bind ports
             if proxy is not None:
-                env["TH16_MP_PEER"] = f"127.0.0.1:{proxy_base + (seat if seat else 1)}"
+                env["TH07_MP_PEER"] = f"127.0.0.1:{proxy_base + (seat if seat else 1)}"
             else:
-                env["TH16_MP_PEER"] = f"127.0.0.1:{args.port}" if seat else f"127.0.0.1:{args.port + 1}"
+                env["TH07_MP_PEER"] = f"127.0.0.1:{args.port}" if seat else f"127.0.0.1:{args.port + 1}"
         for kv in args.env:
             k, v = kv.split("=", 1)
             env[k] = v
@@ -111,7 +102,7 @@ def main():
             if int(s) == seat:
                 k, v = kv.split("=", 1)
                 env[k] = v
-        procs.append(subprocess.Popen([str(d / "th16.exe")], cwd=str(d), env=env))
+        procs.append(subprocess.Popen([str(d / "th07.exe")], cwd=str(d), env=env))
     start = time.time()
     shots = sorted(float(s) for s in args.shots.split(",") if s)
     try:

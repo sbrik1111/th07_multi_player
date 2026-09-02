@@ -91,111 +91,45 @@ void InitConfig()
         return;
     }
     g_cfg.initialized = true;
-    g_cfg.mode = kDisabled;
+    g_cfg.mode = kLocal;
     g_cfg.localSeat = 0;
-    g_cfg.requestedP1 = -1;
-    g_cfg.requestedP2 = -1;
-    g_cfg.resolvedP1 = -1;
-    g_cfg.resolvedP2 = -1;
-    g_cfg.anmTraceFrom = kNoFrame;
-    g_cfg.anmTraceTo = kNoFrame;
-    g_cfg.stateTraceFrom = kNoFrame;
-    g_cfg.stateTraceTo = kNoFrame;
     g_cfg.menuInputDelay = 4;
     g_cfg.sessionId = 0x20260912u;
     char mode[24];
     if (EnvText("TH07_MP_MODE", mode, sizeof(mode))) {
-        if (_stricmp(mode, "local") == 0 || strcmp(mode, "1") == 0) {
-            g_cfg.mode = kLocal;
-        } else if (_stricmp(mode, "udp") == 0) {
+        if (_stricmp(mode, "udp") == 0) {
             g_cfg.mode = kUdp;
         }
     }
-    g_cfg.playerCount = EnvInt("TH07_MP_PLAYERS", 2);
-    if (g_cfg.playerCount < 2 || g_cfg.playerCount > kMaxPlayers) {
-        g_cfg.playerCount = 2;
+    const int fewest = g_cfg.mode == kUdp ? 2 : 1;
+    g_cfg.playerCount = EnvInt("TH07_MP_PLAYERS", fewest);
+    if (g_cfg.playerCount < fewest || g_cfg.playerCount > kMaxPlayers) {
+        g_cfg.playerCount = fewest;
     }
     g_cfg.localSeat = EnvInt("TH07_MP_SEAT", 0);
     if (g_cfg.localSeat < 0 || g_cfg.localSeat >= g_cfg.playerCount) {
         g_cfg.localSeat = 0;
     }
-    g_cfg.requestedP1 = EnvInt("TH07_MP_P1_CHARACTER", -1);
-    g_cfg.requestedP2 = EnvInt("TH07_MP_P2_CHARACTER", -1);
     g_cfg.testBot = EnvInt("TH07_MP_TEST_BOT", 0) != 0;
     g_cfg.testTitleBot = EnvInt("TH07_MP_TEST_TITLE_BOT", 0) != 0;
-    g_cfg.testTitleBotHold = EnvUnsigned("TH07_MP_TEST_TITLE_BOT_HOLD", 0);
-    g_cfg.testTitleBotCancelP2 = EnvInt("TH07_MP_TEST_TITLE_BOT_CANCEL_P2", 0) != 0;
-    g_cfg.testTitleBotExtra = EnvInt("TH07_MP_TEST_TITLE_BOT_EXTRA", 0) != 0;
-    g_cfg.testPlayEnding = EnvInt("TH07_MP_TEST_PLAY_ENDING", 0) != 0;
-    g_cfg.testMenuTrace = EnvInt("TH07_MP_TEST_MENU_TRACE", 0) != 0;
-    g_cfg.testInfiniteLives = EnvInt("TH07_MP_TEST_INFINITE_LIVES", 0) != 0;
     g_cfg.testBotIdle = static_cast<unsigned>(EnvInt("TH07_MP_TEST_BOT_IDLE", 0)) & ((1u << g_cfg.playerCount) - 1);
-    g_cfg.testOverIdle = EnvInt("TH07_MP_TEST_OVER_IDLE", 0) != 0;
     g_cfg.testPredictAlways = EnvInt("TH07_MP_TEST_PREDICT_ALWAYS", 0) != 0;
-    g_cfg.testPredictTalk = EnvInt("TH07_MP_TEST_PREDICT_TALK", 0) != 0;
     g_cfg.talkConfirmed = EnvInt("TH07_MP_ROLLBACK_TALK_CONFIRMED", 0) != 0;
     g_cfg.testBotMash = EnvInt("TH07_MP_TEST_BOT_MASH", 0) != 0;
     g_cfg.testBotNoShot = EnvInt("TH07_MP_TEST_BOT_NO_SHOT", 0) != 0;
-    g_cfg.testBotLegacy = EnvInt("TH07_MP_TEST_BOT_LEGACY", 0) != 0;
     g_cfg.testMenuSeat = EnvInt("TH07_MP_TEST_MENU_SEAT", -1);
     if (g_cfg.testMenuSeat < 0 || g_cfg.testMenuSeat >= g_cfg.playerCount) {
         g_cfg.testMenuSeat = -1;
     }
-    g_cfg.testPausePeriod = static_cast<unsigned>(EnvInt("TH07_MP_TEST_BOT_PAUSE_PERIOD", 0));
-    g_cfg.testPauseFrame = static_cast<unsigned>(EnvInt("TH07_MP_TEST_BOT_PAUSE_FRAME", 0));
-    g_cfg.testPauseRow = EnvInt("TH07_MP_TEST_PAUSE_ROW", -1);
-    g_cfg.testDeviceLossFrame = static_cast<unsigned>(EnvInt("TH07_MP_TEST_DEVICE_LOSS_FRAME", 0));
-    g_cfg.testDeviceLossHold = static_cast<unsigned>(EnvInt("TH07_MP_TEST_DEVICE_LOSS_HOLD", 30));
-    g_cfg.testPauseSeat = EnvInt("TH07_MP_TEST_PAUSE_SEAT", 0);
-    g_cfg.testCrashFrame = static_cast<unsigned>(EnvInt("TH07_MP_TEST_CRASH_FRAME", 0));
-    g_cfg.testEndGameFrame = EnvUnsigned("TH07_MP_TEST_END_GAME_FRAME", kNoFrame);
-    g_cfg.testExitAfterGame = EnvUnsigned("TH07_MP_TEST_EXIT_AFTER_GAME", 0);
     g_cfg.testStageClearFrame = EnvUnsigned("TH07_MP_TEST_STAGE_CLEAR_FRAME", kNoFrame);
     g_cfg.testStageClearLast = EnvInt("TH07_MP_TEST_STAGE_CLEAR_LAST", 1);
-    g_cfg.testPlayersPeriod = EnvUnsigned("TH07_MP_TEST_PLAYERS_PERIOD", 120);
-    if (g_cfg.testPlayersPeriod == 0) {
-        g_cfg.testPlayersPeriod = 120;
-    }
     g_cfg.testGhostFrame = EnvUnsigned("TH07_MP_TEST_GHOST", kNoFrame);
-    g_cfg.testGhostAll = EnvUnsigned("TH07_MP_TEST_GHOST_ALL", kNoFrame);
-    g_cfg.testGhostHold = EnvInt("TH07_MP_TEST_GHOST_HOLD", 0) != 0;
     g_cfg.testGive = EnvInt("TH07_MP_TEST_GIVE", 0);
-    g_cfg.testDifficulty = EnvInt("TH07_MP_TEST_DIFFICULTY", 0);
-    if (g_cfg.testDifficulty < 0) {
-        g_cfg.testDifficulty = 0;
-    } else if (g_cfg.testDifficulty > 3) {
-        g_cfg.testDifficulty = 3;
-    }
-    EnvList("TH07_MP_TEST_CHARACTERS", g_cfg.testCharacters, 0, 3);
-    EnvList("TH07_MP_TEST_SUBSEASONS", g_cfg.testSubseasons, 0, 3);
-    g_cfg.testBotRelease = EnvInt("TH07_MP_TEST_BOT_RELEASE", 1) != 0;
+    EnvList("TH07_MP_TEST_CHARACTERS", g_cfg.testCharacters, 0, 2);
+    EnvList("TH07_MP_TEST_SHOTTYPES", g_cfg.testShotTypes, 0, 1);
     g_cfg.testStartStage = EnvInt("TH07_MP_TEST_START_STAGE", 1);
     if (g_cfg.testStartStage < 1 || g_cfg.testStartStage > 6) {
         g_cfg.testStartStage = 1;
-    }
-    static const char* const stoneVars[kMaxPlayers][4] = {
-        {"TH07_MP_TEST_P1_MAIN", "TH07_MP_TEST_P1_WIDE", "TH07_MP_TEST_P1_NARROW", "TH07_MP_TEST_P1_SUB"},
-        {"TH07_MP_TEST_P2_MAIN", "TH07_MP_TEST_P2_WIDE", "TH07_MP_TEST_P2_NARROW", "TH07_MP_TEST_P2_SUB"},
-        {"TH07_MP_TEST_P3_MAIN", "TH07_MP_TEST_P3_WIDE", "TH07_MP_TEST_P3_NARROW", "TH07_MP_TEST_P3_SUB"},
-        {"TH07_MP_TEST_P4_MAIN", "TH07_MP_TEST_P4_WIDE", "TH07_MP_TEST_P4_NARROW", "TH07_MP_TEST_P4_SUB"},
-    };
-    static const int stoneDefaults[kMaxPlayers][4] = {
-        {0, 1, 2, 8},
-        {7, 6, 5, 4},
-        {2, 3, 4, 5},
-        {6, 7, 0, 1},
-    };
-    for (int side = 0; side < PlayerCount(); side = side + 1) {
-        for (int slot = 0; slot < 4; slot = slot + 1) {
-            int stone = EnvInt(stoneVars[side][slot], stoneDefaults[side][slot]);
-            const int maximum = slot == 0 ? 7 : 8;
-            if (stone < 0) {
-                stone = 0;
-            } else if (stone > maximum) {
-                stone = maximum;
-            }
-            g_cfg.testStone[side][slot] = stone;
-        }
     }
     int menuDelay = EnvInt("TH07_MP_MENU_INPUT_DELAY", 4);
     if (menuDelay < 0) {
@@ -211,16 +145,6 @@ void InitConfig()
         delay = 60;
     }
     g_cfg.artificialDelay = static_cast<unsigned>(delay);
-    g_cfg.anmTraceFrom = EnvUnsigned("TH07_MP_ANM_TRACE_FROM", kNoFrame);
-    g_cfg.anmTraceTo = EnvUnsigned("TH07_MP_ANM_TRACE_TO", g_cfg.anmTraceFrom);
-    if (g_cfg.anmTraceTo < g_cfg.anmTraceFrom) {
-        g_cfg.anmTraceTo = g_cfg.anmTraceFrom;
-    }
-    g_cfg.stateTraceFrom = EnvUnsigned("TH07_MP_STATE_TRACE_FROM", kNoFrame);
-    g_cfg.stateTraceTo = EnvUnsigned("TH07_MP_STATE_TRACE_TO", g_cfg.stateTraceFrom);
-    if (g_cfg.stateTraceTo < g_cfg.stateTraceFrom) {
-        g_cfg.stateTraceTo = g_cfg.stateTraceFrom;
-    }
     g_cfg.sessionId = EnvUnsigned("TH07_MP_SESSION", g_cfg.sessionId);
     if (!EnvText("TH07_MP_BIND", g_cfg.bindText, sizeof(g_cfg.bindText))) {
         _snprintf_s(g_cfg.bindText, sizeof(g_cfg.bindText), _TRUNCATE, "127.0.0.1:%u", 28020u + g_cfg.localSeat);
@@ -235,7 +159,6 @@ void InitConfig()
     }
     g_cfg.rollback = EnvInt("TH07_MP_ROLLBACK", 0) != 0;
     g_cfg.rollbackWindow = static_cast<unsigned>(EnvInt("TH07_MP_ROLLBACK_WINDOW", 8));
-    g_cfg.testFreePoison = EnvInt("TH07_MP_TEST_FREE_POISON", 0) != 0;
     static const char* const nameVars[kMaxPlayers] = {"TH07_MP_P1_NAME", "TH07_MP_P2_NAME", "TH07_MP_P3_NAME",
                                                       "TH07_MP_P4_NAME"};
     for (int seat = 0; seat < PlayerCount(); ++seat) {
@@ -295,12 +218,6 @@ const Config& Cfg()
     return g_cfg;
 }
 
-bool Enabled()
-{
-    InitConfig();
-    return g_cfg.mode != kDisabled;
-}
-
 bool UdpEnabled()
 {
     InitConfig();
@@ -313,14 +230,10 @@ bool LocalEnabled()
     return g_cfg.mode == kLocal;
 }
 
-bool AllowsMultipleWindows()
-{
-    return Enabled();
-}
-
 int PlayerCount()
 {
-    return Enabled() ? g_cfg.playerCount : 1;
+    InitConfig();
+    return g_cfg.playerCount;
 }
 
 int LocalSeat()

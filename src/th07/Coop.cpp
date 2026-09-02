@@ -280,3 +280,47 @@ const char *CoopPlayerName(i32 seat)
     const char *name = g_CoopNameSource != NULL ? g_CoopNameSource(seat) : NULL;
     return name != NULL && name[0] != 0 ? name : defaults[seat & 3];
 }
+
+i32 g_CoopFadeActive;
+i32 g_CoopViewSeat;
+
+#define FADE_START 64.0f
+#define FADE_FULL 24.0f
+#define FADE_ALPHA 55
+#define GHOST_ALPHA 128
+
+u32 CoopPlayerAlpha(Player *player)
+{
+    if (player->playerState == PLAYER_STATE_GHOST)
+    {
+        return GHOST_ALPHA;
+    }
+    i32 view = g_CoopViewSeat;
+    if (player->seat == view || player->playerState == PLAYER_STATE_DEAD)
+    {
+        return 255;
+    }
+    Player *mine = view >= 0 && view < PlayerCount() ? &g_Players[view] : NULL;
+    if (mine == NULL || mine->playerState == PLAYER_STATE_DEAD)
+    {
+        return 255;
+    }
+    f32 dx = player->positionCenter.x - mine->positionCenter.x;
+    f32 dy = player->positionCenter.y - mine->positionCenter.y;
+    f32 span = dx * dx + dy * dy;
+    if (span >= FADE_START * FADE_START)
+    {
+        return 255;
+    }
+    if (span <= FADE_FULL * FADE_FULL)
+    {
+        return FADE_ALPHA;
+    }
+    f32 apart = sqrtf(span);
+    return (u32)((apart - FADE_FULL) * (255.0f - FADE_ALPHA) / (FADE_START - FADE_FULL) + FADE_ALPHA);
+}
+
+void CoopRefreshFadeSet()
+{
+    g_CoopFadeActive = 0;
+}

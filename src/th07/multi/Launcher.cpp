@@ -962,17 +962,11 @@ void ConfigureEnvironment(Mode mode, unsigned sessionId = 0, bool rollback = fal
 {
     char number[32];
     // Local play must not inherit TH07_MP_ROLLBACK.
-    if (mode == kSingle) {
-        PutEnvironment("TH07_MP_MODE", nullptr);
-        PutEnvironment("TH07_MP_SEAT", nullptr);
-        PutEnvironment("TH07_MP_ROLLBACK", nullptr);
-        return;
-    }
     _snprintf_s(number, sizeof(number), _TRUNCATE, "%d", g_ui.result->playerCount);
     PutEnvironment("TH07_MP_PLAYERS", number);
-    PutEnvironment("TH07_MP_MODE", mode == kLocal ? "local" : "udp");
+    PutEnvironment("TH07_MP_MODE", mode == kHost || mode == kGuest ? "udp" : "local");
     PutEnvironment("TH07_MP_TEST_BOT", g_ui.result->bot ? "1" : "0");
-    if (mode == kLocal) {
+    if (mode == kSingle || mode == kLocal) {
         PutEnvironment("TH07_MP_SEAT", "0");
         PutEnvironment("TH07_MP_ROLLBACK", nullptr);
         return;
