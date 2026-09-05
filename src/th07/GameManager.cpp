@@ -513,8 +513,8 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         arg->gamesStarted++;
         size = g_Rng.GetRandomU32InRange(65535) + 16;
         arg->tmpBuffer = GameAlloc(size);
-        arg->defaultCfg = new GameConfiguration;
-        arg->globals = new ZunGlobals;
+        arg->defaultCfg = new GameConfiguration();
+        arg->globals = new ZunGlobals();
         InitializeRngAndCsum();
         *arg->defaultCfg = g_Supervisor.cfg;
         // Peer-local settings must not affect the simulation.

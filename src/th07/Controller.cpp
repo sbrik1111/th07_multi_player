@@ -385,6 +385,11 @@ u16 Controller::GetInput()
             g_Supervisor.keyboard->Acquire();
             return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
         }
+        // Acquisition can fail in the background: no keys then.
+        if (FAILED(hr))
+        {
+            return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
+        }
         buttons |= KEY_PRESSED(DIK_UP, TH_BUTTON_UP);
         buttons |= KEY_PRESSED(DIK_DOWN, TH_BUTTON_DOWN);
         buttons |= KEY_PRESSED(DIK_LEFT, TH_BUTTON_LEFT);

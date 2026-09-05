@@ -2555,9 +2555,9 @@ ZunResult MainMenu::ActualAddedCallback()
     ScoreDat *local_8;
 
     SAFE_DELETE(g_GameManager.defaultCfg);
-    g_GameManager.defaultCfg = new GameConfiguration;
+    g_GameManager.defaultCfg = new GameConfiguration();
     SAFE_DELETE(g_GameManager.globals);
-    g_GameManager.globals = new ZunGlobals;
+    g_GameManager.globals = new ZunGlobals();
     g_Supervisor.effectiveFramerateMultiplier = 1.0f;
     if (g_GameManager.replay)
     {
