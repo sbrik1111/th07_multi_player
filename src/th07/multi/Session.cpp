@@ -5,7 +5,7 @@
 #include "multi/Net.h"
 #include "multi/RollbackGame.h"
 #include "AsciiManager.hpp"
-#include "Bot.h"
+#include "multi/Bot.h"
 #include "Controller.hpp"
 #include "Coop.hpp"
 #include "FrameInput.hpp"
