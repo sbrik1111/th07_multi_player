@@ -12,6 +12,9 @@ void (*g_CoopLogSink)(const char *line);
 i32 g_FrameMayRollBack;
 i32 g_CoopActiveSeat;
 i32 g_CoopTestGhostFrame = -1;
+i32 g_CoopTestStartStage = 1;
+i32 g_CoopTestStageClearFrame = -1;
+i32 g_CoopTestStageClearLast = 1;
 
 void CoopLog(const char *format, ...)
 {

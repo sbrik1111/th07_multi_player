@@ -344,6 +344,7 @@ struct ResultScreen
     static i32 MoveCursorHorizontally(ResultScreen *screen, i32 max);
 
     static ScoreDat *OpenScore(const char *path);
+    static void UnlockAll();
     static i32 LinkScore(ScoreListNode *prevNode, Hscr *hscr);
     i32 LinkScoreEx(Hscr *out, i32 difficulty, i32 character);
     static u32 GetHighScore(ScoreDat *scoreDat, ScoreListNode *node,

@@ -1,4 +1,5 @@
 #include "ResultScreen.hpp"
+#include "Coop.hpp"
 
 #include <direct.h>
 #include <stdio.h>
@@ -132,7 +133,7 @@ ScoreDat *ResultScreen::OpenScore(const char *path)
     Vrsm *parsedVrsm;
 
     Supervisor::DebugPrint2("info : score load\r\n");
-    scoreData = (ScoreDat *)FileSystem::OpenFile(path, 1);
+    scoreData = NULL;
     if (!scoreData)
     {
     RECREATE_SCORE:
@@ -493,6 +494,11 @@ void ResultScreen::ReleaseScoreDat(ScoreDat *scoreDat)
 // FUNCTION: TH07 0x0044552c
 void ResultScreen::WriteScore()
 {
+    // Scores stay in memory.
+    if (true)
+    {
+        return;
+    }
     ScoreDat *sd;
     u8 *bytes;
     u8 xorValue;
@@ -2600,6 +2606,7 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *arg)
     {
         ParseCatk(arg->scoreDat, g_GameManager.catk);
         ParseClrd(arg->scoreDat, g_GameManager.clrd);
+        UnlockAll();
         g_GameManager.HasUnlockedPhantomAndMaxClears();
         ParsePscr(arg->scoreDat, &g_GameManager.pscr[0][0][0]);
     }
@@ -2721,4 +2728,40 @@ ZunResult ResultScreen::RegisterChain(u32 type)
     g_Chain.AddToDrawChain(resultScreen->drawChain, 13);
 
     return ZUN_SUCCESS;
+}
+
+void ResultScreen::UnlockAll()
+{
+    static i32 s_logged;
+    for (i32 shot = 0; shot < SHOT_COUNT; shot++)
+    {
+        Clrd &clrd = g_GameManager.clrd[shot];
+        clrd.magic = CLRD_MAGIC;
+        clrd.th7kLen = clrd.th7kLen2 = sizeof(Clrd);
+        clrd.version = 1;
+        clrd.characterShotType = (u8)shot;
+        for (i32 diff = 0; diff < DIFF_COUNT; diff++)
+        {
+            clrd.difficultyClearedWithRetries[diff] = 99;
+            clrd.difficultyClearedWithoutRetries[diff] = 99;
+        }
+    }
+    for (i32 i = 0; i < SPELLCARD_COUNT; i++)
+    {
+        Catk &catk = g_GameManager.catk[i];
+        if (catk.numSuccessesPerShot[SHOT_COUNT] == 0)
+        {
+            catk.numSuccessesPerShot[SHOT_COUNT] = 1;
+        }
+        if (catk.numAttemptsPerShot[SHOT_COUNT] == 0)
+        {
+            catk.numAttemptsPerShot[SHOT_COUNT] = 1;
+        }
+    }
+    g_GameManager.phantasmUnlocked = 1;
+    if (!s_logged)
+    {
+        s_logged = 1;
+        CoopLog("UNLOCK_ALL shots=%d spell_cards=%d", SHOT_COUNT, SPELLCARD_COUNT);
+    }
 }

@@ -192,6 +192,10 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     {
         g_CurFrameRawInput |= g_FrameInputs->menu;
     }
+    if (arg->curState == 6)
+    {
+        arg->curState = 1;
+    }
     if (arg->wantedState != arg->curState)
     {
         arg->prevState = arg->wantedState;

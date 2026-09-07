@@ -11,6 +11,7 @@
 #include "GameErrorContext.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
+#include "Coop.hpp"
 #include "multi/Session.h"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -310,6 +311,22 @@ u32 GameManager::OnUpdate(GameManager *arg)
         }
     }
     arg->framesThisStage = arg->framesThisStage + 1;
+    // Test hook (TH07_MP_TEST_STAGE_CLEAR_FRAME).
+    if (g_CoopTestStageClearFrame >= 0 && arg->framesThisStage == g_CoopTestStageClearFrame &&
+        arg->currentStage <= g_CoopTestStageClearLast && g_Supervisor.curState == 2 && !arg->practice)
+    {
+        if (arg->currentStage >= 6)
+        {
+            arg->finished = 1;
+            arg->globals->guiScore = arg->globals->score;
+            g_Supervisor.curState = 9;
+        }
+        else
+        {
+            g_Supervisor.curState = 3;
+        }
+        CoopLog("TEST_STAGE_CLEAR stage=%d frame=%d", arg->currentStage, arg->framesThisStage);
+    }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -457,6 +474,7 @@ ZunResult ResultScreen::ParseScores()
     ParseCatk(scoreDat, g_GameManager.catk);
     ParseClrd(scoreDat, g_GameManager.clrd);
     ParsePscr(scoreDat, &g_GameManager.pscr[0][0][0]);
+    UnlockAll();
     if (g_GameManager.practice)
     {
         g_GameManager.globals->highScore =
@@ -547,6 +565,11 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
             {
                 arg->SetSeatBombs(seat, seat < arg->PlayerCount() ? g_Players[seat].shooterData->initialBombs : 0);
             }
+        }
+        // Test hook (TH07_MP_TEST_START_STAGE).
+        if (g_CoopTestStartStage > 1 && arg->currentStage == 0 && !arg->practice && arg->difficulty < 4)
+        {
+            arg->currentStage = g_CoopTestStartStage - 1;
         }
         for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
         {
@@ -755,6 +778,15 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         g_Rng.seed = oldSeed;
     }
     arg->stageRngSeed = g_Rng.seed;
+    CoopLog("STAGE_START stage=%d new_game=%d rng=%04X score=%u frames=%d", arg->currentStage,
+            g_Supervisor.curState != 3 && g_Supervisor.curState != 11 && g_Supervisor.curState != 12 ? 1 : 0,
+            g_Rng.seed, arg->globals->score, arg->framesThisStage);
+    for (i32 seat = 0; seat < arg->PlayerCount(); seat++)
+    {
+        CoopLog("SEAT seat=%d shot=%d lives=%d bombs=%d power=%d cherry_plus=%d state=%d", seat,
+                arg->ShotTypeAndCharacter(seat), (i32)arg->Lives(seat), (i32)arg->Bombs(seat), (i32)arg->Power(seat),
+                arg->CherryPlus(seat) - arg->globals->cherryStart, g_Players[seat].playerState);
+    }
     if (Stage::RegisterChain(arg->currentStage) != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00498038

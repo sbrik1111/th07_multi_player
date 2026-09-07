@@ -1,4 +1,6 @@
 #include "MainMenu.hpp"
+#include "multi/Session.h"
+#include "multi/MpConfig.h"
 
 #include <direct.h>
 #include <stdio.h>
@@ -18,16 +20,6 @@
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 #include "utils.hpp"
-
-// GLOBAL: TH07 0x0049ea7c
-const char *g_DemoReplayPaths[3] = {
-    // STRING: TH07 0x00495ae8
-    "data/demo/demorpy0.rpy",
-    // STRING: TH07 0x00495ad0
-    "data/demo/demorpy1.rpy",
-    // STRING: TH07 0x00495ab8
-    "data/demo/demorpy2.rpy",
-};
 
 // GLOBAL: TH07 0x0049f40c
 const char *g_StagePracticeStrings[6] = {
@@ -306,49 +298,6 @@ u32 MainMenu::OnUpdatePreInput()
                 &this->vmHead[this->cursor + 1],
                 (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
         }
-        this->demoFramesCount++;
-        if (g_CurFrameRawInput != 0)
-        {
-            this->demoFramesCount = 0;
-        }
-        if (900 < this->demoFramesCount)
-        {
-            g_GameManager.demoIdx++;
-            g_GameManager.demoIdx %= 3;
-            strcpy(g_GameManager.replayFilename,
-                   g_DemoReplayPaths[g_GameManager.demoIdx]);
-            this->currentReplay = (ReplayFile *)FileSystem::OpenFile(
-                g_GameManager.replayFilename, 0);
-            this->currentReplay =
-                ReplayManager::ValidateReplayData(this->currentReplay, g_LastFileSize);
-            if (!this->currentReplay)
-            {
-                Supervisor::DebugPrint2("error : Demo Play is not ready\r\n");
-                this->demoFramesCount = 0;
-            }
-            else
-            {
-                g_GameManager.SetReplay(1);
-                g_GameManager.flags |= 2;
-                g_GameManager.demoFrames = 0;
-                g_GameManager.difficulty = this->currentReplay->data.difficulty;
-                g_GameManager.Character(0) = this->currentReplay->data.shotType / 2;
-                g_GameManager.ShotType(0) = this->currentReplay->data.shotType % 2;
-                g_GameManager.ShotTypeAndCharacter(0) = this->currentReplay->data.shotType;
-                i = 0;
-                while (!this->currentReplay->head.stageReplayData[i].data)
-                {
-                    i++;
-                }
-
-                g_GameManager.currentStage = i;
-                ZunMemory::Free(this->currentReplay);
-                this->currentReplay = NULL;
-                g_Supervisor.curState = 2;
-                g_GameManager.replayStage = 0;
-                return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
-            }
-        }
         if (this->selected != this->cursor)
         {
             this->cursorVm = &this->vms[this->cursor];
@@ -359,7 +308,12 @@ u32 MainMenu::OnUpdatePreInput()
         {
             break;
         }
-        if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
+        if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU) &&
+            (this->cursor == 3 || this->cursor == 4 || (this->cursor == 6 && !th07::mp::LocalEnabled())))
+        {
+            g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
+        }
+        else if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
         {
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
             g_SoundPlayer.ProcessQueues();
@@ -2572,6 +2526,7 @@ ZunResult MainMenu::ActualAddedCallback()
     ResultScreen::ParseClrd(local_8, g_GameManager.clrd);
     ResultScreen::ParsePscr(local_8, &g_GameManager.pscr[0][0][0]);
     ResultScreen::ParseCatk(local_8, g_GameManager.catk);
+    ResultScreen::UnlockAll();
     ResultScreen::ReleaseScoreDat(local_8);
     if (g_GameManager.plst.gameHours < 7)
     {

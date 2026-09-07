@@ -50,6 +50,10 @@ void CoopExtendFromPoints();
 void CoopContinue();
 void CoopKeepGhost(Player *player, i32 wasGhost);
 
+extern i32 g_CoopTestStartStage;
+extern i32 g_CoopTestStageClearFrame;
+extern i32 g_CoopTestStageClearLast;
+
 void CoopLog(const char *format, ...);
 extern void (*g_CoopLogSink)(const char *line);
 

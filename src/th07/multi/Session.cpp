@@ -118,6 +118,9 @@ void MpInitSession()
     }
     g_GameManager.sessionSeed = cfg.sessionId;
     g_CoopTestGhostFrame = cfg.testGhostFrame != th07::mp::kNoFrame ? (i32)cfg.testGhostFrame : -1;
+    g_CoopTestStartStage = cfg.testStartStage;
+    g_CoopTestStageClearFrame = cfg.testStageClearFrame != th07::mp::kNoFrame ? (i32)cfg.testStageClearFrame : -1;
+    g_CoopTestStageClearLast = cfg.testStageClearLast;
     if (cfg.mode == th07::mp::kUdp && cfg.rollback && !th07::rollback_game::Start())
     {
         th07::mp::Log("FAIL rollback could not start");
