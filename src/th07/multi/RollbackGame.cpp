@@ -445,6 +445,9 @@ int RunFrame(netcode::Timeline& timeline, int* present, FrameDone done, void* co
             }
             g_stats.skippedCheckpoints++;
         }
+        // A frame that may not run on predicted input is a barrier: no restore may cross it, so the
+        // checkpoints up to it go.
+        const bool barrier = SessionPredictionBlocked() != 0;
         g_SoundSilenced = replay ? 1 : 0;
         g_FrameMayRollBack = timeline.NeedsCheckpoint(frame) ? 1 : 0;
         g_stepFrame = frame;
@@ -463,6 +466,17 @@ int RunFrame(netcode::Timeline& timeline, int* present, FrameDone done, void* co
         int r = SessionRunFrame(inputs.held, mp::PlayerCount(), replay && !g_drawReplay ? 0 : 1);
         g_ChainCalcProfile = NULL;
         RecordHits(frame, g_FrameMayRollBack == 0);
+        if (barrier) {
+            rollback::heap::RuntimeScope runtime;
+            for (unsigned i = 0; i < MaxPrediction; i++) {
+                if (g_checkpoints[i].frame != NoFrame && g_checkpoints[i].frame <= frame) {
+                    DropCheckpoint(g_checkpoints[i]);
+                }
+            }
+            if (Trace()) {
+                mp::Log("RB barrier frame=%u replay=%d", frame, replay ? 1 : 0);
+            }
+        }
         g_stepFrame = NoFrame;
         g_SoundSilenced = 0;
         g_FrameMayRollBack = 0;
