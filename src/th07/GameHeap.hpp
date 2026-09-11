@@ -20,3 +20,6 @@ using th07::rollback::heap::GameAlloc;
 using th07::rollback::heap::GameAllocSize;
 using th07::rollback::heap::GameFree;
 using th07::rollback::heap::GameRealloc;
+
+// Never freed.
+void *GameStaticBlock(size_t bytes);

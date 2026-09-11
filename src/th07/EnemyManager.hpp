@@ -373,4 +373,4 @@ struct EnemyManager
     Enemy *enemyHead[4];
 };
 C_ASSERT(sizeof(EnemyManager) == 0x954710);
-extern EnemyManager g_EnemyManager;
+extern EnemyManager &g_EnemyManager;

@@ -344,7 +344,7 @@ struct Player
     }
 };
 C_ASSERT(offsetof(Player, seat) == 0xb7e78);
-extern Player g_Players[MAX_PLAYERS];
+extern Player (&g_Players)[MAX_PLAYERS];
 extern u16 g_SeatGameInput[MAX_PLAYERS];
 extern u16 g_SeatLastGameInput[MAX_PLAYERS];
 

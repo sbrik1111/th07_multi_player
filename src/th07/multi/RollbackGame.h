@@ -1,12 +1,14 @@
 ﻿#pragma once
 
 #include "multi/RollbackNetcode.h"
+#include "multi/RollbackMemory.h"
 
 namespace th07 {
 namespace rollback_game {
 
 // Call before any game object exists. False when the arena cannot be made.
 bool Start();
+rollback::Memory* SharedArena();
 bool Enabled();
 
 void BeginSegment();

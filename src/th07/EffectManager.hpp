@@ -106,4 +106,4 @@ struct EffectManager
     i32 frameCounter;
 };
 C_ASSERT(sizeof(EffectManager) == 0x496a8);
-extern EffectManager g_EffectManager;
+extern EffectManager &g_EffectManager;

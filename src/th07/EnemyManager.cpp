@@ -1,4 +1,5 @@
 #include "EnemyManager.hpp"
+#include <new>
 #include "Coop.hpp"
 
 #include "AsciiManager.hpp"
@@ -41,7 +42,7 @@ u32 g_SpellcardScore[SPELLCARD_COUNT] = {
 ChainElem g_EnemyManagerDrawChain1;
 
 // GLOBAL: TH07 0x009a9b00
-EnemyManager g_EnemyManager;
+EnemyManager &g_EnemyManager = *new (GameStaticBlock(sizeof(EnemyManager))) EnemyManager();
 
 // GLOBAL: TH07 0x012fe210
 ChainElem g_EnemyManagerCalcChain;

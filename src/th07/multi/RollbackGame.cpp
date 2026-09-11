@@ -286,12 +286,31 @@ void DropCheckpoint(Checkpoint& c)
 
 }
 
+// Made at the first use: GameStaticBlock places the game's large objects here during static
+// initialization.
+rollback::Memory* SharedArena()
+{
+    static rollback::Memory* s_arena;
+    static bool s_tried;
+    if (!s_tried) {
+        s_tried = true;
+        rollback::Memory* memory = new rollback::Memory;
+        if (memory->Initialize(rollback::kDefaultArenaBytes)) {
+            s_arena = memory;
+        } else {
+            delete memory;
+        }
+    }
+    return s_arena;
+}
+
 bool Start()
 {
     rollback::heap::RuntimeScope runtime;
-    g_memory = new rollback::Memory;
-    if (!g_memory->Initialize(rollback::kDefaultArenaBytes) || !rollback::heap::Install(*g_memory)) {
-        mp::Log("FAIL rollback arena: %s / %s", g_memory->LastError(), rollback::heap::LastError());
+    g_memory = SharedArena();
+    if (g_memory == NULL || g_memory->Base() == NULL || !rollback::heap::Install(*g_memory)) {
+        mp::Log("FAIL rollback arena: %s / %s", g_memory != NULL ? g_memory->LastError() : "none",
+                rollback::heap::LastError());
         return false;
     }
     if (!RegisterSection(".gdata", 0x100) || !RegisterSection(".gbss", 0x200)) {
@@ -536,4 +555,17 @@ int RunFrame(netcode::Timeline& timeline, int* present, FrameDone done, void* co
 }
 
 }
+}
+
+void* GameStaticBlock(size_t bytes)
+{
+    th07::rollback::Memory* arena = th07::rollback_game::SharedArena();
+    void* block = arena != NULL ? arena->Allocate(bytes, 64) : NULL;
+    if (block == NULL) {
+        block = malloc(bytes);
+    }
+    if (block != NULL) {
+        memset(block, 0, bytes);
+    }
+    return block;
 }

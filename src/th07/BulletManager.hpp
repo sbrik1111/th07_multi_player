@@ -302,4 +302,4 @@ struct BulletManager
     ItemType itemType;
 };
 C_ASSERT(sizeof(BulletManager) == 0x37a164);
-extern BulletManager g_BulletManager;
+extern BulletManager &g_BulletManager;

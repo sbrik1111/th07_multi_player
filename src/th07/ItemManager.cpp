@@ -1,5 +1,6 @@
 #include "ItemManager.hpp"
 
+#include <new>
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
 #include "BulletManager.hpp"
@@ -28,7 +29,7 @@ u8 g_ItemDropTable[32] = {0, 0, 1, 0, 1, 0, 0, 7, 1, 1, 0, 0, 7, 1, 1, 0, 1, 0,
                           1, 0, 1, 0, 1, 0, 1, 0, 7, 1, 1, 1, 0, 2};
 
 // GLOBAL: TH07 0x00575c70
-ItemManager g_ItemManager;
+ItemManager &g_ItemManager = *new (GameStaticBlock(sizeof(ItemManager))) ItemManager();
 
 #pragma var_order(i, item)
 // FUNCTION: TH07 0x004326f0

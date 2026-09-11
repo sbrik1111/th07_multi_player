@@ -1,4 +1,5 @@
 #include "EffectManager.hpp"
+#include <new>
 #include "Coop.hpp"
 
 #include "AnmManager.hpp"
@@ -64,7 +65,7 @@ EffectTypeInfo g_EffectMapping[34] = {
 };
 
 // GLOBAL: TH07 0x012fe250
-EffectManager g_EffectManager;
+EffectManager &g_EffectManager = *new (GameStaticBlock(sizeof(EffectManager))) EffectManager();
 
 // GLOBAL: TH07 0x013478f8
 ChainElem g_EffectManagerCalcChain;

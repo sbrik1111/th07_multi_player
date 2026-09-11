@@ -1,5 +1,6 @@
 #include "Player.hpp"
 
+#include <new>
 #include "AnmManager.hpp"
 #include "Coop.hpp"
 #include "AsciiManager.hpp"
@@ -86,7 +87,16 @@ const char *g_ShooterTableFocus[6] = {
 };
 
 // GLOBAL: TH07 0x004bdad8
-Player g_Players[MAX_PLAYERS];
+static Player *NewPlayers()
+{
+    Player *players = (Player *)GameStaticBlock(sizeof(Player) * MAX_PLAYERS);
+    for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
+    {
+        new (&players[seat]) Player();
+    }
+    return players;
+}
+Player (&g_Players)[MAX_PLAYERS] = *(Player(*)[MAX_PLAYERS])NewPlayers();
 u16 g_SeatGameInput[MAX_PLAYERS];
 u16 g_SeatLastGameInput[MAX_PLAYERS];
 

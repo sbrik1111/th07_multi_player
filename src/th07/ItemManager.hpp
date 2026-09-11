@@ -68,4 +68,4 @@ struct ItemManager
     struct Item listHead;
     struct Item *listTail;
 };
-extern ItemManager g_ItemManager;
+extern ItemManager &g_ItemManager;

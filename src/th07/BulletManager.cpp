@@ -1,4 +1,5 @@
 #include "BulletManager.hpp"
+#include <new>
 #include "Coop.hpp"
 
 #include "AnmManager.hpp"
@@ -58,7 +59,7 @@ i32 g_BulletSpriteOffset32Px[8] = {0, 1, 1, 2, 2, 3, 4, 0};
 ChainElem g_BulletManagerDrawChain;
 
 // GLOBAL: TH07 0x0062f958
-BulletManager g_BulletManager;
+BulletManager &g_BulletManager = *new (GameStaticBlock(sizeof(BulletManager))) BulletManager();
 
 // GLOBAL: TH07 0x009a9abc
 ChainElem g_BulletManagerCalcChain;
