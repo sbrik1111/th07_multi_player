@@ -1772,7 +1772,7 @@ void Player::UpdateBorderAndBombState()
                 }
                 g_EnemyManager.spellcardInfo.captureScore = 0;
                 g_EnemyManager.spellcardInfo.isCapturing = 0;
-                g_GameManager.DecreaseSubrank(200);
+                g_GameManager.DecreaseSubrankForPlayer(200);
                 g_EnemyManager.spellcardInfo.usedBomb =
                     g_EnemyManager.spellcardInfo.isActive;
                 this->respawnTimer += 6;
@@ -1858,7 +1858,7 @@ i32 Player::UpdateDeath()
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_FULL_POWER, 2);
                 g_Gui.powerDisplayUpdateFrames = 2;
             }
-            g_GameManager.DecreaseSubrank(1600);
+            g_GameManager.DecreaseSubrankForPlayer(1600);
         }
     }
     else

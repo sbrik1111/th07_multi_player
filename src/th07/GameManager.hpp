@@ -235,6 +235,10 @@ struct GameManager
     void ExtendSeat(i32 seat);
 
     void DecreaseSubrank(i32 amount);
+    void DecreaseSubrankForPlayer(i32 amount)
+    {
+        DecreaseSubrank(amount / PlayerCount());
+    }
     void IncreaseCherry(i32 amount);
     void IncreaseCherryMax(i32 amount);
     void IncreaseSubrank(i32 amount);
