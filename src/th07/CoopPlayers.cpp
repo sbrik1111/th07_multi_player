@@ -6,6 +6,8 @@
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 extern i32 g_CoopTestGhostFrame;
 
@@ -336,6 +338,45 @@ void CoopUpdateTransfers(Player *player)
     UpdateLifeTransfer(player);
 }
 
+static void DrawPrompt(f32 fx, f32 fy, f32 scale, D3DCOLOR color, const char *text)
+{
+    Float3 pos;
+    pos.x = g_GameManager.arcadeRegionTopLeftPos.x + fx -
+            (f32)g_AsciiManager.fontSpacing * scale * (f32)strlen(text) * 0.5f;
+    pos.y = g_GameManager.arcadeRegionTopLeftPos.y + fy;
+    pos.z = 0.0f;
+    g_AsciiManager.color = color;
+    g_AsciiManager.scale.x = scale;
+    g_AsciiManager.scale.y = scale;
+    g_AsciiManager.AddString(&pos, text);
+}
+
 void CoopDrawTransferPrompts()
 {
+    D3DCOLOR color = g_AsciiManager.color;
+    Float2 scale = g_AsciiManager.scale;
+    i32 isGui = g_AsciiManager.isGui;
+    g_AsciiManager.isGui = 0;
+    for (i32 seat = 0; seat < PlayerCount(); seat++)
+    {
+        Player *player = &g_Players[seat];
+        if (player->calcChain == NULL)
+        {
+            continue;
+        }
+        char text[16];
+        if (player->lifeGiveTimer > 0)
+        {
+            sprintf_s(text, sizeof(text), "%d%%", player->lifeGiveTimer * 100 / LIFE_CHARGE_FRAMES);
+            DrawPrompt(player->positionCenter.x, player->positionCenter.y - 22.0f - 8.0f, 0.6f, 0xffffff00, text);
+        }
+        if (player->powerGiveTaps >= 2)
+        {
+            sprintf_s(text, sizeof(text), "P %d/%d", player->powerGiveTaps, POWER_TAPS);
+            DrawPrompt(player->positionCenter.x, player->positionCenter.y + 16.0f, 0.5f, 0xffa0ffa0, text);
+        }
+    }
+    g_AsciiManager.color = color;
+    g_AsciiManager.scale = scale;
+    g_AsciiManager.isGui = isGui;
 }

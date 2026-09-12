@@ -2,6 +2,7 @@
 #include "FrameInput.hpp"
 #include "multi/RollbackHeap.h"
 #include "multi/Session.h"
+#include "Coop.hpp"
 #include "GameWindow.hpp"
 
 #include <dinput.h>
@@ -852,6 +853,10 @@ void Supervisor::DrawFpsCounter(i32 param_1)
         fpsCounterPos.z = 0.0f;
         g_AsciiManager.AddString(&fpsCounterPos, g_FpsCounterBuffer);
         MpDrawPlaySession();
+        if (g_Supervisor.wantedState == 2)
+        {
+            CoopDrawTransferPrompts();
+        }
     }
 }
 
