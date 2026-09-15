@@ -56,7 +56,12 @@ unsigned LocalDeviceButtons(int seat)
     {
         return ReadDeviceButtons(1);
     }
-    return ReadJoypadButtonsOf(seat - 1);
+    u16 buttons = ReadJoypadButtonsOf(seat - 1);
+    if (seat == 1)
+    {
+        buttons |= ReadLocalSecondKeyboardButtons();
+    }
+    return buttons;
 }
 
 int Playing()

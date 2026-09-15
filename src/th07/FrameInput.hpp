@@ -13,3 +13,4 @@ extern const FrameInputs *g_FrameInputs;
 
 u16 ReadDeviceButtons(i32 keyboardOnly);
 u16 ReadJoypadButtonsOf(i32 index);
+u16 ReadLocalSecondKeyboardButtons();
