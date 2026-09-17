@@ -1205,6 +1205,7 @@ u32 MainMenu::OnUpdateSelectDifficulty()
             }
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
             g_SoundPlayer.ProcessQueues();
+            this->coopSelectionSeat = 0;
             if (this->gameState != STATE_EXTRA_SELECT_DIFFICULTY)
             {
                 if (!g_GameManager.practice)
@@ -1271,6 +1272,21 @@ u32 MainMenu::OnUpdateSelectDifficulty()
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
+i32 MainMenu::IsCoopLoadoutSelection() const
+{
+    return g_GameManager.PlayerCount() > 1 && !this->isPracticeMode;
+}
+
+u8 &MainMenu::SelectedCharacter()
+{
+    return g_GameManager.Character(IsCoopLoadoutSelection() ? this->coopSelectionSeat : 0);
+}
+
+u8 &MainMenu::SelectedShotType()
+{
+    return g_GameManager.ShotType(IsCoopLoadoutSelection() ? this->coopSelectionSeat : 0);
+}
+
 // FUNCTION: TH07 0x00457fe5
 u32 MainMenu::OnUpdateSelectCharacter()
 {
@@ -1297,7 +1313,7 @@ u32 MainMenu::OnUpdateSelectCharacter()
                         .SetInterrupt(9);
                 }
             }
-            this->cursor = g_GameManager.Character(0);
+            this->cursor = SelectedCharacter();
             if (g_Supervisor.cfg.defaultDifficulty == 4)
             {
                 while (
@@ -1514,7 +1530,7 @@ u32 MainMenu::OnUpdateSelectCharacter()
         }
         if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
         {
-            g_GameManager.Character(0) = this->cursor;
+            SelectedCharacter() = this->cursor;
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
             g_SoundPlayer.ProcessQueues();
             if (this->gameState != STATE_EXTRA_SELECT_CHARACTER)
@@ -1539,7 +1555,15 @@ u32 MainMenu::OnUpdateSelectCharacter()
         {
             g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
             g_SoundPlayer.ProcessQueues();
-            g_GameManager.Character(0) = this->cursor;
+            SelectedCharacter() = this->cursor;
+            if (IsCoopLoadoutSelection() && this->coopSelectionSeat > 0)
+            {
+                i32 extra = this->gameState == STATE_EXTRA_SELECT_CHARACTER;
+                this->coopSelectionSeat--;
+                SetGameState(extra ? STATE_EXTRA_SELECT_SHOTTYPE : STATE_NORMAL_SELECT_SHOTTYPE);
+                this->cursor = SelectedShotType();
+                return CHAIN_CALLBACK_RESULT_CONTINUE;
+            }
             if (this->gameState != STATE_EXTRA_SELECT_CHARACTER)
             {
                 if (!g_GameManager.practice)
@@ -1607,11 +1631,11 @@ u32 MainMenu::OnUpdateSelectShotType()
             this->vmHead[77].active = 0;
             this->vmHead[82].active = 0;
             this->vmHead[85].active = 0;
-            this->cursor = g_GameManager.ShotType(0);
+            this->cursor = SelectedShotType();
             if (g_Supervisor.cfg.defaultDifficulty == 4)
             {
                 while (g_GameManager.HasReachedMaxClears(
-                           this->cursor + (u32)g_GameManager.Character(0) * 2) == 0)
+                           this->cursor + (u32)SelectedCharacter() * 2) == 0)
                 {
                     this->cursor++;
                     if (this->cursor >= 2)
@@ -1623,7 +1647,7 @@ u32 MainMenu::OnUpdateSelectShotType()
             else if (g_Supervisor.cfg.defaultDifficulty == 5)
             {
                 while (g_GameManager.HasUnlockedPhantom(
-                           this->cursor + (u32)g_GameManager.Character(0) * 2) == 0)
+                           this->cursor + (u32)SelectedCharacter() * 2) == 0)
                 {
                     this->cursor++;
                     if (this->cursor >= 2)
@@ -1632,7 +1656,7 @@ u32 MainMenu::OnUpdateSelectShotType()
                     }
                 }
             }
-            switch (g_GameManager.Character(0))
+            switch (SelectedCharacter())
             {
             case CHAR_REIMU:
                 this->vmHead[72].active = 1;
@@ -1689,7 +1713,7 @@ u32 MainMenu::OnUpdateSelectShotType()
             if (g_Supervisor.cfg.defaultDifficulty == 4)
             {
                 while (g_GameManager.HasReachedMaxClears(
-                           this->cursor + (u32)g_GameManager.Character(0) * 2) == 0)
+                           this->cursor + (u32)SelectedCharacter() * 2) == 0)
                 {
                     this->cursor++;
                     if (this->cursor >= 2)
@@ -1701,7 +1725,7 @@ u32 MainMenu::OnUpdateSelectShotType()
             else if (g_Supervisor.cfg.defaultDifficulty == 5)
             {
                 while (g_GameManager.HasUnlockedPhantom(
-                           this->cursor + (u32)g_GameManager.Character(0) * 2) == 0)
+                           this->cursor + (u32)SelectedCharacter() * 2) == 0)
                 {
                     this->cursor++;
                     if (this->cursor >= 2)
@@ -1710,7 +1734,7 @@ u32 MainMenu::OnUpdateSelectShotType()
                     }
                 }
             }
-            switch (g_GameManager.Character(0))
+            switch (SelectedCharacter())
             {
             case CHAR_REIMU:
                 g_AnmManager->SetActiveSprite(
@@ -1740,11 +1764,25 @@ u32 MainMenu::OnUpdateSelectShotType()
         }
         if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
         {
-            g_GameManager.ShotType(0) = this->cursor;
+            SelectedShotType() = this->cursor;
+            if (IsCoopLoadoutSelection())
+            {
+                th07::mp::Log("LOADOUT seat=%d character=%d shot=%d", this->coopSelectionSeat,
+                              SelectedCharacter(), SelectedShotType());
+            }
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
             g_SoundPlayer.ProcessQueues();
             if (!g_GameManager.practice)
             {
+                if (IsCoopLoadoutSelection() &&
+                    this->coopSelectionSeat + 1 < g_GameManager.PlayerCount())
+                {
+                    i32 extra = this->gameState == STATE_EXTRA_SELECT_SHOTTYPE;
+                    this->coopSelectionSeat++;
+                    SetGameState(extra ? STATE_EXTRA_SELECT_CHARACTER : STATE_NORMAL_SELECT_CHARACTER);
+                    this->cursor = SelectedCharacter();
+                    return CHAIN_CALLBACK_RESULT_CONTINUE;
+                }
                 g_GameManager.difficulty = g_Supervisor.cfg.defaultDifficulty;
                 if (g_GameManager.difficulty < DIFF_EXTRA)
                 {
@@ -1768,7 +1806,7 @@ u32 MainMenu::OnUpdateSelectShotType()
         if (WAS_PRESSED_RAW(TH_BUTTON_RETURNMENU))
         {
             g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
-            g_GameManager.ShotType(0) = this->cursor;
+            SelectedShotType() = this->cursor;
             if (this->gameState != STATE_EXTRA_SELECT_SHOTTYPE)
             {
                 if (!g_GameManager.practice)
@@ -2493,7 +2531,59 @@ u32 MainMenu::OnDraw(MainMenu *arg)
     {
         g_AnmManager->DrawNoRotation(arg->cursorVm);
     }
+    arg->DrawCoopSelectLabels();
     return CHAIN_CALLBACK_RESULT_CONTINUE;
+}
+
+void MainMenu::DrawCoopSelectLabels()
+{
+    if (!IsCoopLoadoutSelection() ||
+        (this->gameState != STATE_NORMAL_SELECT_CHARACTER &&
+         this->gameState != STATE_NORMAL_SELECT_SHOTTYPE &&
+         this->gameState != STATE_EXTRA_SELECT_CHARACTER &&
+         this->gameState != STATE_EXTRA_SELECT_SHOTTYPE))
+    {
+        return;
+    }
+    static const char *characterNames[3] = {"Reimu", "Marisa", "Sakuya"};
+    const bool choosingCharacter = this->gameState == STATE_NORMAL_SELECT_CHARACTER ||
+                                   this->gameState == STATE_EXTRA_SELECT_CHARACTER;
+    const Float2 oldScale = g_AsciiManager.scale;
+    const D3DCOLOR oldColor = g_AsciiManager.color;
+    const i32 oldGui = g_AsciiManager.isGui;
+    const i32 oldSelected = g_AsciiManager.isSelected;
+    g_AsciiManager.scale.x = 0.65f;
+    g_AsciiManager.scale.y = 0.65f;
+    g_AsciiManager.isGui = 0;
+    g_AsciiManager.isSelected = 0;
+    for (i32 seat = 0; seat < g_GameManager.PlayerCount(); seat++)
+    {
+        Float3 pos(40.0f, 220.0f + 18.0f * seat, 0.0f);
+        if (seat > this->coopSelectionSeat)
+        {
+            g_AsciiManager.color = 0xffa0a0a0;
+            AsciiManager::AddFormatText(&g_AsciiManager, &pos, "P%d %s: --",
+                                        seat + 1, th07::mp::PlayerName(seat));
+            continue;
+        }
+        i32 character = seat == this->coopSelectionSeat && choosingCharacter
+                            ? this->cursor : g_GameManager.Character(seat);
+        i32 shot = seat == this->coopSelectionSeat && !choosingCharacter
+                       ? this->cursor : g_GameManager.ShotType(seat);
+        if (character < 0 || character >= 3 || shot < 0 || shot >= 2)
+        {
+            continue;
+        }
+        g_AsciiManager.color = seat == this->coopSelectionSeat ? 0xffffff80 : 0xff80c0ff;
+        AsciiManager::AddFormatText(&g_AsciiManager, &pos, "P%d %s: %s %c%s",
+                                    seat + 1, th07::mp::PlayerName(seat), characterNames[character],
+                                    (char)('A' + shot), seat == this->coopSelectionSeat
+                                                           ? (choosingCharacter ? " [CHAR]" : " [SHOT]") : "");
+    }
+    g_AsciiManager.scale = oldScale;
+    g_AsciiManager.color = oldColor;
+    g_AsciiManager.isGui = oldGui;
+    g_AsciiManager.isSelected = oldSelected;
 }
 
 #pragma var_order(local_8, frameCount, local_1c, local_20, local_24, local_34, i)

@@ -432,10 +432,6 @@ void MpDrawPlaySession()
     }
 }
 
-void MpDrawSelectLabels()
-{
-}
-
 void MpLogBgmState()
 {
 }

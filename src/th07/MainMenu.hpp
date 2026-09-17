@@ -44,6 +44,10 @@ struct MainMenu
     u32 OnUpdateSelectDifficulty();
     u32 OnUpdateSelectCharacter();
     u32 OnUpdateSelectShotType();
+    i32 IsCoopLoadoutSelection() const;
+    u8 &SelectedCharacter();
+    u8 &SelectedShotType();
+    void DrawCoopSelectLabels();
 
     u32 OnUpdateSelectReplay();
     u32 OnUpdateSelectPracticeStage();
@@ -125,5 +129,6 @@ struct MainMenu
     ControllerMapping controlMapping;
     // pad 2
     GameConfiguration cfg;
+    i32 coopSelectionSeat;
 };
-C_ASSERT(sizeof(MainMenu) == 0xd158);
+C_ASSERT(sizeof(MainMenu) == 0xd15c);

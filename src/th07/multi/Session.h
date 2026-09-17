@@ -5,7 +5,6 @@
 void MpInitSession();
 void MpDrawTitleSession();
 void MpDrawPlaySession();
-void MpDrawSelectLabels();
 void MpLogBgmState();
 // 0 quit, -1 restart, else go on. *present: a new frame was drawn.
 int MpRunHostTick(int* present);
