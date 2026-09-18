@@ -2552,33 +2552,40 @@ void MainMenu::DrawCoopSelectLabels()
     const D3DCOLOR oldColor = g_AsciiManager.color;
     const i32 oldGui = g_AsciiManager.isGui;
     const i32 oldSelected = g_AsciiManager.isSelected;
-    g_AsciiManager.scale.x = 0.65f;
-    g_AsciiManager.scale.y = 0.65f;
+    g_AsciiManager.scale.x = g_AsciiManager.scale.y = 0.70f;
     g_AsciiManager.isGui = 0;
     g_AsciiManager.isSelected = 0;
     for (i32 seat = 0; seat < g_GameManager.PlayerCount(); seat++)
     {
         Float3 pos(40.0f, 220.0f + 18.0f * seat, 0.0f);
-        if (seat > this->coopSelectionSeat)
+        const char *name = th07::mp::PlayerName(seat);
+        if (seat == this->coopSelectionSeat)
+        {
+            g_AsciiManager.color = 0xffffff80;
+            AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%s: %s", name,
+                                        choosingCharacter ? "SELECT CHARACTER" : "SELECT SHOT TYPE");
+        }
+        else if (seat > this->coopSelectionSeat)
         {
             g_AsciiManager.color = 0xffa0a0a0;
-            AsciiManager::AddFormatText(&g_AsciiManager, &pos, "P%d %s: --",
-                                        seat + 1, th07::mp::PlayerName(seat));
-            continue;
+            AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%s:", name);
         }
-        i32 character = seat == this->coopSelectionSeat && choosingCharacter
-                            ? this->cursor : g_GameManager.Character(seat);
-        i32 shot = seat == this->coopSelectionSeat && !choosingCharacter
-                       ? this->cursor : g_GameManager.ShotType(seat);
-        if (character < 0 || character >= 3 || shot < 0 || shot >= 2)
+        else
         {
-            continue;
+            const i32 character = g_GameManager.Character(seat);
+            const i32 shot = g_GameManager.ShotType(seat);
+            if (character >= 0 && character < 3 && shot >= 0 && shot < 2)
+            {
+                g_AsciiManager.color = 0xff80c0ff;
+                AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%s: %s %c",
+                                            name, characterNames[character], (char)('A' + shot));
+            }
+            else
+            {
+                g_AsciiManager.color = 0xffa0a0a0;
+                AsciiManager::AddFormatText(&g_AsciiManager, &pos, "%s:", name);
+            }
         }
-        g_AsciiManager.color = seat == this->coopSelectionSeat ? 0xffffff80 : 0xff80c0ff;
-        AsciiManager::AddFormatText(&g_AsciiManager, &pos, "P%d %s: %s %c%s",
-                                    seat + 1, th07::mp::PlayerName(seat), characterNames[character],
-                                    (char)('A' + shot), seat == this->coopSelectionSeat
-                                                           ? (choosingCharacter ? " [CHAR]" : " [SHOT]") : "");
     }
     g_AsciiManager.scale = oldScale;
     g_AsciiManager.color = oldColor;

@@ -1430,6 +1430,184 @@ void Gui::UpdateGui()
 
 #pragma var_order(y, x, i, vm, textDrawPos)
 // FUNCTION: TH07 0x0042b603
+static f32 CoopHudRowY(i32 seat, i32 seats)
+{
+    return 76.0f + (seats == 4 ? 40.0f : 48.0f) * seat;
+}
+
+static f32 CoopHudSharedY(i32 seats)
+{
+    return seats == 4 ? 252.0f : 224.0f;
+}
+
+static const char *CoopHudLoadout(i32 seat)
+{
+    static const char *names[6] = {
+        "ReimuA", "ReimuB", "MarisaA", "MarisaB", "SakuyaA", "SakuyaB"
+    };
+    i32 index = g_GameManager.Character(seat) * 2 + g_GameManager.ShotType(seat);
+    return index >= 0 && index < 6 ? names[index] : "Unknown";
+}
+
+static void DrawCoopPowerBar(f32 y, i32 power)
+{
+    if (power <= 0)
+    {
+        return;
+    }
+    VertexDiffuseXyzrhw verts[4];
+    const f32 left = 540.0f;
+    const f32 right = left + power * 0.25f;
+    verts[0].pos = Float3(left, y, 0.1f);
+    verts[1].pos = Float3(right, y, 0.1f);
+    verts[2].pos = Float3(left, y + 10.0f, 0.1f);
+    verts[3].pos = Float3(right, y + 10.0f, 0.1f);
+    verts[0].diffuse.color = verts[2].diffuse.color = 0xe0e0e0ff;
+    verts[1].diffuse.color = verts[3].diffuse.color = 0x80e0e0ff;
+    for (i32 corner = 0; corner < 4; corner++)
+    {
+        verts[corner].w = 1.0f;
+    }
+    if (!g_Supervisor.cfg.disableTextureBlend)
+    {
+        g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, 2);
+        g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_COLOROP, 2);
+    }
+    g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, 0);
+    g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_COLORARG1, 0);
+    if (!g_Supervisor.cfg.disableZBuffer)
+    {
+        g_Supervisor.SetRenderState(D3DRS_ZWRITEENABLE, 0);
+    }
+    g_Supervisor.d3dDevice->SetVertexShader(D3DFVF_DIFFUSE | D3DFVF_XYZRHW);
+    g_Supervisor.d3dDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, verts,
+                                            sizeof(VertexDiffuseXyzrhw));
+    g_AnmManager->SetVertexShader(255);
+    g_AnmManager->SetColorOp(255);
+    g_AnmManager->SetBlendMode(255);
+    g_AnmManager->SetZWriteDisable(255);
+    if (!g_Supervisor.cfg.disableTextureBlend)
+    {
+        g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, 4);
+        g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_COLOROP, 4);
+    }
+    g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, 2);
+    g_Supervisor.d3dDevice->SetTextureStageState(0, D3DTSS_COLORARG1, 2);
+}
+
+static void DrawCoopHud(Gui *gui)
+{
+    const i32 seats = g_GameManager.PlayerCount();
+    AnmVm *tile = &gui->impl->vms0[13];
+    AnmVm playerLabel = gui->impl->vms0[4];
+    AnmVm bombLabel = gui->impl->vms0[5];
+    AnmVm powerLabel = gui->impl->vms0[6];
+    playerLabel.scale.x = playerLabel.scale.y = 0.80f;
+    bombLabel.scale.x = bombLabel.scale.y = 0.80f;
+    powerLabel.scale.x = powerLabel.scale.y = 0.80f;
+
+    for (f32 x = 416.0f; x < 520.0f; x += 16.0f)
+    {
+        for (i32 seat = 0; seat < seats; seat++)
+        {
+            const f32 y = CoopHudRowY(seat, seats);
+            for (i32 line = 0; line < 3; line++)
+            {
+                tile->pos = Float3(x, y + 12.0f * line, 0.48f);
+                g_AnmManager->DrawNoRotation(tile);
+            }
+        }
+    }
+    AnmVm counterTile = *tile;
+    counterTile.scale.x *= 0.5f;
+    counterTile.pos = Float3(480.0f, CoopHudSharedY(seats), 0.48f);
+    g_AnmManager->DrawNoRotation(&counterTile);
+    counterTile.pos.y += 16.0f;
+    g_AnmManager->DrawNoRotation(&counterTile);
+
+    const Float2 oldScale = g_AsciiManager.scale;
+    const D3DCOLOR oldColor = g_AsciiManager.color;
+    const i32 oldGui = g_AsciiManager.isGui;
+    g_AsciiManager.isGui = 0;
+    for (i32 seat = 0; seat < seats; seat++)
+    {
+        const f32 y = CoopHudRowY(seat, seats);
+        playerLabel.pos = Float3(489.0f, y, 0.47f);
+        bombLabel.pos = Float3(489.0f, y + 12.0f, 0.47f);
+        powerLabel.pos = Float3(489.0f, y + 24.0f, 0.47f);
+        g_AnmManager->DrawNoRotation(&playerLabel);
+        g_AnmManager->DrawNoRotation(&bombLabel);
+        g_AnmManager->DrawNoRotation(&powerLabel);
+
+        AnmVm *lifeIcon = &gui->impl->vms0[9];
+        AnmVm *bombIcon = &gui->impl->vms0[10];
+        const Float2 oldLifeScale = lifeIcon->scale;
+        const Float2 oldBombScale = bombIcon->scale;
+        lifeIcon->scale.x = lifeIcon->scale.y = 0.65f;
+        bombIcon->scale.x = bombIcon->scale.y = 0.65f;
+        for (i32 i = 0; i < (i32)g_GameManager.Lives(seat); i++)
+        {
+            lifeIcon->pos = Float3(540.0f + 11.0f * i, y, 0.46f);
+            g_AnmManager->DrawNoRotation(lifeIcon);
+        }
+        for (i32 i = 0; i < (i32)g_GameManager.Bombs(seat); i++)
+        {
+            bombIcon->pos = Float3(540.0f + 11.0f * i, y + 12.0f, 0.46f);
+            g_AnmManager->DrawNoRotation(bombIcon);
+        }
+        lifeIcon->scale = oldLifeScale;
+        bombIcon->scale = oldBombScale;
+
+        Float3 textPos(432.0f, y, 0.0f);
+        g_AsciiManager.scale.x = g_AsciiManager.scale.y = 0.55f;
+        g_AsciiManager.color = 0xffffffff;
+        g_AsciiManager.AddString(&textPos, CoopPlayerName(seat));
+        textPos.y = y + 14.0f;
+        g_AsciiManager.scale.x = g_AsciiManager.scale.y = 0.50f;
+        g_AsciiManager.color = 0xff80c0ff;
+        g_AsciiManager.AddString(&textPos, CoopHudLoadout(seat));
+    }
+
+    AnmVm grazeLabel = gui->impl->vms0[7];
+    AnmVm pointLabel = gui->impl->vms0[8];
+    const f32 labelShift = CoopHudSharedY(seats) - 164.0f;
+    grazeLabel.pos.y += labelShift;
+    pointLabel.pos.y += labelShift;
+    g_AnmManager->DrawNoRotation(&grazeLabel);
+    g_AnmManager->DrawNoRotation(&pointLabel);
+    g_AsciiManager.scale.x = g_AsciiManager.scale.y = 0.70f;
+    g_AsciiManager.color = oldColor;
+    Float3 textPos(488.0f, CoopHudSharedY(seats), 0.0f);
+    AsciiManager::AddFormatText(&g_AsciiManager, &textPos, "%d",
+                                g_GameManager.globals->grazeInTotal);
+    textPos.y += 16.0f;
+    AsciiManager::AddFormatText(&g_AsciiManager, &textPos, "%d/%d",
+                                g_GameManager.globals->pointItemsCollectedForExtend,
+                                g_GameManager.globals->nextNeededPointItemsForExtend);
+    g_AsciiManager.scale = oldScale;
+    g_AsciiManager.color = oldColor;
+    g_AsciiManager.isGui = oldGui;
+
+    g_AnmManager->Flush();
+    g_AsciiManager.scale.x = g_AsciiManager.scale.y = 0.70f;
+    g_AsciiManager.color = 0xffffffff;
+    g_AsciiManager.isGui = 0;
+    for (i32 seat = 0; seat < seats; seat++)
+    {
+        const i32 power = (i32)g_GameManager.Power(seat);
+        const f32 y = CoopHudRowY(seat, seats) + 26.0f;
+        DrawCoopPowerBar(y, power);
+        Float3 powerPos(540.0f, y, 0.0f);
+        if (power < 128)
+            AsciiManager::AddFormatText(&g_AsciiManager, &powerPos, "%d", power);
+        else
+            g_AsciiManager.AddString(&powerPos, "MAX");
+    }
+    g_AsciiManager.scale = oldScale;
+    g_AsciiManager.color = oldColor;
+    g_AsciiManager.isGui = oldGui;
+}
+
 void Gui::DrawGameScene()
 {
     Float3 textDrawPos;
@@ -1437,6 +1615,7 @@ void Gui::DrawGameScene()
     i32 i;
     f32 x;
     f32 y;
+    const bool coop = g_GameManager.PlayerCount() > 1;
 
     g_AnmManager->Flush();
     g_Supervisor.viewport.X = 0;
@@ -1447,6 +1626,7 @@ void Gui::DrawGameScene()
     vm = &this->impl->vms0[12];
     if (g_Supervisor.cfg.redrawEveryFrame ||
         vm->currentInstruction ||
+        g_GameManager.isInPauseMenu || g_GameManager.isInRetryMenu ||
         g_Supervisor.renderSkipFrames != 0)
     {
         for (y = 0.0f; y < 464.0f; y = y + 32.0f)
@@ -1471,14 +1651,25 @@ void Gui::DrawGameScene()
             g_AnmManager->DrawNoRotation(vm);
         }
         g_AnmManager->DrawNoRotation(this->impl->vms0);
-        g_AnmManager->Draw(this->impl->vms0 + 1);
+        if (!coop || g_GameManager.PlayerCount() < 4)
+            g_AnmManager->Draw(this->impl->vms0 + 1);
+        if (coop)
+        {
+            this->impl->vms0[2].pos.y -= 14.0f;
+            this->impl->vms0[3].pos.y -= 14.0f;
+        }
         g_AnmManager->DrawNoRotation(this->impl->vms0 + 2);
         g_AnmManager->DrawNoRotation(this->impl->vms0 + 3);
-        g_AnmManager->DrawNoRotation(this->impl->vms0 + 4);
-        g_AnmManager->DrawNoRotation(this->impl->vms0 + 5);
-        g_AnmManager->DrawNoRotation(this->impl->vms0 + 6);
-        g_AnmManager->DrawNoRotation(this->impl->vms0 + 7);
-        g_AnmManager->DrawNoRotation(this->impl->vms0 + 8);
+        if (coop)
+        {
+            this->impl->vms0[2].pos.y += 14.0f;
+            this->impl->vms0[3].pos.y += 14.0f;
+        }
+        else
+        {
+            for (i32 label = 4; label <= 8; label++)
+                g_AnmManager->DrawNoRotation(this->impl->vms0 + label);
+        }
         this->lifeDisplayUpdateFrames = 2;
         this->bombDisplayUpdateFrames = 2;
         this->grazeDisplayUpdateFrames = 2;
@@ -1488,32 +1679,32 @@ void Gui::DrawGameScene()
     if (!g_Supervisor.cfg.disableItemDrawAroundPlayfield)
     {
         vm = &this->impl->vms0[13];
-        x = 496.0f;
-        vm->pos = Float3(x, 48.0f, 0.49f);
+        x = coop ? 512.0f : 496.0f;
+        vm->pos = Float3(x, coop ? 34.0f : 48.0f, 0.49f);
         g_AnmManager->DrawNoRotation(vm);
-        vm->pos = Float3(x, 64.0f, 0.49f);
+        vm->pos = Float3(x, coop ? 50.0f : 64.0f, 0.49f);
         g_AnmManager->DrawNoRotation(vm);
-        if (this->lifeDisplayUpdateFrames)
+        if (!coop && this->lifeDisplayUpdateFrames)
         {
             vm->pos = Float3(x, 96.0f, 0.48f);
             g_AnmManager->DrawNoRotation(vm);
         }
-        if (this->bombDisplayUpdateFrames)
+        if (!coop && this->bombDisplayUpdateFrames)
         {
             vm->pos = Float3(x, 112.0f, 0.48f);
             g_AnmManager->DrawNoRotation(vm);
         }
-        if (this->powerDisplayUpdateFrames)
+        if (!coop && this->powerDisplayUpdateFrames)
         {
             vm->pos = Float3(x, 144.0f, 0.48f);
             g_AnmManager->DrawNoRotation(vm);
         }
-        if (this->grazeDisplayUpdateFrames)
+        if (!coop && this->grazeDisplayUpdateFrames)
         {
             vm->pos = Float3(x, 160.0f, 0.48f);
             g_AnmManager->DrawNoRotation(vm);
         }
-        if (this->pointDisplayUpdateFrames)
+        if (!coop && this->pointDisplayUpdateFrames)
         {
             vm->pos = Float3(x, 176.0f, 0.48f);
             g_AnmManager->DrawNoRotation(vm);
@@ -1521,7 +1712,7 @@ void Gui::DrawGameScene()
         vm->pos = Float3(512.0f, 464.0f, 0.48f);
         g_AnmManager->DrawNoRotation(vm);
     }
-    if (this->lifeDisplayUpdateFrames)
+    if (!coop && this->lifeDisplayUpdateFrames)
     {
         vm = &this->impl->vms0[9];
         for (i = 0, x = 496.0f;
@@ -1532,7 +1723,7 @@ void Gui::DrawGameScene()
             g_AnmManager->DrawNoRotation(vm);
         }
     }
-    if (this->bombDisplayUpdateFrames)
+    if (!coop && this->bombDisplayUpdateFrames)
     {
         vm = &this->impl->vms0[10];
         for (i = 0, x = 496.0f;
@@ -1550,7 +1741,7 @@ void Gui::DrawGameScene()
         g_AnmManager->DrawNoRotation(vm);
     }
     textDrawPos.x = 496.0f;
-    textDrawPos.y = 64.0f;
+    textDrawPos.y = coop ? 50.0f : 64.0f;
     textDrawPos.z = 0.0f;
     if (g_GameManager.globals->guiScore < 100000000)
     {
@@ -1572,7 +1763,7 @@ void Gui::DrawGameScene()
         g_AsciiManager.scale.x = 1.0f;
         g_AsciiManager.scale.y = 1.0f;
     }
-    textDrawPos = Float3(496.0f, 48.0f, 0.0f);
+    textDrawPos = Float3(496.0f, coop ? 34.0f : 48.0f, 0.0f);
     if (g_GameManager.globals->highScore < 100000000)
     {
         AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "%.8d",
@@ -1595,15 +1786,17 @@ void Gui::DrawGameScene()
         g_AsciiManager.scale.x = 1.0f;
         g_AsciiManager.scale.y = 1.0f;
     }
-    if (this->grazeDisplayUpdateFrames ||
-        g_Supervisor.cfg.disableItemDrawAroundPlayfield)
+    if (coop)
+        DrawCoopHud(this);
+    if (!coop && (this->grazeDisplayUpdateFrames ||
+        g_Supervisor.cfg.disableItemDrawAroundPlayfield))
     {
         textDrawPos = Float3(496.0f, 160.0f, 0.0f);
         AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "%d",
                                     g_GameManager.globals->grazeInTotal);
     }
-    if (this->pointDisplayUpdateFrames ||
-        g_Supervisor.cfg.disableItemDrawAroundPlayfield)
+    if (!coop && (this->pointDisplayUpdateFrames ||
+        g_Supervisor.cfg.disableItemDrawAroundPlayfield))
     {
         textDrawPos = Float3(496.0f, 176.0f, 0.0f);
         AsciiManager::AddFormatText(
@@ -1612,8 +1805,8 @@ void Gui::DrawGameScene()
             g_GameManager.globals->nextNeededPointItemsForExtend);
     }
     g_AnmManager->Flush();
-    if (this->powerDisplayUpdateFrames ||
-        g_Supervisor.cfg.disableItemDrawAroundPlayfield)
+    if (!coop && (this->powerDisplayUpdateFrames ||
+        g_Supervisor.cfg.disableItemDrawAroundPlayfield))
     {
         VertexDiffuseXyzrhw powerBarVerts[4];
 
