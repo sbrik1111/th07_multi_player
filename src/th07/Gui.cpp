@@ -1651,8 +1651,7 @@ void Gui::DrawGameScene()
             g_AnmManager->DrawNoRotation(vm);
         }
         g_AnmManager->DrawNoRotation(this->impl->vms0);
-        if (!coop || g_GameManager.PlayerCount() < 4)
-            g_AnmManager->Draw(this->impl->vms0 + 1);
+        g_AnmManager->Draw(this->impl->vms0 + 1);
         if (coop)
         {
             this->impl->vms0[2].pos.y -= 14.0f;
