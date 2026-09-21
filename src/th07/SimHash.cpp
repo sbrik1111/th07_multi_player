@@ -67,6 +67,8 @@ void HashPlayer(Fnv &f, Player *p)
     f.Pos(p->optionsPosition[1]);
     f.I32(p->lifeGiveTimer);
     f.I32(p->powerGiveTaps);
+    f.I32(p->powerGiveWindow);
+    f.I32(p->lifeGiveTarget);
 }
 
 void HashShots(Fnv &f, Player *p)
@@ -209,6 +211,7 @@ u32 SimFrameHash(u32 *parts)
     }
     {
         Fnv &f = part[SIM_HASH_ITEMS];
+        f.I32(g_ItemManager.nextIndex);
         for (i32 i = 0; i < 1100; i++)
         {
             const Item &item = g_ItemManager.items[i];
@@ -221,6 +224,12 @@ u32 SimFrameHash(u32 *parts)
             f.I32(item.itemType);
             f.Pos(item.currentPosition);
             f.I32(item.collector);
+            f.I32(item.targetSeat);
+            f.I32(item.transfer);
+            f.I32(item.autoCollect);
+            f.I32(item.timer.current);
+            f.Pos(item.startPosition);
+            f.Pos(item.targetPosition);
         }
     }
     {
@@ -276,10 +285,11 @@ void SimDumpState(u32 frame, u32 pass)
             continue;
         }
         CoopLog("DUMP_ITEM frame=%u pass=%u i=%d state=%d type=%d pos=%08X,%08X,%08X vel=%08X,%08X time=%d auto=%d "
-                "collector=%d",
+                "collector=%d target=%d transfer=%d",
                 frame, pass, i, item.state, item.itemType, FloatBits(item.currentPosition.x),
                 FloatBits(item.currentPosition.y), FloatBits(item.currentPosition.z), FloatBits(item.startPosition.x),
-                FloatBits(item.startPosition.y), item.timer.current, item.autoCollect, item.collector);
+                FloatBits(item.startPosition.y), item.timer.current, item.autoCollect, item.collector,
+                item.targetSeat, item.transfer);
     }
     CoopLog("DUMP_END frame=%u pass=%u", frame, pass);
 }
@@ -309,6 +319,8 @@ i32 SimCollectItems(SimItemRecord *out, i32 max)
         r.time = item.timer.current;
         r.intangible = 0;
         r.collector = item.collector;
+        r.targetSeat = item.targetSeat;
+        r.transfer = item.transfer;
     }
     return n;
 }

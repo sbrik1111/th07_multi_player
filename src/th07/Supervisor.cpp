@@ -856,6 +856,7 @@ void Supervisor::DrawFpsCounter(i32 param_1)
         if (g_Supervisor.wantedState == 2)
         {
             CoopDrawTransferPrompts();
+            CoopDrawStageNames();
         }
     }
 }

@@ -30,6 +30,8 @@ f32 CoopItemCopyAngle(i32 k, i32 count);
 void CoopSpawnDrop(Float3 *pos, i32 type, i32 state, i32 boss);
 i32 CoopAllSeatsFullPower();
 
+i32 PowerDropSeat(i32 itemIndex);
+
 i32 AnyBombInUse();
 i32 AnyPlayerBusy();
 
@@ -45,6 +47,8 @@ i32 CoopTestGhost(Player *player);
 
 void CoopUpdateTransfers(Player *player);
 void CoopDrawTransferPrompts();
+void CoopDrawStageNames();
+extern i32 g_CoopShowStageNames;
 
 void CoopExtendFromPoints();
 void CoopContinue();

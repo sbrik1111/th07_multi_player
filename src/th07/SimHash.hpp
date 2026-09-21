@@ -38,5 +38,7 @@ struct SimItemRecord
     i32 time;
     i32 intangible;
     i32 collector;
+    i32 targetSeat;
+    i32 transfer;
 };
 i32 SimCollectItems(SimItemRecord *out, i32 max);

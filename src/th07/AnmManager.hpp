@@ -616,16 +616,16 @@ struct AnmManager
     u32 flushesThisFrame;
     Float2 offset;
     D3DXMATRIX matrix;
-    // Seats 1-3: player sprites/scripts at 0xa00.
-    AnmLoadedSprite sprites[0xd00];
+    // Seats 1-3: player sprites/scripts at 0xa00, bomb portraits at 0xd00.
+    AnmLoadedSprite sprites[0xe00];
     AnmVm vm;
     IDirect3DTexture8 *textures[264];
     void *imageDataArray[256];
     char *textureNames[264];
     i32 loadedSpriteCount;
-    AnmRawInstr *scripts[0xd00];
-    i32 spriteIndices[0xd00];
-    AnmEntry anmFiles[53]; // 50-52: players
+    AnmRawInstr *scripts[0xe00];
+    i32 spriteIndices[0xe00];
+    AnmEntry anmFiles[62]; // 50-52: players; 53-61: per-seat faces
     IDirect3DSurface8 *surfaces[32];
     IDirect3DSurface8 *surfacesBis[32];
     ZunImageInfo surfaceSourceInfo[32];

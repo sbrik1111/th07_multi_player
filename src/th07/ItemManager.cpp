@@ -1,6 +1,7 @@
 #include "ItemManager.hpp"
 
 #include <new>
+#include <math.h>
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
 #include "BulletManager.hpp"
@@ -33,19 +34,12 @@ ItemManager &g_ItemManager = *new (GameStaticBlock(sizeof(ItemManager))) ItemMan
 
 #pragma var_order(i, item)
 // FUNCTION: TH07 0x004326f0
-Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
+Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state, i32 recipient)
 {
     Item *item;
     i32 i;
 
     item = &this->items[this->nextIndex];
-    if (CoopAllSeatsFullPower())
-    {
-        if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
-        {
-            itemType = ITEM_CHERRY;
-        }
-    }
     for (i = 0; i < 1100; i++)
     {
         this->nextIndex++;
@@ -67,8 +61,16 @@ Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
         {
             this->nextIndex = 0;
         }
+        if (recipient < 0 && (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG) &&
+            g_GameManager.Power(PowerDropSeat((i32)(item - this->items))) >= 128.0f)
+        {
+            itemType = ITEM_CHERRY;
+        }
         item->isInUse = 1;
+        item->targetSeat = (i8)recipient;
+        item->transfer = recipient >= 0;
         item->currentPosition = *heading;
+        item->targetPosition = Float3(0.0f, 0.0f, 0.0f);
         item->startPosition.x = 0.0f;
         item->startPosition.y = -2.2f;
         item->startPosition.z = 0.0f;
@@ -84,7 +86,9 @@ Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
         }
         else if (state == 3)
         {
-            item->state = 1;
+            item->targetPosition = *heading;
+            item->targetPosition.y -= 60.0f;
+            item->startPosition = *heading;
         }
         else if (state == 4)
         {
@@ -100,6 +104,28 @@ Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state)
     }
 
     return i < 1100 ? item : &this->items[1100];
+}
+
+// Reserve every slot first: a full pool cannot eat a gift.
+bool ItemManager::SpawnTransfer(Float3 *heading, i32 itemType, i32 recipient, i32 amount)
+{
+    if (recipient < 0 || recipient >= PlayerCount() || amount <= 0 ||
+        (itemType != ITEM_LIFE && itemType != ITEM_POWER_SMALL))
+        return false;
+    const i32 bigCount = itemType == ITEM_POWER_SMALL ? amount / 8 : 0;
+    const i32 smallCount = itemType == ITEM_POWER_SMALL ? amount % 8 : amount;
+    const i32 needed = bigCount + smallCount;
+    i32 available = 0;
+    for (i32 i = 0; i < 1100 && available < needed; i++)
+        available += !this->items[i].isInUse;
+    if (available < needed)
+        return false;
+    for (i32 i = 0; i < needed; i++)
+    {
+        Item *item = SpawnItem(heading, i < bigCount ? ITEM_POWER_BIG : itemType, 3, recipient);
+        item->targetPosition.x += (i - (needed - 1) * 0.5f) * 8.0f;
+    }
+    return true;
 }
 
 #pragma var_order(i, itemTimerSecs, itemScore, playerAngle, local_20, itemAcquired, \
@@ -157,6 +183,19 @@ void ItemManager::OnUpdate()
                 item->state = 0;
             }
         }
+        else if (item->state == 3)
+        {
+            if (item->timer < 20)
+            {
+                const f32 t = item->timer.AsFloat() / 20.0f;
+                const f32 ease = 1.0f - powf(1.0f - t, 1.5f);
+                item->currentPosition = ease * item->targetPosition +
+                                        (1.0f - ease) * item->startPosition;
+                goto check_collision;
+            }
+            item->startPosition = Float3(0.0f, 0.0f, 0.0f);
+            item->state = 1;
+        }
         else
         {
             if (item->state == 1 || ((128.0 <= (f64)(i32)g_GameManager.Power(player->seat) || g_GameManager.difficulty >= 4) && player->positionCenter.y < player->shooterData->pocY) || player->hasBorder == 1)
@@ -210,8 +249,10 @@ void ItemManager::OnUpdate()
             item->startPosition.y = 3.0f;
         }
     check_collision:
-        if (player->CalcItemBoxCollision(&item->currentPosition, &local_20))
+        if (item->state != 3 && player->CalcItemBoxCollision(&item->currentPosition, &local_20))
         {
+            if (item->transfer)
+                CoopLog("TRANSFER_PICKUP to=%d type=%d", player->seat, item->itemType);
             g_ReplayManager->replayEventFlags |= 0x40;
             switch (item->itemType)
             {
@@ -401,6 +442,7 @@ void ItemManager::OnUpdate()
                     g_Gui.ShowStatusPopup(0, 1);
                     g_SoundPlayer.PlaySoundByIdx(SOUND_POWERUP, 0);
                     g_AsciiManager.CreatePopup1(&item->currentPosition, -1, 0xffffc0a0);
+                    g_GameManager.Power(player->seat) = 128.0f;
                     this->DespawnAllItems(i);
                 }
                 g_GameManager.Power(player->seat) = 128.0f;
@@ -515,8 +557,11 @@ void ItemManager::RemoveAllItems()
             continue;
         }
 
-        item->state = 1;
-        item->startPosition = Float3(0.0f, -0.5f, 0.0f);
+        if (!item->transfer)
+        {
+            item->state = 1;
+            item->startPosition = Float3(0.0f, -0.5f, 0.0f);
+        }
     }
 }
 
@@ -535,7 +580,8 @@ void ItemManager::DespawnAllItems(i32 param_1)
             continue;
         }
 
-        if (item->itemType == 0 || item->itemType == 2)
+        if ((item->itemType == ITEM_POWER_SMALL || item->itemType == ITEM_POWER_BIG) &&
+            !item->transfer && g_GameManager.Power(PowerDropSeat(i)) >= 128.0f)
         {
             if (item->startPosition.y > -0.5f)
             {
@@ -565,8 +611,9 @@ void ItemManager::ActivateAllItems()
             continue;
         }
 
-        if (item->state == 1)
+        if (item->state == 1 && !item->transfer)
         {
+            item->targetSeat = -1;
             item->state = 0;
             item->startPosition.x = 0.0f;
             item->startPosition.y = -0.9f;

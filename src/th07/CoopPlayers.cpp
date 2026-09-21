@@ -3,6 +3,7 @@
 #include "Controller.hpp"
 #include "Coop.hpp"
 #include "Gui.hpp"
+#include "ItemManager.hpp"
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
 #include <math.h>
@@ -265,17 +266,9 @@ static void UpdatePowerTransfer(Player *giver)
     }
     giver->powerGiveTaps = 0;
     giver->powerGiveWindow = 0;
-    f32 &to = g_GameManager.Power(receiver->seat);
-    power -= amount;
-    if (power < 0.0f)
-    {
-        power = 0.0f;
-    }
-    to += amount;
-    if (to > MAX_POWER)
-    {
-        to = MAX_POWER;
-    }
+    if (!g_ItemManager.SpawnTransfer(&giver->positionCenter, ITEM_POWER_SMALL, receiver->seat, amount))
+        return;
+    g_GameManager.AddSeatStock(power, -amount);
     g_Gui.powerDisplayUpdateFrames = 2;
     g_SoundPlayer.PlaySoundByIdx(SOUND_POWERUP, 0);
     CoopLog("POWER_GIVE from=%d to=%d amount=%d", giver->seat, receiver->seat, amount);
@@ -314,14 +307,17 @@ static void UpdateLifeTransfer(Player *giver)
     }
     giver->lifeGiveTimer = 0;
     giver->lifeGiveTarget = 0;
-    lives -= 1.0f;
     if (IsGhost(receiver))
     {
+        g_GameManager.AddSeatStock(lives, -1);
         CoopReviveGhost(receiver);
+        g_GameManager.RegenerateGameIntegrityCsum();
     }
     else
     {
-        g_GameManager.Lives(receiver->seat) += 1.0f;
+        if (!g_ItemManager.SpawnTransfer(&giver->positionCenter, ITEM_LIFE, receiver->seat))
+            return;
+        g_GameManager.AddSeatStock(lives, -1);
     }
     g_Gui.lifeDisplayUpdateFrames = 2;
     g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
@@ -370,7 +366,7 @@ void CoopDrawTransferPrompts()
             sprintf_s(text, sizeof(text), "%d%%", player->lifeGiveTimer * 100 / LIFE_CHARGE_FRAMES);
             DrawPrompt(player->positionCenter.x, player->positionCenter.y - 22.0f - 8.0f, 0.6f, 0xffffff00, text);
         }
-        if (player->powerGiveTaps >= 2)
+        if (player->powerGiveTaps >= 4)
         {
             sprintf_s(text, sizeof(text), "P %d/%d", player->powerGiveTaps, POWER_TAPS);
             DrawPrompt(player->positionCenter.x, player->positionCenter.y + 16.0f, 0.5f, 0xffa0ffa0, text);
@@ -379,4 +375,38 @@ void CoopDrawTransferPrompts()
     g_AsciiManager.color = color;
     g_AsciiManager.scale = scale;
     g_AsciiManager.isGui = isGui;
+}
+
+void CoopDrawStageNames()
+{
+    if (!g_CoopShowStageNames || PlayerCount() < 2 ||
+        g_GameManager.framesThisStage < 0 || g_GameManager.framesThisStage >= 240)
+        return;
+    static const D3DCOLOR colors[MAX_PLAYERS] = {
+        0xffffffff, 0xffa0d0ff, 0xffa8ffa8, 0xffffc090
+    };
+    const D3DCOLOR color = g_AsciiManager.color;
+    const Float2 scale = g_AsciiManager.scale;
+    const i32 gui = g_AsciiManager.isGui;
+    const i32 selected = g_AsciiManager.isSelected;
+    g_AsciiManager.isGui = 0;
+    g_AsciiManager.isSelected = 0;
+    for (i32 seat = 0; seat < PlayerCount(); seat++)
+    {
+        const Player &player = g_Players[seat];
+        if (player.calcChain == NULL)
+            continue;
+        const char *name = CoopPlayerName(seat);
+        const f32 halfWidth = strlen(name) * g_AsciiManager.fontSpacing * 0.48f * 0.5f;
+        f32 x = player.positionCenter.x;
+        if (x < halfWidth + 2.0f)
+            x = halfWidth + 2.0f;
+        if (x > g_GameManager.arcadeRegionSize.x - halfWidth - 2.0f)
+            x = g_GameManager.arcadeRegionSize.x - halfWidth - 2.0f;
+        DrawPrompt(x, player.positionCenter.y - 22.0f - seat * 9.0f, 0.48f, colors[seat], name);
+    }
+    g_AsciiManager.color = color;
+    g_AsciiManager.scale = scale;
+    g_AsciiManager.isGui = gui;
+    g_AsciiManager.isSelected = selected;
 }

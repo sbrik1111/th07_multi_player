@@ -53,6 +53,7 @@ enum Control {
     kPlayersLabel,
     kDelayHint,
     kPlayersCombo,
+    kStageNames,
 };
 
 enum Language {
@@ -115,6 +116,7 @@ enum TextId {
     kTextErrorPeerStopped,
     kTextErrorTimeout,
     kTextErrorHandoff,
+    kTextStageNames,
     kTextCount,
 };
 
@@ -179,6 +181,7 @@ const wchar_t* const kText[kTextCount][kLanguageCount] = {
     {L"Connection timed out.", L"接続がタイムアウトしました。", L"连接超时。"},
     {L"Could not hand the UDP socket to the game.", L"UDP ソケットをゲームへ引き渡せませんでした。",
      L"无法将 UDP 套接字交给游戏。"},
+    {L"Stage intro names", L"開始時に名前を表示", L"开场显示名称"},
 };
 
 enum LobbyResult {
@@ -881,6 +884,7 @@ void SaveSettings()
     SaveNumber("bgm", IsDlgButtonChecked(g_ui.window, kBgm) == BST_CHECKED ? 1 : 0);
     SaveNumber("se", IsDlgButtonChecked(g_ui.window, kSe) == BST_CHECKED ? 1 : 0);
     SaveNumber("bot", IsDlgButtonChecked(g_ui.window, kBot) == BST_CHECKED ? 1 : 0);
+    SaveNumber("stage_names", IsDlgButtonChecked(g_ui.window, kStageNames) == BST_CHECKED ? 1 : 0);
     SaveNumber("language", static_cast<int>(g_ui.language));
 }
 
@@ -901,6 +905,7 @@ bool IsLiveSettingControl(int id)
     case kBgm:
     case kSe:
     case kBot:
+    case kStageNames:
     case kLanguageCombo:
     case kPlayersCombo:
         return true;
@@ -966,6 +971,7 @@ void ConfigureEnvironment(Mode mode, unsigned sessionId = 0, bool rollback = fal
     PutEnvironment("TH07_MP_PLAYERS", number);
     PutEnvironment("TH07_MP_MODE", mode == kHost || mode == kGuest ? "udp" : "local");
     PutEnvironment("TH07_MP_TEST_BOT", g_ui.result->bot ? "1" : "0");
+    PutEnvironment("TH07_MP_STAGE_NAMES", IsDlgButtonChecked(g_ui.window, kStageNames) == BST_CHECKED ? "1" : "0");
     if (mode == kSingle || mode == kLocal) {
         PutEnvironment("TH07_MP_SEAT", "0");
         PutEnvironment("TH07_MP_ROLLBACK", nullptr);
@@ -1063,8 +1069,8 @@ void SetNetworkControls(bool enabled)
 {
     const BOOL value = enabled ? TRUE : FALSE;
     const int controls[] = {
-        kRoleHost, kRoleGuest,  kHostEdit,   kPortEdit,  kDelayEdit,    kRollback,      kDisplay640,
-        kDisplay960, kDisplay1280, kDisplayFullscreen, kBgm, kSe, kBot, kPlayerName, kStartLocal, kStartSingle,
+        kRoleHost, kRoleGuest, kHostEdit, kPortEdit, kDelayEdit, kRollback,
+        kBot, kPlayerName, kStartLocal, kStartSingle,
         kStartNetwork, kLanguageCombo, kPlayersCombo,
     };
     for (int id : controls) {
@@ -1237,6 +1243,7 @@ void ApplyLanguage()
         {kSe, kTextSe},
         {kControlGroup, kTextControl},
         {kBot, kTextBot},
+        {kStageNames, kTextStageNames},
         {kRollback, kTextRollback},
         {kPlayerNameLabel, kTextPlayerName},
         {kHostLabel, kTextHostIp},
@@ -1249,7 +1256,7 @@ void ApplyLanguage()
     };
     HFONT oldFont = g_ui.font;
     g_ui.font = MakeFont(g_ui.language);
-    for (int id = kRoleHost; id <= kDelayHint; ++id) {
+    for (int id = kRoleHost; id <= kStageNames; ++id) {
         HWND control = GetDlgItem(g_ui.window, id);
         if (control != nullptr) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_ui.font), TRUE);
@@ -1288,6 +1295,7 @@ void LoadSettings()
     CheckDlgButton(g_ui.window, kBgm, SettingNumber("bgm", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kSe, SettingNumber("se", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kBot, SettingNumber("bot", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(g_ui.window, kStageNames, SettingNumber("stage_names", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     g_ui.ownRollback = SettingNumber("rollback", 0, 0, 1) != 0;
     CheckDlgButton(g_ui.window, kRollback, g_ui.ownRollback ? BST_CHECKED : BST_UNCHECKED);
     const int language = SettingNumber("language", static_cast<int>(g_ui.language), 0, kLanguageCount - 1);
@@ -1333,6 +1341,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
         AddControl(L"BUTTON", Text(kTextSe), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 128, 150, 22, kSe);
         AddControl(L"BUTTON", Text(kTextControl), BS_GROUPBOX, 280, 160, 180, 66, kControlGroup);
         AddControl(L"BUTTON", Text(kTextBot), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 178, 150, 22, kBot);
+        AddControl(L"BUTTON", Text(kTextStageNames), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 200, 154, 22, kStageNames);
         AddControl(L"BUTTON", Text(kTextRollback), BS_AUTOCHECKBOX | WS_TABSTOP, 20, 238, 310, 22, kRollback);
         AddControl(L"STATIC", Text(kTextPlayerName), SS_LEFT, 20, 272, 84, 22, kPlayerNameLabel);
         g_ui.name = AddControl(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 270, 150, 24, kPlayerName);
@@ -1427,6 +1436,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
             case kBgm:
             case kSe:
             case kBot:
+            case kStageNames:
                 SaveLiveSettings(LOWORD(wp));
                 return 0;
             case kStartNetwork:
@@ -1566,6 +1576,11 @@ bool Run(Selection* selection)
     }
     return true;
 #endif
+}
+
+const wchar_t* SettingsPath()
+{
+    return g_settingsPath;
 }
 
 void ApplyGameConfig()

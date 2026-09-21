@@ -155,8 +155,9 @@ struct GuiImpl
     i32 clearPointItems;
     i32 clearCherryMax;
     i32 clearGraze;
+    i32 bombPortraitSeat;
 };
-C_ASSERT(sizeof(GuiImpl) == 0x20a30);
+C_ASSERT(sizeof(GuiImpl) == 0x20a34);
 
 struct Gui
 {
@@ -182,8 +183,8 @@ struct Gui
     i32 MsgWait();
 
     void EndEnemySpellcard();
-    void EndPlayerSpellcard();
-    void ShowBombNamePortrait(i32 sprite, const char *name);
+    void EndPlayerSpellcard(i32 seat);
+    void ShowBombNamePortrait(i32 sprite, const char *name, i32 seat);
     void ShowBonusScore(i32 score);
     void ShowStatusPopup(i32 fmtArg, i32 popupType);
     void ShowSpellcard(i32 spellcardSprite, const char *spellcardName);

@@ -111,6 +111,8 @@ void InitConfig()
         g_cfg.localSeat = 0;
     }
     g_cfg.testBot = EnvInt("TH07_MP_TEST_BOT", 0) != 0;
+    g_cfg.testRules = EnvInt("TH07_MP_TEST_RULES", 0) != 0;
+    g_cfg.showStageNames = EnvInt("TH07_MP_STAGE_NAMES", 0) != 0;
     g_cfg.testTitleBot = EnvInt("TH07_MP_TEST_TITLE_BOT", 0) != 0;
     g_cfg.testBotIdle = static_cast<unsigned>(EnvInt("TH07_MP_TEST_BOT_IDLE", 0)) & ((1u << g_cfg.playerCount) - 1);
     g_cfg.testPredictAlways = EnvInt("TH07_MP_TEST_PREDICT_ALWAYS", 0) != 0;

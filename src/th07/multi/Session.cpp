@@ -6,6 +6,7 @@
 #include "multi/RollbackGame.h"
 #include "AsciiManager.hpp"
 #include "multi/Bot.h"
+#include "multi/RuleTests.h"
 #include "Controller.hpp"
 #include "Coop.hpp"
 #include "FrameInput.hpp"
@@ -20,6 +21,7 @@
 #include "multi/RuntimeData.h"
 
 extern i32 g_CoopTestGhostFrame;
+i32 g_CoopShowStageNames;
 
 enum
 {
@@ -91,11 +93,15 @@ unsigned TitleBotMask(unsigned frame)
     {
         return 0;
     }
+    if (g_Supervisor.wantedState == 9 && g_Supervisor.curState == 9)
+        return TH_BUTTON_SKIP;
     return frame % 20 == 0 ? TH_BUTTON_SHOOT : 0;
 }
 
 int RunFrame(const unsigned *buttons, int count, int draw)
 {
+    if (!RunCoopRuleTestsIfRequested())
+        return 0;
     FrameInputs inputs = {};
     for (int seat = 0; seat < count && seat < MAX_PLAYERS; seat++)
     {
@@ -132,6 +138,7 @@ void MpInitSession()
     }
     g_CoopLogSink = CoopLogToSeatLog;
     g_CoopNameSource = NameOfSeat;
+    g_CoopShowStageNames = cfg.showStageNames;
     g_CoopViewSeat = cfg.mode == th07::mp::kUdp ? cfg.localSeat : 0;
     th07::mp::Log("SESSION mode=%s seat=%d players=%d rollback=%d delay=%u menu_delay=%u session=%08X",
                   cfg.mode == th07::mp::kUdp ? "udp" : "local", cfg.localSeat, cfg.playerCount, cfg.rollback ? 1 : 0,

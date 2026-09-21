@@ -48,7 +48,8 @@ struct Item
     i8 state;
     i8 autoCollect;
     i8 collector;
-    // pad 2
+    i8 targetSeat; // -1: unclaimed
+    i8 transfer;
     struct Item *next;
 };
 C_ASSERT(sizeof(Item) == 0x288);
@@ -60,7 +61,8 @@ struct ItemManager
     void OnUpdate();
     void OnDraw();
     void RemoveAllItems();
-    Item *SpawnItem(Float3 *heading, i32 itemType, i32 state);
+    Item *SpawnItem(Float3 *heading, i32 itemType, i32 state, i32 recipient = -1);
+    bool SpawnTransfer(Float3 *heading, i32 itemType, i32 recipient, i32 amount = 1);
 
     struct Item items[1101];
     i32 nextIndex;

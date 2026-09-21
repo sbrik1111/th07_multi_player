@@ -20,6 +20,8 @@ struct Config {
     int localSeat;
     int playerCount;
     bool testBot;
+    bool testRules;
+    bool showStageNames;
     bool testTitleBot;
     int testMenuSeat;
     unsigned testBotIdle;

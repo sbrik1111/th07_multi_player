@@ -218,25 +218,41 @@ i32 PlayerAutoCollects(Player *player)
            player->hasBorder == BORDER_ACTIVE;
 }
 
+i32 PowerDropSeat(i32 itemIndex)
+{
+    i32 seats[MAX_PLAYERS];
+    i32 count = 0;
+    for (i32 seat = 0; seat < PlayerCount(); seat++)
+        if (!IsGhost(&g_Players[seat]))
+            seats[count++] = seat;
+    return count ? seats[itemIndex % count] : 0;
+}
+
 Player *ItemCollector(Item *item)
 {
-    for (i32 seat = 0; seat < PlayerCount(); seat++)
+    if (item->targetSeat >= 0 && item->targetSeat < PlayerCount())
     {
-        Player *player = &g_Players[seat];
-        if (CanCollect(player) && PlayerAutoCollects(player))
-        {
-            return player;
-        }
+        Player *target = &g_Players[item->targetSeat];
+        if (CanCollect(target))
+            return target;
+        // A dead recipient releases the gift so it cannot get stuck.
+        item->targetSeat = -1;
+        item->transfer = 0;
+        item->state = 0;
+        item->startPosition = Float3(0.0f, -0.5f, 0.0f);
     }
+
+    i32 eligible[MAX_PLAYERS];
+    i32 count = 0;
     Player *best = NULL;
     f32 bestDistance = 0.0f;
     for (i32 seat = 0; seat < PlayerCount(); seat++)
     {
         Player *player = &g_Players[seat];
         if (!CanCollect(player))
-        {
             continue;
-        }
+        if (PlayerAutoCollects(player))
+            eligible[count++] = seat;
         f32 distance = DistanceSq(player, &item->currentPosition);
         if (best == NULL || distance < bestDistance)
         {
@@ -244,6 +260,16 @@ Player *ItemCollector(Item *item)
             bestDistance = distance;
         }
     }
+    if (count > 0)
+    {
+        best = &g_Players[eligible[(item - g_ItemManager.items) % count]];
+        item->autoCollect = 1;
+        // State 2: th07's death drop scatter.
+        if (item->state != 2)
+            item->state = 1;
+    }
+    if (best != NULL && item->state == 1)
+        item->targetSeat = (i8)best->seat;
     return best != NULL ? best : &g_Players[0];
 }
 

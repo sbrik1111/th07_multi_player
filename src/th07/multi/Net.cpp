@@ -29,7 +29,7 @@ using netcode::Timeline;
 using netcode::Inputs;
 
 const unsigned kMagic = 0x4E373054u; // "T07N"
-const unsigned short kVersion = 1;
+const unsigned short kVersion = 2;
 const unsigned kHistory = netcode::History;
 const unsigned kHashRing = 256;
 const unsigned kHashPeriod = 16;
@@ -380,10 +380,10 @@ void WriteItemTrace(unsigned last)
         for (int i = 0; i < t.count; i++) {
             const SimItemRecord& r = t.items[i];
             mp::Log("TRACE_ITEM frame=%u i=%d state=%d type=%d pos=%08X,%08X z=%08X vel=%08X,%08X vz=%08X mag=%08X tow=%08X "
-                    "time=%d intang=%d collector=%d",
+                    "time=%d intang=%d collector=%d target=%d transfer=%d",
                     frame, r.index, r.state, r.type, r.pos_x, r.pos_y, r.pos_z, r.vel_x, r.vel_y, r.vel_z, r.magnitude,
                     r.towards, r.time,
-                    r.intangible, r.collector);
+                    r.intangible, r.collector, r.targetSeat, r.transfer);
         }
     }
 }

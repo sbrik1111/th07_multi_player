@@ -125,7 +125,7 @@ void BombData::BombReimuACalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         return;
     }
@@ -133,7 +133,7 @@ void BombData::BombReimuACalc(Player *player)
     if (bombInfo->bombTimer.HasTicked() &&
         bombInfo->bombTimer == 0)
     {
-        g_Gui.ShowBombNamePortrait(1185, "霊符「夢想封印　散」");
+        g_Gui.ShowBombNamePortrait(1185, "霊符「夢想封印　散」", player->seat);
         bombInfo->bombDuration = 140;
         player->invulnerabilityTimer = 200;
         SpawnBombInvulnEffect(player);
@@ -321,7 +321,7 @@ void BombData::BombReimuACalcFocus(Player *player)
 
     if (bombInfo->bombTimer >= bombInfo->bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         bombInfo->isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -331,7 +331,7 @@ void BombData::BombReimuACalcFocus(Player *player)
     if (bombInfo->bombTimer.HasTicked() &&
         bombInfo->bombTimer == 0)
     {
-        g_Gui.ShowBombNamePortrait(1185, "霊符「夢想封印　集」");
+        g_Gui.ShowBombNamePortrait(1185, "霊符「夢想封印　集」", player->seat);
         bombInfo->bombDuration = 300;
         player->invulnerabilityTimer = 360;
         SpawnBombInvulnEffect(player);
@@ -521,7 +521,7 @@ void BombData::BombReimuBCalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         return;
     }
@@ -530,7 +530,7 @@ void BombData::BombReimuBCalc(Player *player)
         player->bombInfo.bombTimer == 0)
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1185, "夢符「封魔陣」");
+        g_Gui.ShowBombNamePortrait(1185, "夢符「封魔陣」", player->seat);
         player->bombInfo.bombDuration = 140;
         player->invulnerabilityTimer = 200;
         SpawnBombInvulnEffect(player);
@@ -630,7 +630,7 @@ void BombData::BombReimuBCalcFocus(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -641,7 +641,7 @@ void BombData::BombReimuBCalcFocus(Player *player)
         player->bombInfo.bombTimer == 0)
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1185, "夢符「二重結界」");
+        g_Gui.ShowBombNamePortrait(1185, "夢符「二重結界」", player->seat);
         player->bombInfo.bombDuration = 190;
         player->invulnerabilityTimer = 250;
         SpawnBombInvulnEffect(player);
@@ -710,7 +710,7 @@ void BombData::BombMarisaACalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         return;
     }
@@ -719,7 +719,7 @@ void BombData::BombMarisaACalc(Player *player)
         player->bombInfo.bombTimer == 0)
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1187, "魔符「スターダストレヴァリエ」");
+        g_Gui.ShowBombNamePortrait(1187, "魔符「スターダストレヴァリエ」", player->seat);
         player->bombInfo.bombDuration = 200;
         player->invulnerabilityTimer = 250;
         SpawnBombInvulnEffect(player);
@@ -817,7 +817,7 @@ void BombData::BombMarisaACalcFocus(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -828,7 +828,7 @@ void BombData::BombMarisaACalcFocus(Player *player)
         player->bombInfo.bombTimer == 0)
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1186, "魔符「ミルキーウェイ」");
+        g_Gui.ShowBombNamePortrait(1186, "魔符「ミルキーウェイ」", player->seat);
         player->bombInfo.bombDuration = 260;
         player->invulnerabilityTimer = 310;
         SpawnBombInvulnEffect(player);
@@ -964,7 +964,7 @@ void BombData::BombMarisaBCalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -976,7 +976,7 @@ void BombData::BombMarisaBCalc(Player *player)
     {
         g_ItemManager.RemoveAllItems();
         player->bombInfo.startPos = player->positionCenter;
-        g_Gui.ShowBombNamePortrait(1185, "恋符「ノンディレクショナルレーザー」");
+        g_Gui.ShowBombNamePortrait(1185, "恋符「ノンディレクショナルレーザー」", player->seat);
         player->bombInfo.bombDuration = 300;
         player->invulnerabilityTimer = 300;
         SpawnBombInvulnEffect(player);
@@ -1092,7 +1092,7 @@ void BombData::BombMarisaBCalcFocus(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -1103,7 +1103,7 @@ void BombData::BombMarisaBCalcFocus(Player *player)
         player->bombInfo.bombTimer == 0)
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1186, "恋符「マスタースパーク」");
+        g_Gui.ShowBombNamePortrait(1186, "恋符「マスタースパーク」", player->seat);
         player->bombInfo.bombDuration = 340;
         player->invulnerabilityTimer = 390;
         SpawnBombInvulnEffect(player);
@@ -1195,7 +1195,7 @@ void BombData::BombSakuyaACalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         return;
     }
@@ -1203,7 +1203,7 @@ void BombData::BombSakuyaACalc(Player *player)
     if (player->GetBombTimer()->HasTickedAndIsEq(0))
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1185, "幻符「インディスクリミネイト」");
+        g_Gui.ShowBombNamePortrait(1185, "幻符「インディスクリミネイト」", player->seat);
         player->bombInfo.bombDuration = 160;
         player->invulnerabilityTimer = 210;
         SpawnBombInvulnEffect(player);
@@ -1325,7 +1325,7 @@ void BombData::BombSakuyaACalcFocus(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -1335,7 +1335,7 @@ void BombData::BombSakuyaACalcFocus(Player *player)
     if (player->GetBombTimer()->HasTickedAndIsEq(0))
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1185, "幻符「殺人ドール」");
+        g_Gui.ShowBombNamePortrait(1185, "幻符「殺人ドール」", player->seat);
         player->bombInfo.bombDuration = 250;
         player->invulnerabilityTimer = 290;
         SpawnBombInvulnEffect(player);
@@ -1492,7 +1492,7 @@ void BombData::BombSakuyaBCalc(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -1504,7 +1504,7 @@ void BombData::BombSakuyaBCalc(Player *player)
     if (player->GetBombTimer()->HasTickedAndIsEq(0))
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1187, "時符「パーフェクトスクウェア」");
+        g_Gui.ShowBombNamePortrait(1187, "時符「パーフェクトスクウェア」", player->seat);
         player->bombInfo.bombDuration = 160;
         player->invulnerabilityTimer = 260;
         SpawnBombInvulnEffect(player);
@@ -1613,7 +1613,7 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
 
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
-        g_Gui.EndPlayerSpellcard();
+        g_Gui.EndPlayerSpellcard(player->seat);
         player->bombInfo.isInUse = 0;
         player->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
         player->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
@@ -1629,7 +1629,7 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
     if (player->GetBombTimer()->HasTickedAndIsEq(0))
     {
         g_ItemManager.RemoveAllItems();
-        g_Gui.ShowBombNamePortrait(1187, "時符「プライベートスクウェア」");
+        g_Gui.ShowBombNamePortrait(1187, "時符「プライベートスクウェア」", player->seat);
         player->bombInfo.bombDuration = 300;
         player->invulnerabilityTimer = 420;
         SpawnBombInvulnEffect(player);

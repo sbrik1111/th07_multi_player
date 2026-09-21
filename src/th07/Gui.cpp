@@ -46,8 +46,10 @@ i32 Gui::IsStageFinished()
 }
 
 // FUNCTION: TH07 0x00427b21
-void Gui::EndPlayerSpellcard()
+void Gui::EndPlayerSpellcard(i32 seat)
 {
+    if (this->impl->bombPortraitSeat != seat)
+        return;
     this->impl->bombSpellcardName.pendingInterrupt = 1;
     this->impl->bombSpellcardNameBg.SetInterrupt(2);
 }
@@ -341,9 +343,17 @@ u32 Gui::OnDraw(Gui *arg)
 }
 
 // FUNCTION: TH07 0x0042868d
-void Gui::ShowBombNamePortrait(i32 sprite, const char *name)
+void Gui::ShowBombNamePortrait(i32 sprite, const char *name, i32 seat)
 {
-    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardPortrait, 1185);
+    this->impl->bombPortraitSeat = seat;
+    i32 portraitScript = 1185;
+    if (seat > 0 && seat < g_GameManager.PlayerCount())
+    {
+        const i32 offset = ANM_OFFSET_COOP_FACE + (seat - 1) * 0x20 - ANM_OFFSET_FACE;
+        sprite += offset;
+        portraitScript += offset;
+    }
+    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardPortrait, portraitScript);
     g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardPortrait, sprite);
     g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardDecorLeft, 1188);
     g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardDecorLeft, 1196);
@@ -454,6 +464,16 @@ ZunResult Gui::ActualAddedCallback()
                 return ZUN_ERROR;
             }
             break;
+        }
+        static const char *faces[3] = {
+            "data/face_rm00.anm", "data/face_mr00.anm", "data/face_sk00.anm"
+        };
+        for (i32 seat = 1; seat < g_GameManager.PlayerCount(); seat++)
+        {
+            if (g_AnmManager->LoadAnms(ANM_FILE_COOP_FACE + (seat - 1) * 3,
+                    faces[g_GameManager.Character(seat)],
+                    ANM_OFFSET_COOP_FACE + (seat - 1) * 0x20) != ZUN_SUCCESS)
+                return ZUN_ERROR;
         }
     }
     else
@@ -2122,6 +2142,8 @@ ZunResult Gui::DeletedCallback(Gui *arg)
         g_AnmManager->ReleaseAnm(26);
         g_AnmManager->ReleaseAnm(27);
         g_AnmManager->ReleaseAnm(22);
+        for (i32 seat = 1; seat < g_GameManager.PlayerCount(); seat++)
+            g_AnmManager->ReleaseAnm(ANM_FILE_COOP_FACE + (seat - 1) * 3);
         delete arg->impl;
         arg->impl = NULL;
     }

@@ -34,6 +34,7 @@ void ApplyGameConfig();
 void RestoreGameConfig();
 // In halves of 640 x 480.
 int WindowScale();
+const wchar_t* SettingsPath();
 
 }
 }

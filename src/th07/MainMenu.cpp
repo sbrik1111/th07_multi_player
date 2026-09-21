@@ -321,7 +321,7 @@ u32 MainMenu::OnUpdatePreInput()
             {
             case 0:
                 g_GameManager.practice = 0;
-                this->cursor = g_Supervisor.cfg.defaultDifficulty;
+                this->cursor = 1;
                 if (this->cursor >= 4)
                 {
                     this->cursor = 2;
@@ -337,7 +337,7 @@ u32 MainMenu::OnUpdatePreInput()
                 return CHAIN_CALLBACK_RESULT_CONTINUE;
             case 2:
                 g_GameManager.practice = 1;
-                this->cursor = g_Supervisor.cfg.defaultDifficulty;
+                this->cursor = 1;
                 if (this->cursor >= 4)
                 {
                     this->cursor = 2;
@@ -355,7 +355,7 @@ u32 MainMenu::OnUpdatePreInput()
                 if (g_GameManager.HasReachedMaxClearsAllShotTypes())
                 {
                     g_GameManager.practice = 0;
-                    this->cursor = g_Supervisor.cfg.defaultDifficulty == 5;
+                    this->cursor = 0;
                     this->prevGameState = this->gameState;
                     this->gameState = STATE_EXTRA_SELECT_DIFFICULTY;
                     this->inputDelayTimer = 0;
@@ -1098,7 +1098,7 @@ u32 MainMenu::OnUpdateSelectDifficulty()
             {
                 return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
             }
-            this->cursor = g_Supervisor.cfg.defaultDifficulty;
+            this->cursor = 1;
             if (this->gameState != STATE_EXTRA_SELECT_DIFFICULTY)
             {
                 g_AnmManager->SetInterruptActiveVms(this->vmHead, this->vmCount, 7);
