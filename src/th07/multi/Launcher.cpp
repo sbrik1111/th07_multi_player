@@ -39,21 +39,19 @@ enum Control {
     kStartSingle,
     kStartGame,
     kStatus,
-    kRoster,
-    kCancel,
+    kCancel = 121,
     kPlayerNameLabel,
     kPlayerName,
-    kLanguageLabel = 131,
-    kLanguageCombo,
+    kLanguageCombo = 132,
     kConnectAsLabel,
     kDisplayGroup,
     kAudioGroup,
-    kControlGroup,
-    kPortLabel,
+    kPortLabel = 137,
     kPlayersLabel,
-    kDelayHint,
-    kPlayersCombo,
-    kStageNames,
+    kPlayers2 = 142,
+    kPlayers3,
+    kPlayers4,
+    kStatusLabel,
 };
 
 enum Language {
@@ -66,7 +64,6 @@ enum Language {
 enum TextId {
     kTextLanguageName,
     kTextWindowTitle,
-    kTextLanguageLabel,
     kTextConnectAs,
     kTextRoleHost,
     kTextRoleGuest,
@@ -78,15 +75,12 @@ enum TextId {
     kTextAudio,
     kTextBgm,
     kTextSe,
-    kTextControl,
     kTextBot,
     kTextRollback,
     kTextPlayerName,
     kTextHostIp,
     kTextUdpPort,
     kTextInputDelay,
-    kTextDelayHint,
-    kTextDelayHintRollback,
     kTextPlayers,
     kTextStartHosting,
     kTextConnectToHost,
@@ -96,8 +90,6 @@ enum TextId {
     kTextCancel,
     kTextStopSearch,
     kTextStatusReady,
-    kTextStatusEnterHost,
-    kTextStatusWaitHost,
     kTextButtonConnecting,
     kTextButtonHosting,
     kTextStatusConnecting,
@@ -116,35 +108,31 @@ enum TextId {
     kTextErrorPeerStopped,
     kTextErrorTimeout,
     kTextErrorHandoff,
-    kTextStageNames,
+    kTextStatusLabel,
     kTextCount,
 };
 
 const wchar_t* const kText[kTextCount][kLanguageCount] = {
     {L"English", L"日本語", L"中文"},
-    {L"th07 multiplayer - Connection", L"th07 multiplayer - 接続", L"th07 multiplayer - 连接"},
-    {L"Language:", L"言語:", L"语言:"},
+    {L"th07_multi_net - Connection", L"th07_multi_net - 接続", L"th07_multi_net - 连接"},
     {L"Connect as:", L"接続方法:", L"连接方式:"},
     {L"Host", L"ホスト", L"主机"},
     {L"Guest", L"ゲスト", L"客机"},
-    {L"Display mode", L"画面モード", L"显示模式"},
-    {L"640 x 480", L"640 x 480", L"640 x 480"},
-    {L"960 x 720", L"960 x 720", L"960 x 720"},
-    {L"1280 x 960 (recommended)", L"1280 x 960 (推奨)", L"1280 x 960 (推荐)"},
-    {L"Fullscreen", L"フルスクリーン", L"全屏"},
-    {L"Audio", L"音声", L"音频"},
+    {L"Display mode:", L"画面モード:", L"显示模式:"},
+    {L"Window (640 x 480)", L"ウィンドウ (640 x 480)", L"窗口 (640 x 480)"},
+    {L"Window (960 x 720)", L"ウィンドウ (960 x 720)", L"窗口 (960 x 720)"},
+    {L"Window (1280 x 960)", L"ウィンドウ (1280 x 960)", L"窗口 (1280 x 960)"},
+    {L"Fullscreen (640 x 480)", L"全画面 (640 x 480)", L"全屏 (640 x 480)"},
+    {L"Audio:", L"音声:", L"音频:"},
     {L"BGM", L"BGM", L"背景音乐"},
-    {L"Sound effects (SE)", L"効果音 (SE)", L"音效 (SE)"},
-    {L"Control", L"操作", L"操作"},
-    {L"Use BOT on this PC", L"この PC で BOT を使う", L"在本机使用 BOT"},
-    {L"Rollback (delay 0)", L"ロールバック (遅延 0)", L"回滚 (延迟 0)"},
+    {L"SE", L"SE", L"SE"},
+    {L"BOT", L"BOT", L"BOT"},
+    {L"Predictive rollback (lowest input lag)", L"ロールバック (入力遅延を最小化)", L"预测回滚 (最低输入延迟)"},
     {L"Player name:", L"プレイヤー名:", L"玩家名称:"},
-    {L"Host name / IP:", L"ホスト名 / IP:", L"主机名 / IP:"},
-    {L"UDP port:", L"UDP ポート:", L"UDP 端口:"},
-    {L"Input delay:", L"入力遅延:", L"输入延迟:"},
-    {L"(fixed lockstep)", L"(固定ロックステップ)", L"(固定同步)"},
-    {L"(rollback uses 0)", L"(ロールバックは 0)", L"(回滚使用 0)"},
-    {L"Players:", L"人数:", L"人数:"},
+    {L"Host IP:", L"ホスト IP:", L"主机 IP:"},
+    {L"Port:", L"ポート:", L"端口:"},
+    {L"Fallback:", L"入力遅延:", L"输入延迟:"},
+    {L"Host players:", L"ホスト人数:", L"主机人数:"},
     {L"Start hosting", L"ホストを開始", L"开始主机"},
     {L"Connect to host", L"ホストに接続", L"连接到主机"},
     {L"Start Game (local)", L"ゲーム開始 (ローカル)", L"开始游戏 (本地)"},
@@ -152,11 +140,7 @@ const wchar_t* const kText[kTextCount][kLanguageCount] = {
     {L"Start Game", L"ゲーム開始", L"开始游戏"},
     {L"Cancel", L"キャンセル", L"取消"},
     {L"Stop search", L"検索を中止", L"停止搜索"},
-    {L"Ready", L"準備完了", L"准备就绪"},
-    {L"Enter the Host name or IPv4 address.", L"ホスト名または IPv4 アドレスを入力してください。",
-     L"请输入主机名或 IPv4 地址。"},
-    {L"Waiting for a guest after Start hosting.", L"「ホストを開始」を押すとゲストを待ちます。",
-     L"点击「开始主机」后等待客机。"},
+    {L"no connection", L"未接続", L"未连接"},
     {L"Connecting...", L"接続中...", L"连接中..."},
     {L"Hosting...", L"ホスト中...", L"主机启动中..."},
     {L"Connecting to host...", L"ホストに接続しています...", L"正在连接主机..."},
@@ -181,7 +165,7 @@ const wchar_t* const kText[kTextCount][kLanguageCount] = {
     {L"Connection timed out.", L"接続がタイムアウトしました。", L"连接超时。"},
     {L"Could not hand the UDP socket to the game.", L"UDP ソケットをゲームへ引き渡せませんでした。",
      L"无法将 UDP 套接字交给游戏。"},
-    {L"Stage intro names", L"開始時に名前を表示", L"开场显示名称"},
+    {L"cur state:", L"接続状態:", L"连接状态:"},
 };
 
 enum LobbyResult {
@@ -229,9 +213,7 @@ struct Ui {
     HWND startNetwork;
     HWND startGame;
     HWND cancel;
-    HWND roster;
     HWND languageCombo;
-    HWND playersCombo;
     HFONT font;
     Selection* result;
     Language language;
@@ -293,20 +275,34 @@ void SetText(HWND control, const wchar_t* text)
     }
 }
 
-void SetNumberText(HWND control, unsigned value)
+void ShowStatus(TextId status)
 {
-    wchar_t text[16];
-    swprintf_s(text, L"%u", value);
-    SetText(control, text);
+    wchar_t text[512];
+    wcscpy_s(text, Text(status));
+    if (g_ui.networkAttempting && g_lobby.active) {
+        char roster[160] = {};
+        for (int seat = 0; seat < g_lobby.playerCount; ++seat) {
+            char label[20];
+            _snprintf_s(label, sizeof(label), _TRUNCATE, "%sP%d: ", seat % 2 == 0 ? "\r\n" : "    ", seat + 1);
+            Append(roster, sizeof(roster), label);
+            Append(roster, sizeof(roster), g_lobby.connectedMask & (1u << seat) ? g_lobby.roster[seat] : "...");
+        }
+        wchar_t wide[160];
+        if (MultiByteToWideChar(932, 0, roster, -1, wide, 160) > 0)
+            wcscat_s(text, wide);
+    }
+    SetText(g_ui.status, text);
 }
 
 HFONT MakeFont(Language language)
 {
+    if (language == kEnglish)
+        return nullptr;
     const wchar_t* face = language == kJapanese  ? L"Yu Gothic UI"
                           : language == kChinese ? L"Microsoft YaHei UI"
                                                  : L"Segoe UI";
     const DWORD charset = language == kJapanese ? SHIFTJIS_CHARSET : language == kChinese ? GB2312_CHARSET : DEFAULT_CHARSET;
-    return CreateFontW(language == kEnglish ? -11 : -12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, charset,
+    return CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, charset,
                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, face);
 }
 
@@ -828,8 +824,9 @@ LobbyResult PollLobby()
 
 int SelectedPlayerCount()
 {
-    const int selected = static_cast<int>(SendMessageW(g_ui.playersCombo, CB_GETCURSEL, 0, 0));
-    return selected >= 0 && selected <= 2 ? selected + 2 : 2;
+    if (IsDlgButtonChecked(g_ui.window, kPlayers4) == BST_CHECKED)
+        return 4;
+    return IsDlgButtonChecked(g_ui.window, kPlayers3) == BST_CHECKED ? 3 : 2;
 }
 
 void ReadSelection(Mode mode)
@@ -872,7 +869,7 @@ void SaveSettings()
     }
     GetWindowTextA(g_ui.host, text, sizeof(text));
     SaveText("host", text);
-    SaveNumber("port", static_cast<int>(ReadNumber(g_ui.port, 22020, 1, 65535)));
+    SaveNumber("port", static_cast<int>(ReadNumber(g_ui.port, 35000, 1, 65535)));
     SaveNumber("players", SelectedPlayerCount());
     SaveNumber("delay", g_ui.lockstepDelay);
     SaveNumber("rollback", g_ui.ownRollback ? 1 : 0);
@@ -884,7 +881,6 @@ void SaveSettings()
     SaveNumber("bgm", IsDlgButtonChecked(g_ui.window, kBgm) == BST_CHECKED ? 1 : 0);
     SaveNumber("se", IsDlgButtonChecked(g_ui.window, kSe) == BST_CHECKED ? 1 : 0);
     SaveNumber("bot", IsDlgButtonChecked(g_ui.window, kBot) == BST_CHECKED ? 1 : 0);
-    SaveNumber("stage_names", IsDlgButtonChecked(g_ui.window, kStageNames) == BST_CHECKED ? 1 : 0);
     SaveNumber("language", static_cast<int>(g_ui.language));
 }
 
@@ -905,9 +901,10 @@ bool IsLiveSettingControl(int id)
     case kBgm:
     case kSe:
     case kBot:
-    case kStageNames:
     case kLanguageCombo:
-    case kPlayersCombo:
+    case kPlayers2:
+    case kPlayers3:
+    case kPlayers4:
         return true;
     default:
         return false;
@@ -971,7 +968,7 @@ void ConfigureEnvironment(Mode mode, unsigned sessionId = 0, bool rollback = fal
     PutEnvironment("TH07_MP_PLAYERS", number);
     PutEnvironment("TH07_MP_MODE", mode == kHost || mode == kGuest ? "udp" : "local");
     PutEnvironment("TH07_MP_TEST_BOT", g_ui.result->bot ? "1" : "0");
-    PutEnvironment("TH07_MP_STAGE_NAMES", IsDlgButtonChecked(g_ui.window, kStageNames) == BST_CHECKED ? "1" : "0");
+    PutEnvironment("TH07_MP_STAGE_NAMES", SettingNumber("stage_names", 0, 0, 1) ? "1" : "0");
     if (mode == kSingle || mode == kLocal) {
         PutEnvironment("TH07_MP_SEAT", "0");
         PutEnvironment("TH07_MP_ROLLBACK", nullptr);
@@ -1013,29 +1010,15 @@ void Finish(Mode mode)
     }
 }
 
-void ShowDelayHint()
-{
-    SetText(GetDlgItem(g_ui.window, kDelayHint),
-            Text(IsDlgButtonChecked(g_ui.window, kRollback) == BST_CHECKED ? kTextDelayHintRollback : kTextDelayHint));
-}
-
 void UpdateRollback()
 {
     const bool multiple = SelectedPlayerCount() > 2;
-    if (multiple) {
+    if (multiple)
         CheckDlgButton(g_ui.window, kRollback, BST_CHECKED);
-    }
     const bool guest = IsDlgButtonChecked(g_ui.window, kRoleGuest) == BST_CHECKED;
-    const bool rollback = IsDlgButtonChecked(g_ui.window, kRollback) == BST_CHECKED;
-    if (rollback) {
-        SetText(g_ui.delay, L"0");
-    }
-    const BOOL delayEditable = !guest && !rollback ? TRUE : FALSE;
-    EnableWindow(GetDlgItem(g_ui.window, kRollback), guest || multiple ? FALSE : TRUE);
-    EnableWindow(g_ui.delay, delayEditable);
-    EnableWindow(GetDlgItem(g_ui.window, kDelayLabel), delayEditable);
-    EnableWindow(GetDlgItem(g_ui.window, kDelayHint), delayEditable);
-    ShowDelayHint();
+    EnableWindow(GetDlgItem(g_ui.window, kRollback), !guest && !multiple && !g_ui.networkAttempting);
+    EnableWindow(g_ui.delay, !guest && !g_ui.networkAttempting);
+    EnableWindow(GetDlgItem(g_ui.window, kDelayLabel), !guest && !g_ui.networkAttempting);
 }
 
 void ShowOwnDelayChoice()
@@ -1048,20 +1031,18 @@ void ShowOwnDelayChoice()
 
 bool DelayBoxIsOwnChoice()
 {
-    return IsDlgButtonChecked(g_ui.window, kRoleGuest) != BST_CHECKED &&
-           IsDlgButtonChecked(g_ui.window, kRollback) != BST_CHECKED;
+    return IsDlgButtonChecked(g_ui.window, kRoleGuest) != BST_CHECKED;
 }
 
 void UpdateRole()
 {
     const bool guest = IsDlgButtonChecked(g_ui.window, kRoleGuest) == BST_CHECKED;
-    EnableWindow(g_ui.playersCombo, guest ? FALSE : TRUE);
-    EnableWindow(g_ui.host, guest ? TRUE : FALSE);
-    EnableWindow(GetDlgItem(g_ui.window, kHostLabel), guest ? TRUE : FALSE);
+    const int hostOnly[] = {kPlayersLabel, kPlayers2, kPlayers3, kPlayers4, kDelayLabel, kDelayEdit, kRollback};
+    for (int id : hostOnly)
+        ShowWindow(GetDlgItem(g_ui.window, id), guest ? SW_HIDE : SW_SHOW);
     SetText(g_ui.startNetwork, Text(guest ? kTextConnectToHost : kTextStartHosting));
-    if (!g_ui.networkAttempting) {
-        SetText(g_ui.status, Text(guest ? kTextStatusEnterHost : kTextStatusWaitHost));
-    }
+    if (!g_ui.networkAttempting)
+        ShowStatus(kTextStatusReady);
     UpdateRollback();
 }
 
@@ -1071,7 +1052,7 @@ void SetNetworkControls(bool enabled)
     const int controls[] = {
         kRoleHost, kRoleGuest, kHostEdit, kPortEdit, kDelayEdit, kRollback,
         kBot, kPlayerName, kStartLocal, kStartSingle,
-        kStartNetwork, kLanguageCombo, kPlayersCombo,
+        kStartNetwork, kLanguageCombo, kPlayers2, kPlayers3, kPlayers4,
     };
     for (int id : controls) {
         EnableWindow(GetDlgItem(g_ui.window, id), value);
@@ -1081,32 +1062,15 @@ void SetNetworkControls(bool enabled)
     }
 }
 
-void ShowRoster()
-{
-    char roster[128] = {};
-    for (int seat = 0; seat < g_lobby.playerCount; ++seat) {
-        char label[16];
-        _snprintf_s(label, sizeof(label), _TRUNCATE, "%sP%d: ", seat == 0 ? "" : seat == 2 ? "\r\n" : "    ", seat + 1);
-        Append(roster, sizeof(roster), label);
-        Append(roster, sizeof(roster), g_lobby.connectedMask & (1u << seat) ? g_lobby.roster[seat] : "...");
-    }
-    wchar_t wide[128];
-    if (MultiByteToWideChar(932, 0, roster, -1, wide, static_cast<int>(sizeof(wide) / sizeof(wide[0]))) > 0) {
-        SetWindowTextW(g_ui.roster, wide);
-    }
-    ShowWindow(g_ui.roster, SW_SHOW);
-}
-
 void ResetAttempt(TextId status)
 {
     g_ui.networkAttempting = false;
     g_ui.networkConnected = false;
     EnableWindow(g_ui.startGame, FALSE);
     SetText(g_ui.cancel, Text(kTextCancel));
-    ShowWindow(g_ui.roster, SW_HIDE);
     ShowOwnDelayChoice();
     SetNetworkControls(true);
-    SetText(g_ui.status, Text(status));
+    ShowStatus(status);
 }
 
 void StartAttempt()
@@ -1118,15 +1082,15 @@ void StartAttempt()
     char localName[kMultiplayerPlayerNameBytes] = {};
     GetWindowTextA(g_ui.host, address, sizeof(address));
     ReadPlayerName(localName, mode == kGuest ? 1 : 0);
-    const unsigned port = ReadNumber(g_ui.port, 22020, 1, 65535);
+    const unsigned port = ReadNumber(g_ui.port, 35000, 1, 65535);
     const bool rollback = IsDlgButtonChecked(g_ui.window, kRollback) == BST_CHECKED;
-    const unsigned delay = rollback ? 0u : ReadNumber(g_ui.delay, 4, 0, 12);
+    const unsigned delay = rollback ? 0u : ReadNumber(g_ui.delay, 1, 0, 12);
     g_ui.networkAttempting = true;
     g_ui.networkConnected = false;
     SetNetworkControls(false);
     SetText(g_ui.cancel, Text(kTextStopSearch));
     SetText(g_ui.startNetwork, Text(mode == kGuest ? kTextButtonConnecting : kTextButtonHosting));
-    SetText(g_ui.status, Text(mode == kGuest ? kTextStatusConnecting : kTextStatusHosting));
+    ShowStatus(mode == kGuest ? kTextStatusConnecting : kTextStatusHosting);
     TextId error = kTextErrorSocket;
     if (!OpenLobby(mode == kGuest, address[0] ? address : "127.0.0.1", port, localName, rollback, delay,
                    SelectedPlayerCount(), &error)) {
@@ -1177,12 +1141,6 @@ void PollNetwork()
         return;
     }
     const LobbyResult result = PollLobby();
-    if (g_lobby.connected) {
-        ShowRoster();
-        if (!g_lobby.host) {
-            SendMessageW(g_ui.playersCombo, CB_SETCURSEL, g_lobby.playerCount - 2, 0);
-        }
-    }
     if (result == kLobbyFailed) {
         const TextId reason = g_lobby.protocolMismatch ? kTextErrorProtocol
                               : g_lobby.peerCancelled  ? kTextErrorPeerStopped
@@ -1192,7 +1150,7 @@ void PollNetwork()
         return;
     }
     if (result == kLobbyReady) {
-        SetText(g_ui.status, Text(kTextStatusStartingGame));
+        ShowStatus(kTextStatusStartingGame);
         if (!CommitNetworkHandoff()) {
             CancelLobby();
             ResetAttempt(kTextErrorHandoff);
@@ -1203,13 +1161,11 @@ void PollNetwork()
         g_ui.networkConnected = true;
         if (!g_lobby.host) {
             CheckDlgButton(g_ui.window, kRollback, g_lobby.rollback ? BST_CHECKED : BST_UNCHECKED);
-            ShowDelayHint();
-            SetNumberText(g_ui.delay, g_lobby.inputDelay);
         }
         EnableWindow(g_ui.startGame, g_lobby.host && !g_lobby.startRequested ? TRUE : FALSE);
-        SetText(g_ui.status, Text(g_lobby.host ? kTextStatusConnectedHost : kTextStatusConnectedGuest));
+        ShowStatus(g_lobby.host ? kTextStatusConnectedHost : kTextStatusConnectedGuest);
     } else {
-        SetText(g_ui.status, Text(g_lobby.host ? kTextStatusHosting : kTextStatusConnecting));
+        ShowStatus(g_lobby.host ? kTextStatusHosting : kTextStatusConnecting);
     }
 }
 
@@ -1229,7 +1185,6 @@ void ApplyLanguage()
         TextId text;
     };
     static const Label labels[] = {
-        {kLanguageLabel, kTextLanguageLabel},
         {kConnectAsLabel, kTextConnectAs},
         {kRoleHost, kTextRoleHost},
         {kRoleGuest, kTextRoleGuest},
@@ -1241,9 +1196,7 @@ void ApplyLanguage()
         {kAudioGroup, kTextAudio},
         {kBgm, kTextBgm},
         {kSe, kTextSe},
-        {kControlGroup, kTextControl},
         {kBot, kTextBot},
-        {kStageNames, kTextStageNames},
         {kRollback, kTextRollback},
         {kPlayerNameLabel, kTextPlayerName},
         {kHostLabel, kTextHostIp},
@@ -1253,10 +1206,11 @@ void ApplyLanguage()
         {kStartLocal, kTextStartLocal},
         {kStartSingle, kTextSinglePlayer},
         {kStartGame, kTextStartGame},
+        {kStatusLabel, kTextStatusLabel},
     };
     HFONT oldFont = g_ui.font;
     g_ui.font = MakeFont(g_ui.language);
-    for (int id = kRoleHost; id <= kStageNames; ++id) {
+    for (int id = kRoleHost; id <= kStatusLabel; ++id) {
         HWND control = GetDlgItem(g_ui.window, id);
         if (control != nullptr) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_ui.font), TRUE);
@@ -1265,14 +1219,13 @@ void ApplyLanguage()
     for (const Label& label : labels) {
         SetText(GetDlgItem(g_ui.window, label.control), Text(label.text));
     }
-    ShowDelayHint();
     SetText(g_ui.window, Text(kTextWindowTitle));
     FillLanguageCombo();
     SetText(g_ui.cancel, Text(g_ui.networkAttempting ? kTextStopSearch : kTextCancel));
     if (g_ui.networkAttempting) {
         SetText(g_ui.startNetwork, Text(g_lobby.host ? kTextButtonHosting : kTextButtonConnecting));
         if (g_lobby.connected) {
-            SetText(g_ui.status, Text(g_lobby.host ? kTextStatusConnectedHost : kTextStatusConnectedGuest));
+            ShowStatus(g_lobby.host ? kTextStatusConnectedHost : kTextStatusConnectedGuest);
         }
     } else {
         UpdateRole();
@@ -1285,18 +1238,17 @@ void ApplyLanguage()
 
 void LoadSettings()
 {
-    SendMessageW(g_ui.playersCombo, CB_SETCURSEL, SettingNumber("players", 2, 2, 4) - 2, 0);
+    CheckRadioButton(g_ui.window, kPlayers2, kPlayers4, kPlayers2 + SettingNumber("players", 2, 2, 4) - 2);
     const int role = SettingNumber("role", 0, 0, 1);
     CheckRadioButton(g_ui.window, kRoleHost, kRoleGuest, role ? kRoleGuest : kRoleHost);
-    const int resolution = SettingNumber("resolution", 1, 0, 2);
-    CheckRadioButton(g_ui.window, kDisplay640, kDisplay1280,
-                     resolution == 2 ? kDisplay1280 : resolution == 1 ? kDisplay960 : kDisplay640);
-    CheckDlgButton(g_ui.window, kDisplayFullscreen, SettingNumber("fullscreen", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
+    const int resolution = SettingNumber("resolution", 0, 0, 2);
+    const int display = SettingNumber("fullscreen", 0, 0, 1) ? kDisplayFullscreen :
+                        resolution == 2 ? kDisplay1280 : resolution == 1 ? kDisplay960 : kDisplay640;
+    CheckRadioButton(g_ui.window, kDisplay640, kDisplayFullscreen, display);
     CheckDlgButton(g_ui.window, kBgm, SettingNumber("bgm", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kSe, SettingNumber("se", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kBot, SettingNumber("bot", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(g_ui.window, kStageNames, SettingNumber("stage_names", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
-    g_ui.ownRollback = SettingNumber("rollback", 0, 0, 1) != 0;
+    g_ui.ownRollback = SettingNumber("rollback", 1, 0, 1) != 0;
     CheckDlgButton(g_ui.window, kRollback, g_ui.ownRollback ? BST_CHECKED : BST_UNCHECKED);
     const int language = SettingNumber("language", static_cast<int>(g_ui.language), 0, kLanguageCount - 1);
     if (language != static_cast<int>(g_ui.language)) {
@@ -1307,96 +1259,95 @@ void LoadSettings()
     }
 }
 
+void CreateForm()
+{
+    struct ControlSpec {
+        int id;
+        const wchar_t* cls;
+        TextId text;
+        DWORD style;
+        int x, y, width, height;
+    };
+    static const ControlSpec controls[] = {
+        {kConnectAsLabel, L"STATIC", kTextConnectAs, SS_LEFT, 20, 14, 100, 22},
+        {kRoleHost, L"BUTTON", kTextRoleHost, BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 122, 12, 90, 22},
+        {kRoleGuest, L"BUTTON", kTextRoleGuest, BS_AUTORADIOBUTTON, 218, 12, 90, 22},
+        {kDisplayGroup, L"STATIC", kTextDisplayMode, SS_LEFT, 20, 50, 120, 22},
+        {kDisplayFullscreen, L"BUTTON", kTextDisplayFullscreen, BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 36, 76, 230, 22},
+        {kDisplay640, L"BUTTON", kTextDisplay640, BS_AUTORADIOBUTTON, 36, 100, 230, 22},
+        {kDisplay960, L"BUTTON", kTextDisplay960, BS_AUTORADIOBUTTON, 36, 124, 230, 22},
+        {kDisplay1280, L"BUTTON", kTextDisplay1280, BS_AUTORADIOBUTTON, 36, 148, 230, 22},
+        {kAudioGroup, L"STATIC", kTextAudio, SS_LEFT | WS_GROUP, 280, 50, 110, 22},
+        {kBgm, L"BUTTON", kTextBgm, BS_AUTOCHECKBOX | WS_TABSTOP, 280, 76, 110, 22},
+        {kSe, L"BUTTON", kTextSe, BS_AUTOCHECKBOX | WS_TABSTOP, 280, 100, 110, 22},
+        {kPlayersLabel, L"STATIC", kTextPlayers, SS_LEFT, 280, 130, 110, 20},
+        {kPlayerNameLabel, L"STATIC", kTextPlayerName, SS_LEFT | WS_GROUP, 20, 188, 90, 22},
+        {kPlayerName, L"EDIT", kTextCount, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 186, 270, 24},
+        {kHostLabel, L"STATIC", kTextHostIp, SS_LEFT, 20, 228, 80, 22},
+        {kHostEdit, L"EDIT", kTextCount, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 226, 270, 24},
+        {kPortLabel, L"STATIC", kTextUdpPort, SS_LEFT, 20, 268, 80, 22},
+        {kPortEdit, L"EDIT", kTextCount, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 266, 100, 24},
+        {kDelayLabel, L"STATIC", kTextInputDelay, SS_LEFT, 20, 308, 80, 22},
+        {kDelayEdit, L"EDIT", kTextCount, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 306, 100, 24},
+        {kRollback, L"BUTTON", kTextRollback, BS_AUTOCHECKBOX | WS_TABSTOP, 20, 340, 330, 24},
+        {kBot, L"BUTTON", kTextBot, BS_AUTOCHECKBOX | WS_TABSTOP, 20, 368, 170, 24},
+        {kStartNetwork, L"BUTTON", kTextStartHosting, BS_PUSHBUTTON | WS_TABSTOP, 20, 398, 370, 32},
+        {kStatusLabel, L"STATIC", kTextStatusLabel, SS_LEFT, 20, 438, 80, 20},
+        {kStatus, L"STATIC", kTextStatusReady, SS_LEFT | WS_BORDER, 20, 458, 370, 72},
+        {kStartGame, L"BUTTON", kTextStartGame, BS_DEFPUSHBUTTON | WS_TABSTOP | WS_DISABLED, 20, 538, 160, 32},
+        {kStartLocal, L"BUTTON", kTextStartLocal, BS_PUSHBUTTON | WS_TABSTOP, 220, 538, 160, 32},
+        {kStartSingle, L"BUTTON", kTextSinglePlayer, BS_PUSHBUTTON | WS_TABSTOP, 20, 578, 160, 28},
+        {kCancel, L"BUTTON", kTextCancel, BS_PUSHBUTTON | WS_TABSTOP, 280, 578, 100, 28},
+    };
+    for (const auto& control : controls) {
+        AddControl(control.cls, control.text == kTextCount ? L"" : Text(control.text), control.style,
+                   control.x, control.y, control.width, control.height, control.id);
+    }
+    // Radio buttons group by creation order.
+    AddControl(L"BUTTON", L"2", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 280, 152, 48, 22, kPlayers2);
+    AddControl(L"BUTTON", L"3", BS_AUTORADIOBUTTON, 334, 152, 48, 22, kPlayers3);
+    AddControl(L"BUTTON", L"4", BS_AUTORADIOBUTTON, 382, 152, 34, 22, kPlayers4);
+    g_ui.languageCombo = AddControl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP | WS_GROUP,
+                                    310, 10, 104, 200, kLanguageCombo);
+    g_ui.name = GetDlgItem(g_ui.window, kPlayerName);
+    g_ui.host = GetDlgItem(g_ui.window, kHostEdit);
+    g_ui.port = GetDlgItem(g_ui.window, kPortEdit);
+    g_ui.delay = GetDlgItem(g_ui.window, kDelayEdit);
+    g_ui.status = GetDlgItem(g_ui.window, kStatus);
+    g_ui.startNetwork = GetDlgItem(g_ui.window, kStartNetwork);
+    g_ui.startGame = GetDlgItem(g_ui.window, kStartGame);
+    g_ui.cancel = GetDlgItem(g_ui.window, kCancel);
+
+    char host[128];
+    wchar_t wideHost[128] = {};
+    wchar_t value[24];
+    SettingText("host", "127.0.0.1", host, sizeof(host));
+    MultiByteToWideChar(CP_ACP, 0, host, -1, wideHost, 128);
+    SetText(g_ui.host, wideHost);
+    swprintf_s(value, L"%d", SettingNumber("port", 35000, 1, 65535));
+    SetText(g_ui.port, value);
+    g_ui.lockstepDelay = SettingNumber("delay", 1, 0, 12);
+    swprintf_s(value, L"%d", g_ui.lockstepDelay);
+    SetText(g_ui.delay, value);
+    wchar_t name[64] = L"Player";
+    if (g_settingsPath[0])
+        GetPrivateProfileStringW(kSettingsSection, L"name", L"Player", name, 64, g_settingsPath);
+    SetText(g_ui.name, name);
+    SendMessageW(g_ui.name, EM_LIMITTEXT, kMultiplayerPlayerNameBytes - 1, 0);
+    LoadSettings();
+    UpdateRole();
+    g_ui.settingsReady = true;
+}
+
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
 {
     switch (message) {
-    case WM_CREATE: {
+    case WM_CREATE:
         g_ui.window = window;
-        char savedHost[128];
-        wchar_t wideHost[128] = {};
-        wchar_t savedPort[24];
-        wchar_t savedDelay[24];
-        SettingText("host", "127.0.0.1", savedHost, sizeof(savedHost));
-        MultiByteToWideChar(CP_ACP, 0, savedHost, -1, wideHost, 128);
-        swprintf_s(savedPort, L"%d", SettingNumber("port", 22020, 1, 65535));
-        g_ui.lockstepDelay = SettingNumber("delay", 4, 0, 12);
-        swprintf_s(savedDelay, L"%d", g_ui.lockstepDelay);
-
-        AddControl(L"STATIC", Text(kTextLanguageLabel), SS_LEFT, 20, 14, 80, 22, kLanguageLabel);
-        g_ui.languageCombo =
-            AddControl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 104, 10, 170, 200, kLanguageCombo);
-        AddControl(L"STATIC", Text(kTextConnectAs), SS_LEFT, 20, 48, 100, 22, kConnectAsLabel);
-        AddControl(L"BUTTON", Text(kTextRoleHost), BS_AUTORADIOBUTTON | WS_GROUP, 122, 46, 90, 22, kRoleHost);
-        AddControl(L"BUTTON", Text(kTextRoleGuest), BS_AUTORADIOBUTTON, 218, 46, 90, 22, kRoleGuest);
-
-        AddControl(L"BUTTON", Text(kTextDisplayMode), BS_GROUPBOX, 10, 78, 260, 148, kDisplayGroup);
-        AddControl(L"BUTTON", Text(kTextDisplay640), BS_AUTORADIOBUTTON | WS_GROUP, 26, 102, 230, 22, kDisplay640);
-        AddControl(L"BUTTON", Text(kTextDisplay960), BS_AUTORADIOBUTTON, 26, 126, 230, 22, kDisplay960);
-        AddControl(L"BUTTON", Text(kTextDisplay1280), BS_AUTORADIOBUTTON, 26, 150, 230, 22, kDisplay1280);
-        AddControl(L"BUTTON", Text(kTextDisplayFullscreen), BS_AUTOCHECKBOX | WS_TABSTOP, 26, 182, 230, 22,
-                   kDisplayFullscreen);
-
-        AddControl(L"BUTTON", Text(kTextAudio), BS_GROUPBOX, 280, 78, 180, 78, kAudioGroup);
-        AddControl(L"BUTTON", Text(kTextBgm), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 102, 130, 22, kBgm);
-        AddControl(L"BUTTON", Text(kTextSe), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 128, 150, 22, kSe);
-        AddControl(L"BUTTON", Text(kTextControl), BS_GROUPBOX, 280, 160, 180, 66, kControlGroup);
-        AddControl(L"BUTTON", Text(kTextBot), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 178, 150, 22, kBot);
-        AddControl(L"BUTTON", Text(kTextStageNames), BS_AUTOCHECKBOX | WS_TABSTOP, 298, 200, 154, 22, kStageNames);
-        AddControl(L"BUTTON", Text(kTextRollback), BS_AUTOCHECKBOX | WS_TABSTOP, 20, 238, 310, 22, kRollback);
-        AddControl(L"STATIC", Text(kTextPlayerName), SS_LEFT, 20, 272, 84, 22, kPlayerNameLabel);
-        g_ui.name = AddControl(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 270, 150, 24, kPlayerName);
-        SendMessageW(g_ui.name, EM_LIMITTEXT, kMultiplayerPlayerNameBytes - 1, 0);
-        {
-            wchar_t name[64] = L"PLAYER1";
-            if (g_settingsPath[0] != 0) {
-                GetPrivateProfileStringW(kSettingsSection, L"name", L"PLAYER1", name,
-                                         static_cast<DWORD>(sizeof(name) / sizeof(name[0])), g_settingsPath);
-            }
-            SetWindowTextW(g_ui.name, name);
-        }
-        AddControl(L"STATIC", Text(kTextPlayers), SS_LEFT, 298, 272, 60, 22, kPlayersLabel);
-        g_ui.playersCombo =
-            AddControl(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 360, 268, 80, 120, kPlayersCombo);
-        static const wchar_t* const counts[] = {L"2", L"3", L"4"};
-        for (const wchar_t* count : counts) {
-            SendMessageW(g_ui.playersCombo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(count));
-        }
-        AddControl(L"STATIC", Text(kTextHostIp), SS_LEFT, 20, 306, 90, 22, kHostLabel);
-        g_ui.host = AddControl(L"EDIT", wideHost, WS_BORDER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 304, 270, 24, kHostEdit);
-        AddControl(L"STATIC", Text(kTextUdpPort), SS_LEFT, 20, 340, 80, 22, kPortLabel);
-        g_ui.port = AddControl(L"EDIT", savedPort, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 338, 100,
-                               24, kPortEdit);
-        AddControl(L"STATIC", Text(kTextInputDelay), SS_LEFT, 222, 340, 66, 22, kDelayLabel);
-        g_ui.delay = AddControl(L"EDIT", savedDelay, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, 290, 338, 40,
-                                24, kDelayEdit);
-        AddControl(L"STATIC", Text(kTextDelayHint), SS_LEFT, 336, 340, 126, 22, kDelayHint);
-
-        g_ui.roster = AddControl(L"STATIC", L"", SS_LEFT | WS_BORDER, 20, 374, 420, 34, kRoster);
-        ShowWindow(g_ui.roster, SW_HIDE);
-        g_ui.startNetwork = AddControl(L"BUTTON", Text(kTextStartHosting), BS_DEFPUSHBUTTON | WS_TABSTOP, 20, 416, 420,
-                                       34, kStartNetwork);
-        AddControl(L"BUTTON", Text(kTextStartLocal), BS_PUSHBUTTON | WS_TABSTOP, 20, 458, 200, 32, kStartLocal);
-        AddControl(L"BUTTON", Text(kTextSinglePlayer), BS_PUSHBUTTON | WS_TABSTOP, 240, 458, 200, 32, kStartSingle);
-        g_ui.startGame =
-            AddControl(L"BUTTON", Text(kTextStartGame), BS_DEFPUSHBUTTON | WS_TABSTOP, 20, 500, 200, 32, kStartGame);
-        EnableWindow(g_ui.startGame, FALSE);
-        g_ui.status = AddControl(L"STATIC", Text(kTextStatusReady), SS_LEFT | WS_BORDER, 20, 540, 420, 48, kStatus);
-        g_ui.cancel =
-            AddControl(L"BUTTON", Text(kTextCancel), BS_PUSHBUTTON | WS_TABSTOP, 340, 598, 100, 30, kCancel);
-
-        LoadSettings();
-        UpdateRole();
-        g_ui.settingsReady = true;
+        CreateForm();
         SetTimer(window, kTimerId, kTimerMs, nullptr);
         return 0;
-    }
     case WM_COMMAND:
-        if (LOWORD(wp) == kPlayersCombo && HIWORD(wp) == CBN_SELCHANGE) {
-            ShowOwnDelayChoice();
-            UpdateRollback();
-            SaveLiveSettings(kPlayersCombo);
-            return 0;
-        }
         if (LOWORD(wp) == kLanguageCombo && HIWORD(wp) == CBN_SELCHANGE) {
             const LRESULT selected = SendMessageW(g_ui.languageCombo, CB_GETCURSEL, 0, 0);
             if (selected >= 0 && selected < kLanguageCount) {
@@ -1408,7 +1359,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
         }
         if (HIWORD(wp) == EN_CHANGE && IsLiveSettingControl(LOWORD(wp))) {
             if (LOWORD(wp) == kDelayEdit && g_ui.settingsReady && DelayBoxIsOwnChoice()) {
-                g_ui.lockstepDelay = static_cast<int>(ReadNumber(g_ui.delay, 4, 0, 12));
+                g_ui.lockstepDelay = static_cast<int>(ReadNumber(g_ui.delay, 1, 0, 12));
             }
             SaveLiveSettings(LOWORD(wp));
             return 0;
@@ -1419,6 +1370,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
             case kRoleGuest:
                 ShowOwnDelayChoice();
                 UpdateRole();
+                SaveLiveSettings(LOWORD(wp));
+                return 0;
+            case kPlayers2:
+            case kPlayers3:
+            case kPlayers4:
+                CheckRadioButton(window, kPlayers2, kPlayers4, LOWORD(wp));
+                ShowOwnDelayChoice();
+                UpdateRollback();
                 SaveLiveSettings(LOWORD(wp));
                 return 0;
             case kRollback:
@@ -1433,10 +1392,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
             case kDisplay960:
             case kDisplay1280:
             case kDisplayFullscreen:
+                CheckRadioButton(window, kDisplay640, kDisplayFullscreen, LOWORD(wp));
+                SaveLiveSettings(LOWORD(wp));
+                return 0;
             case kBgm:
             case kSe:
             case kBot:
-            case kStageNames:
                 SaveLiveSettings(LOWORD(wp));
                 return 0;
             case kStartNetwork:
@@ -1450,7 +1411,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
                     g_lobby.startRequested = true;
                     SendLobbyPacket(kMultiplayerLobbyStart);
                     EnableWindow(g_ui.startGame, FALSE);
-                    SetText(g_ui.status, Text(kTextStatusStartingAck));
+                    ShowStatus(kTextStatusStartingAck);
                     LauncherLog("LOBBY_START_REQUEST session=%08X", g_lobby.sessionId);
                 }
                 return 0;
@@ -1542,7 +1503,7 @@ bool Run(Selection* selection)
     }
 
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
-    RECT rectangle = {0, 0, 470, 668};
+    RECT rectangle = {0, 0, 424, 615};
     AdjustWindowRectEx(&rectangle, style, FALSE, WS_EX_APPWINDOW);
     g_ui.window = CreateWindowExW(WS_EX_APPWINDOW, kWindowClass, Text(kTextWindowTitle), style, CW_USEDEFAULT,
                                   CW_USEDEFAULT, rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
