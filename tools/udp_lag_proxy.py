@@ -26,6 +26,7 @@ ap.add_argument("--jitter-ms", type=float, default=20)
 ap.add_argument("--loss", type=float, default=0.02)
 ap.add_argument("--seed", type=int, default=20260916)
 ap.add_argument("--stats", required=True)
+ap.add_argument("--schedule", default="", help="seconds:delay_ms,jitter_ms,loss;...; affects newly received packets")
 a = ap.parse_args()
 rng = random.Random(a.seed)
 host = ("127.0.0.1", a.host)
@@ -39,10 +40,23 @@ for s in (int(x) for x in a.guests.split(",")):
     guest_addr[s] = ("127.0.0.1", a.host + s)
 queue = []
 seq = 0
-stats = dict(received=0, dropped=0, forwarded=0, started=time.time())
+schedule = []
+for entry in filter(None, a.schedule.split(";")):
+    at, profile = entry.split(":")
+    delay, jitter, loss = map(float, profile.split(","))
+    if float(at) < 0 or min(delay, jitter) < 0 or not 0 <= loss <= 1:
+        ap.error("invalid schedule profile")
+    schedule.append((float(at), delay, jitter, loss))
+schedule.sort()
+started = time.monotonic()
+stats = dict(received=0, dropped=0, forwarded=0, started=time.time(),
+             profiles=[dict(at=0, delay_ms=a.delay_ms, jitter_ms=a.jitter_ms, loss=a.loss)])
 last_stats = 0.0
 while True:
     now = time.monotonic()
+    while schedule and now - started >= schedule[0][0]:
+        at, a.delay_ms, a.jitter_ms, a.loss = schedule.pop(0)
+        stats["profiles"].append(dict(at=now - started, delay_ms=a.delay_ms, jitter_ms=a.jitter_ms, loss=a.loss))
     timeout = max(0.0, min(0.005, queue[0][0] - now)) if queue else 0.005
     ready, _, _ = select.select(list(socks), [], [], timeout)
     for sock in ready:
@@ -72,5 +86,7 @@ while True:
             pass
     if now - last_stats > 1.0:
         last_stats = now
+        stats["elapsed_seconds"] = now - started
+        stats["queued"] = len(queue)
         with open(a.stats, "w") as f:
             json.dump(stats, f)

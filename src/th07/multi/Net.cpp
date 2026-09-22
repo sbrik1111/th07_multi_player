@@ -29,7 +29,7 @@ using netcode::Timeline;
 using netcode::Inputs;
 
 const unsigned kMagic = 0x4E373054u; // "T07N"
-const unsigned short kVersion = 2;
+const unsigned short kVersion = 3;
 const unsigned kHistory = netcode::History;
 const unsigned kHashRing = 256;
 const unsigned kHashPeriod = 16;
@@ -58,13 +58,15 @@ struct Packet {
     unsigned count;
     unsigned short input[kHistory];
     unsigned received[netcode::kMaxPlayers];
+    unsigned next;
+    unsigned seenNext[netcode::kMaxPlayers];
     unsigned readyHash;
     unsigned readyParts[SIM_HASH_PART_COUNT];
     unsigned hashFrame;
     unsigned hash;
     unsigned partFrame;
     unsigned parts[SIM_HASH_PART_COUNT];
-    unsigned sendTime, echoTime, echoHold;
+    unsigned sendTime, echoTime[netcode::kMaxPlayers], echoHold[netcode::kMaxPlayers];
 };
 #pragma pack(pop)
 static_assert(sizeof(Packet) <= 1472, "a session packet must fit one IPv4 datagram");
@@ -104,6 +106,7 @@ struct Segment {
     bool testStalled;
     int peerAdvantage[netcode::kMaxPlayers];
     bool peerAdvantageKnown[netcode::kMaxPlayers];
+    unsigned peerNext[netcode::kMaxPlayers], peerStamp[netcode::kMaxPlayers];
 };
 
 struct Net {
@@ -116,13 +119,18 @@ struct Net {
     int seat;
     int players;
     unsigned session;
-    netcode::RoundTrip roundTrip;
+    netcode::RoundTrip roundTrip[netcode::kMaxPlayers];
     Segment segments[2]; // current and previous, by index & 1
     unsigned current;
     unsigned hostFrames;
     unsigned framesRun;
     unsigned waitFrames;
     unsigned lastNetLog;
+    unsigned startedMs, perfMs, perfFrame, perfTicks, perfIdle, perfSync;
+    unsigned perfRollbacks, perfReplayed;
+    unsigned idleSinceMs, longestIdleMs;
+    unsigned gameplayDelay;
+    unsigned delayKeys, testDelayStep;
     unsigned stallSince; // 0: frames run
 };
 
@@ -138,6 +146,20 @@ unsigned NowMicros()
     QueryPerformanceCounter(&now);
     return (unsigned)(now.QuadPart / frequency.QuadPart * 1000000 +
                       now.QuadPart % frequency.QuadPart * 1000000 / frequency.QuadPart);
+}
+
+bool WorstRoundTrip(unsigned& micros)
+{
+    bool known = false;
+    micros = 0;
+    for (int seat = 0; seat < g_net.players; ++seat) {
+        unsigned value = 0;
+        if (seat != g_net.seat && g_net.roundTrip[seat].Display(value)) {
+            known = true;
+            if (value > micros) micros = value;
+        }
+    }
+    return known;
 }
 
 void Fail(const char* what)
@@ -186,7 +208,8 @@ void StartSegment(unsigned index)
     s.index = index;
     s.phase = (index & 1) ? kGameplay : kMenu;
     s.rollback = s.phase == kGameplay && cfg.rollback;
-    s.delay = s.phase == kMenu ? cfg.menuInputDelay : (s.rollback ? 0 : cfg.artificialDelay);
+    s.delay = s.phase == kMenu ? cfg.menuInputDelay : g_net.gameplayDelay;
+    g_net.testDelayStep = 0;
     unsigned window = s.rollback ? cfg.rollbackWindow : 1;
     s.lastHashFrame = netcode::NoFrame;
     s.lastPartFrame = netcode::NoFrame;
@@ -200,6 +223,11 @@ void StartSegment(unsigned index)
         Fail(s.timeline.Error());
     }
     g_net.current = index;
+    g_net.perfMs = GetTickCount();
+    g_net.perfFrame = g_net.perfTicks = g_net.perfIdle = g_net.perfSync = 0;
+    g_net.idleSinceMs = g_net.longestIdleMs = 0;
+    g_net.perfRollbacks = rollback_game::GetStats().rollbacks;
+    g_net.perfReplayed = rollback_game::GetStats().replayedFrames;
     if (s.rollback) {
         rollback_game::BeginSegment();
     }
@@ -213,8 +241,10 @@ bool InitNetwork()
         return !g_net.failed;
     }
     g_net.initialized = true;
+    g_net.startedMs = GetTickCount();
     const mp::Config& cfg = mp::Cfg();
     g_net.seat = cfg.localSeat;
+    g_net.gameplayDelay = cfg.artificialDelay;
     g_net.players = cfg.playerCount;
     g_net.session = cfg.sessionId;
     WSADATA wsa;
@@ -300,8 +330,10 @@ void SendSegment(Segment& s)
     p.window = s.timeline.Limit();
     p.first = s.timeline.PeerAck();
     p.count = s.timeline.SendHistory(p.input);
+    p.next = s.timeline.Next();
     for (int seat = 0; seat < g_net.players; seat++) {
         p.received[seat] = s.timeline.Received(seat);
+        p.seenNext[seat] = s.peerNext[seat];
     }
     p.readyHash = s.readyHash;
     memcpy(p.readyParts, s.readyParts, sizeof(p.readyParts));
@@ -314,8 +346,10 @@ void SendSegment(Segment& s)
         memcpy(p.parts, s.own[s.lastPartFrame % kHashRing].parts, sizeof(p.parts));
     }
     unsigned now = NowMicros();
-    g_net.roundTrip.Publish(now);
-    g_net.roundTrip.Stamp(now, p.sendTime, p.echoTime, p.echoHold);
+    for (int seat = 0; seat < g_net.players; ++seat) {
+        g_net.roundTrip[seat].Publish(now);
+        g_net.roundTrip[seat].Stamp(now, p.sendTime, p.echoTime[seat], p.echoHold[seat]);
+    }
     SendOut(&p, sizeof(p), -1);
 }
 
@@ -457,7 +491,8 @@ void AcceptPacket(const Packet& p, int bytes, const sockaddr_in& from)
         g_net.guestKnown[p.seat] = true;
         SendOut(&p, sizeof(p), p.seat);
     }
-    g_net.roundTrip.Receive(NowMicros(), p.sendTime, p.echoTime, p.echoHold);
+    // Each receiver gets its own echo: never read another PC's clock.
+    g_net.roundTrip[p.seat].Receive(NowMicros(), p.sendTime, p.echoTime[g_net.seat], p.echoHold[g_net.seat]);
     Segment* target = NULL;
     if (p.segment == Current().index) {
         target = &Current();
@@ -472,7 +507,7 @@ void AcceptPacket(const Packet& p, int bytes, const sockaddr_in& from)
         Fail("peers use different rollback windows");
         return;
     }
-    if (p.delay != s.delay) {
+    if (p.delay > 12 || (!s.rollback && p.delay != s.delay)) {
         Fail("peers use different input delays");
         return;
     }
@@ -482,8 +517,13 @@ void AcceptPacket(const Packet& p, int bytes, const sockaddr_in& from)
             return;
         }
     }
-    s.peerAdvantage[p.seat] = (int)p.received[p.seat] - (int)p.received[g_net.seat];
-    s.peerAdvantageKnown[p.seat] = true;
+    // Simulation positions, not queued input counts: each seat sets its own delay.
+    if (!s.peerAdvantageKnown[p.seat] || p.sendTime - s.peerStamp[p.seat] < 0x80000000u) {
+        s.peerAdvantage[p.seat] = (int)p.next - (int)p.seenNext[g_net.seat];
+        s.peerNext[p.seat] = p.next;
+        s.peerStamp[p.seat] = p.sendTime;
+        s.peerAdvantageKnown[p.seat] = true;
+    }
     unsigned acked = p.received[g_net.seat];
     if (acked > s.timeline.LocalCount()) {
         acked = s.timeline.LocalCount();
@@ -610,6 +650,7 @@ void SwitchTo(unsigned index)
 {
     Segment& old = Current();
     old.tailFrames = kTailFrames;
+    if (old.phase == kGameplay) SessionLogGameEnd();
     mp::Log("SEGMENT_END index=%u frames=%u hash_checked=%u hash_mismatches=%u", old.index, old.timeline.Next(),
             old.hashChecked, old.hashMismatches);
     StartSegment(index);
@@ -702,13 +743,13 @@ bool TimeSyncWait(Segment& s)
     if (!enabled) {
         return false;
     }
-    int mine = (int)s.timeline.Received((unsigned)g_net.seat);
+    int mine = (int)s.timeline.Next();
     int ahead = INT_MIN;
     for (int seat = 0; seat < g_net.players; seat++) {
         if (seat == g_net.seat || (g_net.seat != 0 && seat != 0) || !s.peerAdvantageKnown[seat]) {
             continue;
         }
-        int local = mine - (int)s.timeline.Received((unsigned)seat);
+        int local = mine - (int)s.peerNext[seat];
         int difference = local - s.peerAdvantage[seat];
         if (difference > ahead) {
             ahead = difference;
@@ -726,6 +767,37 @@ bool TimeSyncWait(Segment& s)
     s.syncWaits++;
     s.syncAverage -= 2.0f;
     return true;
+}
+
+void UpdateInputDelay(Segment& s)
+{
+    if (!s.rollback) return;
+    DWORD foregroundPid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+    const unsigned keys = foregroundPid == GetCurrentProcessId()
+        ? ((GetAsyncKeyState(VK_F5) & 0x8000 ? 1u : 0u) | (GetAsyncKeyState(VK_F6) & 0x8000 ? 2u : 0u)) : 0;
+    const unsigned pressed = keys & ~g_net.delayKeys;
+    g_net.delayKeys = keys;
+    unsigned delay = g_net.gameplayDelay;
+    if (pressed == 1 && delay) --delay;
+    if (pressed == 2 && delay < 12) ++delay;
+    static int testInterval = -1;
+    if (testInterval < 0) {
+        char text[16];
+        testInterval = GetEnvironmentVariableA("TH07_MP_TEST_DELAY_CYCLE", text, sizeof(text)) ? atoi(text) : 0;
+        if (testInterval < 60) testInterval = 0;
+    }
+    const unsigned step = testInterval ? s.timeline.Next() / (unsigned)testInterval : 0;
+    if (step > g_net.testDelayStep) {
+        static const unsigned delays[] = {0, 2, 5, 1, 0, 8, 3, 0};
+        delay = delays[step % _countof(delays)];
+        g_net.testDelayStep = step;
+    }
+    if (delay != g_net.gameplayDelay) {
+        mp::Log("INPUT_DELAY segment=%u frame=%u old=%u new=%u source=%s", s.index, s.timeline.Next(),
+                g_net.gameplayDelay, delay, pressed ? "key" : "test");
+        g_net.gameplayDelay = s.delay = delay;
+    }
 }
 
 int RunRollback(Segment& s, int* present)
@@ -775,6 +847,7 @@ int RunHostTick(int* present)
     g_net.hostFrames++;
     Receive();
     Segment& s = Current();
+    UpdateInputDelay(s);
     unsigned short local = SessionLocalInput(s.phase == kGameplay);
     if (!s.timeline.SampleLocalDelayed(local, s.delay)) {
         Fail(s.timeline.Error());
@@ -796,10 +869,41 @@ int RunHostTick(int* present)
     } else if (g_net.stallSince == 0) {
         g_net.stallSince = NowMicros() | 1;
     }
+    const unsigned nowMs = GetTickCount();
+    ++g_net.perfTicks;
+    if (*present != 1) {
+        ++g_net.perfIdle;
+        if (*present == 2) ++g_net.perfSync;
+        if (!g_net.idleSinceMs) g_net.idleSinceMs = nowMs | 1;
+        const unsigned idleMs = nowMs >= g_net.idleSinceMs ? nowMs - g_net.idleSinceMs : 0;
+        if (idleMs > g_net.longestIdleMs) g_net.longestIdleMs = idleMs;
+    } else {
+        g_net.idleSinceMs = 0;
+    }
+    if (nowMs - g_net.perfMs >= 5000) {
+        const unsigned dt = nowMs - g_net.perfMs;
+        const unsigned next = Current().timeline.Next();
+        const rollback_game::Stats& stats = rollback_game::GetStats();
+        unsigned rtt = 0;
+        const bool hasRtt = WorstRoundTrip(rtt);
+        mp::Log("NET_PERF elapsed_ms=%u segment=%u phase=%s dt_ms=%u from=%u next=%u confirmed=%u "
+                "fps_milli=%u ticks=%u idle=%u sync=%u longest_idle_ms=%u rollbacks=%u replayed=%u delay=%u rtt_us=%d",
+                nowMs - g_net.startedMs, Current().index, Current().phase == kGameplay ? "gameplay" : "menu",
+                dt, g_net.perfFrame, next, Current().timeline.Confirmed(),
+                (unsigned)((unsigned long long)(next - g_net.perfFrame) * 1000000 / dt),
+                g_net.perfTicks, g_net.perfIdle, g_net.perfSync, g_net.longestIdleMs,
+                stats.rollbacks - g_net.perfRollbacks, stats.replayedFrames - g_net.perfReplayed,
+                Current().delay, hasRtt ? (int)rtt : -1);
+        g_net.perfMs = nowMs;
+        g_net.perfFrame = next;
+        g_net.perfTicks = g_net.perfIdle = g_net.perfSync = g_net.longestIdleMs = 0;
+        g_net.perfRollbacks = stats.rollbacks;
+        g_net.perfReplayed = stats.replayedFrames;
+    }
     if (Current().timeline.Next() % 600 == 0 && Current().timeline.Next() != g_net.lastNetLog) {
         g_net.lastNetLog = Current().timeline.Next();
         unsigned rtt = 0;
-        bool hasRtt = g_net.roundTrip.Display(rtt);
+        bool hasRtt = WorstRoundTrip(rtt);
         if (Current().rollback && rollback_game::Enabled()) {
             rollback_game::LogPerf();
         }
@@ -812,6 +916,22 @@ int RunHostTick(int* present)
                 rollback_game::GetStats().maxRollback, Current().syncAdvantage, Current().syncWaits);
     }
     return g_net.failed ? 0 : status;
+}
+
+unsigned TestInputFrame()
+{
+    return Current().timeline.Next();
+}
+
+unsigned TestGameIndex()
+{
+    static int offset = -1;
+    if (offset < 0) {
+        char text[16];
+        offset = GetEnvironmentVariableA("TH07_MP_TEST_CAMPAIGN_OFFSET", text, sizeof(text)) ? atoi(text) : 0;
+        if (offset < 0 || offset > 3) offset = 0;
+    }
+    return g_net.current / 2 + (unsigned)offset;
 }
 
 unsigned short TestBotMask(int seat)
@@ -827,7 +947,8 @@ namespace net {
 
 void GetStatus(Status* out)
 {
-    out->hasRoundTrip = g_net.initialized && g_net.roundTrip.Display(out->roundTripMicros);
+    out->inputDelay = g_net.initialized ? g_net.gameplayDelay : mp::Cfg().artificialDelay;
+    out->hasRoundTrip = g_net.initialized && WorstRoundTrip(out->roundTripMicros);
     static unsigned s_waitingMask;
     static unsigned s_waitingSeen;
     unsigned now = NowMicros();

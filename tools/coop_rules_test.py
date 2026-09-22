@@ -43,7 +43,7 @@ def main():
     args = parser.parse_args()
     directory = (ROOT / (args.logs if args.logs is not None else args.out)).resolve()
     if args.logs is None:
-        # mptest replaces its output directory. Keep this runner's output within ignored wk/.
+        # Keep this runner's output within ignored wk/. mptest requires a fresh directory.
         workspace = (ROOT / "wk").resolve()
         if not directory.is_relative_to(workspace) or directory == workspace:
             parser.error("--out must be a subdirectory of wk/")

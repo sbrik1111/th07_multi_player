@@ -11,6 +11,7 @@
 #include "Coop.hpp"
 #include "FrameInput.hpp"
 #include "GameManager.hpp"
+#include "MainMenu.hpp"
 #include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
@@ -95,11 +96,46 @@ unsigned TitleBotMask(unsigned frame)
     }
     if (g_Supervisor.wantedState == 9 && g_Supervisor.curState == 9)
         return TH_BUTTON_SKIP;
-    return frame % 20 == 0 ? TH_BUTTON_SHOOT : 0;
+    if (cfg.testCampaign && cfg.mode == th07::mp::kUdp)
+        frame = th07::net::TestInputFrame();
+    if (frame % 20 != 0)
+        return 0;
+    if (cfg.testCampaign && cfg.mode == th07::mp::kUdp)
+    {
+        for (ChainElem *e = g_Chain.calcChain.next; e; e = e->next)
+        {
+            if (e->callback != (ChainCallback)MainMenu::OnUpdate)
+                continue;
+            const MainMenu *menu = (const MainMenu *)e->arg;
+            const unsigned route = th07::net::TestGameIndex() % 4;
+            if ((menu->gameState == STATE_PRE_INPUT || menu->gameState == STATE_EXTRA_SELECT_DIFFICULTY) &&
+                menu->menuSubState != 1)
+                return 0;
+            if (menu->gameState == STATE_PRE_INPUT && menu->menuSubState == 1)
+            {
+                const int target = route >= 2 ? 1 : 0;
+                if (menu->cursor != target)
+                    return menu->cursor < target ? TH_BUTTON_DOWN : TH_BUTTON_UP;
+            }
+            if (menu->gameState == STATE_EXTRA_SELECT_DIFFICULTY && menu->menuSubState == 1)
+            {
+                const int target = route == 3 ? 1 : 0;
+                if (menu->cursor != target)
+                    return TH_BUTTON_DOWN;
+            }
+        }
+    }
+    return TH_BUTTON_SHOOT;
 }
 
 int RunFrame(const unsigned *buttons, int count, int draw)
 {
+    if (th07::mp::Cfg().testKeepAlive && Playing() && SessionGameplayActive())
+    {
+        for (int seat = 0; seat < count; ++seat)
+            if (g_GameManager.Lives(seat) < 2)
+                g_GameManager.AddSeatStock(g_GameManager.Lives(seat), 1);
+    }
     if (!RunCoopRuleTestsIfRequested())
         return 0;
     FrameInputs inputs = {};
@@ -139,6 +175,7 @@ void MpInitSession()
     g_CoopLogSink = CoopLogToSeatLog;
     g_CoopNameSource = NameOfSeat;
     g_CoopShowStageNames = cfg.showStageNames;
+    if (cfg.testKeepAlive) th07::mp::Log("TEST_KEEP_ALIVE enabled=1");
     g_CoopViewSeat = cfg.mode == th07::mp::kUdp ? cfg.localSeat : 0;
     th07::mp::Log("SESSION mode=%s seat=%d players=%d rollback=%d delay=%u menu_delay=%u session=%08X",
                   cfg.mode == th07::mp::kUdp ? "udp" : "local", cfg.localSeat, cfg.playerCount, cfg.rollback ? 1 : 0,
@@ -258,6 +295,13 @@ unsigned short SessionLocalInput(bool gameplay)
     return SessionEncodeButtons(buttons);
 }
 
+void SessionLogGameEnd()
+{
+    th07::mp::Log("GAME_END difficulty=%d stage=%d stage_frame=%d finished=%d scene=%d score=%u",
+                  g_GameManager.difficulty, g_GameManager.currentStage, g_GameManager.framesThisStage,
+                  g_GameManager.finished ? 1 : 0, g_Supervisor.curState, g_GameManager.globals->score);
+}
+
 int SessionGameplayActive()
 {
     if (g_Supervisor.wantedState != SUPERVISOR_STATE_GAMEMANAGER ||
@@ -375,7 +419,7 @@ void MpDrawTitleSession()
         th07::net::GetStatus(&status);
         if (cfg.rollback)
         {
-            _snprintf_s(lines[count], sizeof(lines[count]), _TRUNCATE, "ROLLBACK ON  DELAY 0");
+            _snprintf_s(lines[count], sizeof(lines[count]), _TRUNCATE, "ROLLBACK ON  DELAY %u", status.inputDelay);
         }
         else
         {
@@ -419,6 +463,13 @@ void MpDrawPlaySession()
     th07::net::Status status = {};
     th07::net::GetStatus(&status);
     f32 y = 455.0f;
+    if (th07::mp::Cfg().rollback)
+    {
+        char text[32];
+        _snprintf_s(text, sizeof(text), _TRUNCATE, "DELAY %uF [F5/F6]", status.inputDelay);
+        DrawSessionLine(y, text, 0xffffffff);
+        y -= 9.0f;
+    }
     if (status.hasRoundTrip)
     {
         unsigned tenths = (status.roundTripMicros + 50) / 100;

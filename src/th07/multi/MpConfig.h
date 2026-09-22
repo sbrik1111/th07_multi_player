@@ -21,8 +21,10 @@ struct Config {
     int playerCount;
     bool testBot;
     bool testRules;
+    bool testKeepAlive;
     bool showStageNames;
     bool testTitleBot;
+    bool testCampaign;
     int testMenuSeat;
     unsigned testBotIdle;
     bool testBotMash;

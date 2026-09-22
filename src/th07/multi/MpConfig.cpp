@@ -112,8 +112,10 @@ void InitConfig()
     }
     g_cfg.testBot = EnvInt("TH07_MP_TEST_BOT", 0) != 0;
     g_cfg.testRules = EnvInt("TH07_MP_TEST_RULES", 0) != 0;
+    g_cfg.testKeepAlive = EnvInt("TH07_MP_TEST_KEEP_ALIVE", 0) != 0;
     g_cfg.showStageNames = EnvInt("TH07_MP_STAGE_NAMES", 0) != 0;
     g_cfg.testTitleBot = EnvInt("TH07_MP_TEST_TITLE_BOT", 0) != 0;
+    g_cfg.testCampaign = EnvInt("TH07_MP_TEST_CAMPAIGN", 0) != 0;
     g_cfg.testBotIdle = static_cast<unsigned>(EnvInt("TH07_MP_TEST_BOT_IDLE", 0)) & ((1u << g_cfg.playerCount) - 1);
     g_cfg.testPredictAlways = EnvInt("TH07_MP_TEST_PREDICT_ALWAYS", 0) != 0;
     g_cfg.talkConfirmed = EnvInt("TH07_MP_ROLLBACK_TALK_CONFIRMED", 0) != 0;
@@ -143,8 +145,8 @@ void InitConfig()
     int delay = EnvInt("TH07_MP_TEST_DELAY", 0);
     if (delay < 0) {
         delay = 0;
-    } else if (delay > 60) {
-        delay = 60;
+    } else if (delay > 12) {
+        delay = 12;
     }
     g_cfg.artificialDelay = static_cast<unsigned>(delay);
     g_cfg.sessionId = EnvUnsigned("TH07_MP_SESSION", g_cfg.sessionId);
@@ -252,7 +254,7 @@ bool AdoptPreparedUdpSocket(uintptr_t socketHandle, uint32_t peerIpv4, uint16_t 
     if (g_netInitialized || g_preparedUdp.valid || socketHandle == invalidSocket || peerIpv4 == 0 ||
         peerPort == 0 || playerCount < 2 || playerCount > kMaxPlayers || localSeat < 0 ||
         localSeat >= playerCount || (localSeat == 0 && playerCount > 2 && guests == nullptr) || sessionId == 0 ||
-        inputDelay > 60) {
+        inputDelay > 12) {
         return false;
     }
     g_cfg.mode = kUdp;

@@ -222,7 +222,7 @@ struct Ui {
     bool networkConnected;
     bool settingsReady;
     bool ownRollback;
-    int lockstepDelay;
+    int inputDelay;
 };
 
 const UINT_PTR kTimerId = 1;
@@ -656,7 +656,7 @@ bool OpenLobby(bool guest, const char* address, unsigned port, const char* local
         Copy(g_lobby.roster[0], 16, localName);
     }
     g_lobby.rollback = rollback || (!guest && playerCount > 2);
-    g_lobby.inputDelay = g_lobby.rollback ? 0u : inputDelay;
+    g_lobby.inputDelay = inputDelay;
     Copy(g_lobby.localName, sizeof(g_lobby.localName), localName);
     g_lobby.sessionId = guest ? 0u : (GetTickCount() ^ GetCurrentProcessId() * 0x45D9F3Bu ^ 0x20260913u);
     if (!guest && g_lobby.sessionId == 0) {
@@ -773,7 +773,7 @@ LobbyResult PollLobby()
                 g_lobby.connected = true;
                 g_lobby.lastReceive = now;
                 g_lobby.rollback = packet.rollbackEnabled != 0;
-                g_lobby.inputDelay = g_lobby.rollback ? 0 : (packet.inputDelay > 12 ? 12 : packet.inputDelay);
+                g_lobby.inputDelay = packet.inputDelay > 12 ? 12 : packet.inputDelay;
                 for (int seat = 0; seat < g_lobby.playerCount; ++seat) {
                     CleanMultiplayerPlayerName(g_lobby.roster[seat], packet.roster[seat], 16, seat);
                 }
@@ -871,7 +871,7 @@ void SaveSettings()
     SaveText("host", text);
     SaveNumber("port", static_cast<int>(ReadNumber(g_ui.port, 35000, 1, 65535)));
     SaveNumber("players", SelectedPlayerCount());
-    SaveNumber("delay", g_ui.lockstepDelay);
+    SaveNumber("delay", g_ui.inputDelay);
     SaveNumber("rollback", g_ui.ownRollback ? 1 : 0);
     SaveNumber("role", IsDlgButtonChecked(g_ui.window, kRoleGuest) == BST_CHECKED ? 1 : 0);
     SaveNumber("resolution", IsDlgButtonChecked(g_ui.window, kDisplay1280) == BST_CHECKED  ? 2
@@ -986,7 +986,7 @@ void ConfigureEnvironment(Mode mode, unsigned sessionId = 0, bool rollback = fal
     PutEnvironment("TH07_MP_SESSION", number);
     PutEnvironment("TH07_MP_ROLLBACK", rollback ? "1" : "0");
     PutEnvironment("TH07_MP_ROLLBACK_WINDOW", rollback ? "8" : nullptr);
-    _snprintf_s(number, sizeof(number), _TRUNCATE, "%u", rollback ? 0u : inputDelay);
+    _snprintf_s(number, sizeof(number), _TRUNCATE, "%u", inputDelay);
     PutEnvironment("TH07_MP_TEST_DELAY", number);
     PutEnvironment("TH07_MP_MENU_INPUT_DELAY", "4");
 }
@@ -1025,7 +1025,7 @@ void ShowOwnDelayChoice()
 {
     CheckDlgButton(g_ui.window, kRollback, g_ui.ownRollback ? BST_CHECKED : BST_UNCHECKED);
     wchar_t delay[16];
-    swprintf_s(delay, L"%d", g_ui.lockstepDelay);
+    swprintf_s(delay, L"%d", g_ui.inputDelay);
     SetText(g_ui.delay, delay);
 }
 
@@ -1084,7 +1084,7 @@ void StartAttempt()
     ReadPlayerName(localName, mode == kGuest ? 1 : 0);
     const unsigned port = ReadNumber(g_ui.port, 35000, 1, 65535);
     const bool rollback = IsDlgButtonChecked(g_ui.window, kRollback) == BST_CHECKED;
-    const unsigned delay = rollback ? 0u : ReadNumber(g_ui.delay, 1, 0, 12);
+    const unsigned delay = ReadNumber(g_ui.delay, 1, 0, 12);
     g_ui.networkAttempting = true;
     g_ui.networkConnected = false;
     SetNetworkControls(false);
@@ -1326,8 +1326,8 @@ void CreateForm()
     SetText(g_ui.host, wideHost);
     swprintf_s(value, L"%d", SettingNumber("port", 35000, 1, 65535));
     SetText(g_ui.port, value);
-    g_ui.lockstepDelay = SettingNumber("delay", 1, 0, 12);
-    swprintf_s(value, L"%d", g_ui.lockstepDelay);
+    g_ui.inputDelay = SettingNumber("delay", 1, 0, 12);
+    swprintf_s(value, L"%d", g_ui.inputDelay);
     SetText(g_ui.delay, value);
     wchar_t name[64] = L"Player";
     if (g_settingsPath[0])
@@ -1359,7 +1359,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
         }
         if (HIWORD(wp) == EN_CHANGE && IsLiveSettingControl(LOWORD(wp))) {
             if (LOWORD(wp) == kDelayEdit && g_ui.settingsReady && DelayBoxIsOwnChoice()) {
-                g_ui.lockstepDelay = static_cast<int>(ReadNumber(g_ui.delay, 1, 0, 12));
+                g_ui.inputDelay = static_cast<int>(ReadNumber(g_ui.delay, 1, 0, 12));
             }
             SaveLiveSettings(LOWORD(wp));
             return 0;

@@ -9,6 +9,8 @@ screenshots (--shots: seconds after the start) and a summary go to --out. Extra 
 --env NAME=VALUE (all instances), --seat-env SEAT:NAME=VALUE.
 """
 import argparse
+import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -46,7 +48,7 @@ def main():
     ap.add_argument("mode", choices=["local", "udp"])
     ap.add_argument("--players", type=int, default=2)
     ap.add_argument("--rollback", action="store_true")
-    ap.add_argument("--delay", type=int, default=4)
+    ap.add_argument("--delay", type=int, help="initial gameplay delay (rollback default 0, lockstep default 4)")
     ap.add_argument("--seconds", type=float, default=40)
     ap.add_argument("--shots", default="")
     ap.add_argument("--out", default="wk/mptest")
@@ -57,11 +59,18 @@ def main():
     ap.add_argument("--no-bot", action="store_true")
     ap.add_argument("--tag", default="", help="instance folder prefix (run/mptest/<tag><a..d>), for runs side by side")
     ap.add_argument("--lag", default="", help="delay_ms,jitter_ms,loss through tools/udp_lag_proxy.py")
+    ap.add_argument("--lag-schedule", default="", help="seconds:delay_ms,jitter_ms,loss;... (during a connection)")
     args = ap.parse_args()
 
     out = (ROOT / args.out).resolve()
+    if not out.is_relative_to((ROOT / "wk").resolve()) or out == (ROOT / "wk").resolve():
+        ap.error("--out must be a subdirectory of this repository's wk directory")
+    if not (1 if args.mode == "local" else 2) <= args.players <= 4:
+        ap.error("--players must be 1..4 (local) or 2..4 (udp)")
+    if not all(c.isalnum() or c in "_-" for c in args.tag):
+        ap.error("--tag may only contain letters, digits, underscores and hyphens")
     if out.exists():
-        shutil.rmtree(out)
+        ap.error("--out already exists; choose a new directory to preserve earlier evidence")
     out.mkdir(parents=True)
     count = 1 if args.mode == "local" else args.players
     procs = []
@@ -72,7 +81,8 @@ def main():
         proxy = subprocess.Popen([sys.executable, str(ROOT / "tools" / "udp_lag_proxy.py"), "--host", str(args.port),
                                   "--proxy-base", str(proxy_base), "--guests",
                                   ",".join(str(s) for s in range(1, args.players)), "--delay-ms", d, "--jitter-ms", j,
-                                  "--loss", l, "--stats", str(out / "lag.json")])
+                                  "--loss", l, "--stats", str(out / "lag.json"),
+                                  "--schedule", args.lag_schedule])
         time.sleep(0.5)
     for seat in range(count):
         d, appdata = prepare(args.tag + chr(ord("a") + seat), args.exe)
@@ -87,7 +97,7 @@ def main():
         if args.mode == "udp":
             env["TH07_MP_SESSION"] = "0x20260913"
             env["TH07_MP_ROLLBACK"] = "1" if args.rollback else "0"
-            env["TH07_MP_TEST_DELAY"] = "0" if args.rollback else str(args.delay)
+            env["TH07_MP_TEST_DELAY"] = str(args.delay if args.delay is not None else (0 if args.rollback else 4))
             env["TH07_MP_BIND"] = f"127.0.0.1:{args.port + seat}"
             # guests talk to the host; the host finds the guests at their bind ports
             if proxy is not None:
@@ -104,6 +114,10 @@ def main():
                 env[k] = v
         procs.append(subprocess.Popen([str(d / "th07.exe")], cwd=str(d), env=env))
     start = time.time()
+    metadata = dict(arguments=vars(args), started=start,
+                    executable_sha256=hashlib.sha256(Path(args.exe).read_bytes()).hexdigest(),
+                    pids=[p.pid for p in procs])
+    (out / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     shots = sorted(float(s) for s in args.shots.split(",") if s)
     try:
         while time.time() - start < args.seconds:
@@ -121,11 +135,15 @@ def main():
         for p in procs:
             if p.poll() is None:
                 p.kill()
+                p.wait()
                 codes.append("killed")
             else:
                 codes.append(str(p.returncode))
-    if proxy is not None:
-        proxy.kill()
+        if proxy is not None:
+            proxy.kill()
+            proxy.wait()
+        metadata.update(elapsed_seconds=time.time() - start, exit_codes=codes)
+        (out / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print("exit codes:", " ".join(codes))
     for seat in range(count):
         log = out / f"seat{seat + 1}.log"

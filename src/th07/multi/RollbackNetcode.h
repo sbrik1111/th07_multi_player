@@ -104,20 +104,24 @@ public:
         }
         return true;
     }
+    // Sent input is immutable: an increase pads with the last held input, a decrease waits for the
+    // queue to drain.
     bool SampleLocalDelayed(std::uint16_t mask, unsigned delay) {
         if (error_) return false;
-        if (next_ == 0 && localCount_ == 0) {
-            for (unsigned f = 0; f < delay; ++f) {
-                auto& c = At(f);
-                c.actual.held[seat_] = 0; c.known[seat_] = true;
-            }
-            localCount_ = delay;
+        if (delay >= History || next_ >= NoFrame - delay)
+            return Fail("invalid input delay/frame");
+        const unsigned target = next_ + delay;
+        if (localCount_ > target) return true;
+        const unsigned first = PeerAck();
+        if (target >= first && target - first >= History) return true;
+        const Cell* previous = localCount_ ? Find(localCount_ - 1) : nullptr;
+        const std::uint16_t held = previous ? previous->actual.held[seat_] : 0;
+        while (localCount_ <= target) {
+            auto& c = At(localCount_);
+            c.actual.held[seat_] = localCount_ == target ? mask : held;
+            c.known[seat_] = true;
+            ++localCount_;
         }
-        if (localCount_ != next_ + delay) return true;
-        if (localCount_ >= PeerAck() && localCount_ - PeerAck() >= History) return true;
-        auto& c = At(localCount_);
-        c.actual.held[seat_] = mask; c.known[seat_] = true;
-        ++localCount_;
         return true;
     }
     bool Acknowledge(unsigned exclusive) { return Acknowledge(seat_ ^ 1, exclusive); }

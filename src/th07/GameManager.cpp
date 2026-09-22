@@ -319,7 +319,7 @@ u32 GameManager::OnUpdate(GameManager *arg)
         {
             arg->finished = 1;
             arg->globals->guiScore = arg->globals->score;
-            g_Supervisor.curState = 9;
+            g_Supervisor.curState = arg->difficulty >= DIFF_EXTRA ? 6 : 9;
         }
         else
         {
@@ -778,9 +778,9 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         g_Rng.seed = oldSeed;
     }
     arg->stageRngSeed = g_Rng.seed;
-    CoopLog("STAGE_START stage=%d new_game=%d rng=%04X score=%u frames=%d", arg->currentStage,
+    CoopLog("STAGE_START stage=%d new_game=%d rng=%04X score=%u frames=%d difficulty=%d", arg->currentStage,
             g_Supervisor.curState != 3 && g_Supervisor.curState != 11 && g_Supervisor.curState != 12 ? 1 : 0,
-            g_Rng.seed, arg->globals->score, arg->framesThisStage);
+            g_Rng.seed, arg->globals->score, arg->framesThisStage, arg->difficulty);
     for (i32 seat = 0; seat < arg->PlayerCount(); seat++)
     {
         CoopLog("SEAT seat=%d shot=%d lives=%d bombs=%d power=%d cherry_plus=%d state=%d", seat,
