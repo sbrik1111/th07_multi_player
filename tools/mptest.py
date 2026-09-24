@@ -131,18 +131,22 @@ def main():
                                     str(out / f"shot_{int(t):03d}_seat{seat + 1}.png")])
             time.sleep(0.2)
     finally:
+        test_seconds = time.time() - start
         codes = []
         for p in procs:
             if p.poll() is None:
                 p.kill()
-                p.wait()
                 codes.append("killed")
             else:
                 codes.append(str(p.returncode))
+        # Terminate every peer before waiting for OS resource cleanup. Waiting
+        # per process would make surviving peers record a fake network stall.
+        for p in procs:
+            p.wait()
         if proxy is not None:
             proxy.kill()
             proxy.wait()
-        metadata.update(elapsed_seconds=time.time() - start, exit_codes=codes)
+        metadata.update(elapsed_seconds=time.time() - start, test_seconds=test_seconds, exit_codes=codes)
         (out / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print("exit codes:", " ".join(codes))
     for seat in range(count):

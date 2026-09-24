@@ -29,12 +29,17 @@ def summarize_perf(rows):
                 rtt_median_ms=statistics.median(row["rtt_us"] / 1000 for row in rows))
 
 
-def audit(directory, minimum_seconds=0, campaign=False):
+def audit(directory, minimum_seconds=0, campaign=False, require_clear=()):
     directory = Path(directory)
     errors, seats = [], []
     metadata = json.loads((directory / "run.json").read_text(encoding="utf-8"))
+    # Older harness versions included sequential process cleanup in elapsed.
+    # Exclude that post-test tail from throughput and stall measurements.
+    test_seconds = metadata.get("test_seconds", min(metadata.get("elapsed_seconds", 0),
+                                                   metadata["arguments"]["seconds"]))
+    window_ms = test_seconds * 1000
     expected = metadata["arguments"]["players"]
-    if metadata.get("elapsed_seconds", 0) < minimum_seconds:
+    if test_seconds < minimum_seconds:
         errors.append("run shorter than requested minimum")
     if any(code != "killed" for code in metadata.get("exit_codes", [])):
         errors.append("game exited before the harness stopped it")
@@ -59,12 +64,16 @@ def audit(directory, minimum_seconds=0, campaign=False):
         routes = [s["difficulty"] for s in new_games]
         completed = [e for e in ends if e["index"] % 2 == 1]
         game_ends = [fields(line) for line in lines if line.startswith("GAME_END ")]
+        for difficulty in require_clear:
+            if not any(e["difficulty"] == difficulty and e["finished"] == 1 for e in game_ends):
+                errors.append(f"seat {seat}: difficulty {difficulty} was not cleared")
         if campaign and (routes[:3] != [1, 1, 4] or len(completed) < 3):
             errors.append(f"seat {seat}: two Normal games and Extra were not all completed")
         perf = [fields(line) for line in lines if line.startswith("NET_PERF ")]
+        perf = [p for p in perf if p["elapsed_ms"] <= window_ms]
         if not perf:
             errors.append(f"seat {seat}: no wall-clock progress measurements")
-        elif metadata.get("elapsed_seconds", 0) * 1000 - perf[-1]["elapsed_ms"] > 20000:
+        elif window_ms - perf[-1]["elapsed_ms"] > 20000:
             errors.append(f"seat {seat}: progress logging stopped before the test ended")
         elif sum(p["next"] - p["from"] for p in perf[-6:]) < 30:
             errors.append(f"seat {seat}: simulation stopped progressing near the end")
@@ -94,8 +103,10 @@ def main():
     ap.add_argument("directory")
     ap.add_argument("--minimum-seconds", type=float, default=0)
     ap.add_argument("--campaign", action="store_true")
+    ap.add_argument("--require-clear", type=int, choices=range(6), action="append", default=[],
+                    help="require GAME_END finished=1 for this difficulty (Extra=4, Phantasm=5)")
     args = ap.parse_args()
-    result = audit(args.directory, args.minimum_seconds, args.campaign)
+    result = audit(args.directory, args.minimum_seconds, args.campaign, args.require_clear)
     print("PASS" if result["ok"] else "FAIL", args.directory)
     for seat in result["seats"]:
         print(json.dumps({k: seat[k] for k in ("seat", "routes", "ready", "input_delay_changes", "gameplay")}, ensure_ascii=False))
