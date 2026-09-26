@@ -468,11 +468,11 @@ void ItemManager::OnUpdate()
                 g_GameManager.AddScore(itemScore);
                 if (!player->bombInfo.isInUse)
                 {
-                    g_GameManager.AddCherryPlus(20, player->seat);
+                    g_GameManager.AddCherryPlus(20);
                 }
                 else if ((i & 1) == 0)
                 {
-                    g_GameManager.AddCherryPlus(10, player->seat);
+                    g_GameManager.AddCherryPlus(10);
                 }
                 else
                 {
@@ -480,7 +480,7 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_CHERRY_SMALL:
-                g_GameManager.AddCherryPlus(30, player->seat);
+                g_GameManager.AddCherryPlus(30);
                 g_GameManager.AddCherry(70);
                 break;
             case ITEM_CHERRY:
@@ -499,7 +499,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlus(itemScore, player->seat);
+                g_GameManager.AddCherryPlus(itemScore);
                 break;
             case ITEM_STAR:
                 itemScore = g_GameManager.globals->grazeInTotal / 40 * 10 + 300;
@@ -517,7 +517,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlus(itemScore, player->seat);
+                g_GameManager.AddCherryPlus(itemScore);
                 break;
             }
             item->isInUse = 0;

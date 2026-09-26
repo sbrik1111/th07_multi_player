@@ -233,7 +233,7 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
     replayData->powerItemCountForScore = g_GameManager.PowerItemCount(0);
     replayData->cherry = g_GameManager.cherry - g_GameManager.globals->cherryStart;
     replayData->cherryMax = g_GameManager.cherryMax - g_GameManager.globals->cherryStart;
-    replayData->cherryPlus = g_GameManager.CherryPlus(0) - g_GameManager.globals->cherryStart;
+    replayData->cherryPlus = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
     replayData->spellCardsCaptured = (u8)g_GameManager.globals->spellCardsCaptured;
     replayData->extendsFromPointItems = g_GameManager.globals->extendsFromPointItems;
     replayData->nextNeededPointItemsForExtend = g_GameManager.globals->nextNeededPointItemsForExtend;
@@ -415,11 +415,11 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
                            g_GameManager.globals->cherryStart;
     g_GameManager.cherryMax = replayData->cherryMax +
                               g_GameManager.globals->cherryStart;
-    g_GameManager.CherryPlus(0) = replayData->cherryPlus +
+    g_GameManager.cherryPlus = replayData->cherryPlus +
                                g_GameManager.globals->cherryStart;
-    if (g_GameManager.CherryPlus(0) >= g_GameManager.globals->cherryStart + 50000)
+    if (g_GameManager.cherryPlus >= g_GameManager.globals->cherryStart + 50000)
     {
-        g_GameManager.CherryPlus(0) = g_GameManager.globals->cherryStart + 50000;
+        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + 50000;
         g_Players[0].ActivateBorder();
     }
     *g_GameManager.defaultCfg = arg->data->data.cfg;

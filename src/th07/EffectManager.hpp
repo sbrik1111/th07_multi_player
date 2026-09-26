@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AnmManager.hpp"
+#include "GameManager.hpp"
 #include "ZunResult.hpp"
 
 typedef i32 (*EffectCallback)(struct Effect *);
@@ -40,7 +41,7 @@ struct EffectTypeInfo
 };
 
 #define MAX_NORMAL_EFFECTS 400
-#define MAX_SPECIAL_EFFECTS 8
+#define MAX_SPECIAL_EFFECTS (8 + 5 * (MAX_PLAYERS - 1))
 #define MAX_EFFECTS (MAX_NORMAL_EFFECTS + MAX_SPECIAL_EFFECTS)
 
 struct EffectManager
@@ -84,7 +85,8 @@ struct EffectManager
     Effect *SpawnEffect(i32 effectId, Float3 *pos, i32 numParticles,
                         D3DCOLOR color);
     Effect *SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectIdx, i32 param_4,
-                               D3DCOLOR color);
+                               D3DCOLOR color, i32 ownerSeat = -1);
+    Effect *SpawnPlayerEffect(i32 effectId, Float3 *pos, i32 slot, i32 seat, D3DCOLOR color);
     Effect *SpawnMovingParticles(i32 effectId, Float3 *pos,
                                  Float3 *velocity, i32 numParticles,
                                  D3DCOLOR color);
@@ -105,5 +107,5 @@ struct EffectManager
     Effect *layerPtrs[4];
     i32 frameCounter;
 };
-C_ASSERT(sizeof(EffectManager) == 0x496a8);
+C_ASSERT(sizeof(EffectManager) == 0x496a8 + (MAX_SPECIAL_EFFECTS - 8) * sizeof(Effect));
 extern EffectManager &g_EffectManager;

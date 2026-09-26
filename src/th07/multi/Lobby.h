@@ -5,7 +5,7 @@
 namespace th07 {
 
 const uint32_t kMultiplayerLobbyMagic = 0x4C373054u;  // "T07L"
-const uint16_t kMultiplayerLobbyVersion = 7;
+const uint16_t kMultiplayerLobbyVersion = 8;
 
 enum MultiplayerLobbyKind {
     kMultiplayerLobbyHello = 1,

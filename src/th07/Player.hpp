@@ -195,6 +195,10 @@ struct Player
     f32 AngleToPlayer(Float3 *pos);
     void BreakBorder(u32 unused);
     void BreakBorderNaturally();
+    void ActivateBorderLocal();
+    void BreakBorderLocal(u32 unused);
+    void BreakBorderNaturallyLocal();
+    void ClearBorderLocal();
 
     i32 CalcItemBoxCollision(Float3 *center, Float3 *size);
     i32 CalcKillboxCollision(Float3 *center, Float3 *size);

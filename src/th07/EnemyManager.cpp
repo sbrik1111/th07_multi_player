@@ -848,7 +848,7 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                             }
                             if (cherryGain != 0)
                             {
-                                g_GameManager.AddCherryPlus(cherryGain, seat);
+                                g_GameManager.AddCherryPlus(cherryGain);
                             }
                         }
                         if (damage >= 70)

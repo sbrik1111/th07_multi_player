@@ -32,6 +32,12 @@ i32 CoopAllSeatsFullPower();
 
 i32 PowerDropSeat(i32 itemIndex);
 
+Player *CoopBorderOwner();
+i32 CoopBorderActive();
+// Call after every player is registered.
+void CoopRestoreBorder();
+void CoopEndBorderForDialogue();
+
 i32 AnyBombInUse();
 i32 AnyPlayerBusy();
 

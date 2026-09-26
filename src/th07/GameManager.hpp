@@ -61,7 +61,6 @@ struct SeatStock
     f32 power;
     f32 bombsUsed;
     f32 deaths;
-    i32 cherryPlus;
     i8 powerItemCountForScore;
     u8 character;
     u8 shotType;
@@ -144,10 +143,7 @@ struct GameManager
     {
         return this->seats[seat].deaths;
     }
-    i32 &CherryPlus(i32 seat)
-    {
-        return this->seats[seat].cherryPlus;
-    }
+    i32 BorderThreshold() const { return this->playerCount >= 3 ? 75000 : 50000; }
     i8 &PowerItemCount(i32 seat)
     {
         return this->seats[seat].powerItemCountForScore;
@@ -229,8 +225,7 @@ struct GameManager
     i32 HasUnlockedPhantom(i32 shotType);
     i32 HasUnlockedPhantomAndMaxClears();
 
-    void AddCherryPlus(i32 amount, i32 seat);
-    void AddCherryGauge(i32 amount, i32 seat);
+    void AddCherryPlus(i32 amount);
     void AddCherry(i32 amount);
     void ExtendSeat(i32 seat);
 
@@ -291,6 +286,7 @@ struct GameManager
     f32 csumFloat;
     i32 cherryMax;
     i32 cherry;
+    i32 cherryPlus;
     i32 phantasmUnlocked;
     i32 playTimeAll; // ZUN name: PlayTimeAll
     u32 bulletLagTime;

@@ -541,6 +541,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
         arg->defaultCfg->slowMode = 0;
         ZunMemory::Free(arg->tmpBuffer);
         arg->cherry = arg->globals->cherryStart;
+        arg->cherryPlus = arg->globals->cherryStart;
         if (g_GameManager.difficulty >= 4)
         {
             arg->defaultCfg->lifeCount = 2;
@@ -577,7 +578,6 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
             stock.power = 0.0f;
             stock.bombsUsed = 0.0f;
             stock.deaths = 0.0f;
-            stock.cherryPlus = arg->globals->cherryStart;
             stock.powerItemCountForScore = 0;
         }
         arg->ResetRegionsPos();
@@ -721,6 +721,12 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     {
         arg->globals->guiScore = arg->globals->score;
         arg->globals->guiScoreDifference = 0;
+        if (arg->PlayerCount() >= 3)
+        {
+            const i32 range = arg->cherryMax - arg->globals->cherryStart;
+            arg->cherryMax = arg->globals->cherryStart + (range > 0 ? range * 3 / 2 : 0);
+            if (arg->cherry > arg->cherryMax) arg->cherry = arg->cherryMax;
+        }
         if (Player::RegisterChain(0) != ZUN_SUCCESS)
         {
             // STRING: TH07 0x00498064
@@ -785,7 +791,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     {
         CoopLog("SEAT seat=%d shot=%d lives=%d bombs=%d power=%d cherry_plus=%d state=%d", seat,
                 arg->ShotTypeAndCharacter(seat), (i32)arg->Lives(seat), (i32)arg->Bombs(seat), (i32)arg->Power(seat),
-                arg->CherryPlus(seat) - arg->globals->cherryStart, g_Players[seat].playerState);
+                arg->cherryPlus - arg->globals->cherryStart, g_Players[seat].playerState);
     }
     if (Stage::RegisterChain(arg->currentStage) != ZUN_SUCCESS)
     {
@@ -968,33 +974,23 @@ void GameManager::DecreaseSubrank(i32 amount)
 }
 
 // FUNCTION: TH07 0x0042f5a2
-void GameManager::AddCherryPlus(i32 amount, i32 seat)
+void GameManager::AddCherryPlus(i32 amount)
 {
-    i32 oldCherry = this->cherry;
-    this->cherry = this->cherry + amount;
+    const i32 oldCherry = this->cherry;
+    this->cherry += amount;
     if (this->cherry > this->cherryMax)
-    {
         this->cherry = this->cherryMax;
-    }
-    this->AddCherryGauge(amount, seat);
-    if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
+    if (amount > 0 && !CoopBorderActive())
     {
-        g_Gui.ShowStatusPopup(this->cherry - this->globals->cherryStart, 3);
-    }
-}
-
-void GameManager::AddCherryGauge(i32 amount, i32 seat)
-{
-    Player *player = &g_Players[seat];
-    if (0 < amount && player->hasBorder == BORDER_NONE && player->playerState != PLAYER_STATE_GHOST)
-    {
-        this->CherryPlus(seat) = this->CherryPlus(seat) + amount;
-        if (this->CherryPlus(seat) >= this->globals->cherryStart + 50000)
+        this->cherryPlus += amount;
+        if (this->cherryPlus >= this->globals->cherryStart + this->BorderThreshold())
         {
-            this->CherryPlus(seat) = this->globals->cherryStart + 50000;
-            player->ActivateBorder();
+            this->cherryPlus = this->globals->cherryStart + this->BorderThreshold();
+            g_Players[0].ActivateBorder();
         }
     }
+    if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
+        g_Gui.ShowStatusPopup(this->cherry - this->globals->cherryStart, 3);
 }
 
 // FUNCTION: TH07 0x0042f69f

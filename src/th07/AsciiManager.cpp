@@ -1222,9 +1222,9 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.pos.x = this->cherryGauge.pos.x + 40.0f + 6.0f + 7.0f;
         this->cherryDigit.pos.y = this->cherryGauge.pos.y + 2.0f;
 
-        cherry = g_GameManager.CherryPlus(0) - g_GameManager.globals->cherryStart;
+        cherry = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
 
-        if (g_Players[0].hasBorder)
+        if (CoopBorderActive())
         {
             this->cherryDigit.color.bytes.r = 255;
             divisor = cherry % 4000;
@@ -1233,9 +1233,9 @@ void AsciiManager::DrawPopups()
                 divisor = 4000 - divisor;
             }
             this->cherryDigit.color.bytes.g =
-                cherry * 192 / 50000 + divisor * 64 / 2000;
+                cherry * 192 / g_GameManager.BorderThreshold() + divisor * 64 / 2000;
             this->cherryDigit.color.bytes.b =
-                cherry * 192 / 50000 + divisor * 64 / 2000;
+                cherry * 192 / g_GameManager.BorderThreshold() + divisor * 64 / 2000;
             this->cherryDigit.scale.x = 1.41f;
             this->cherryDigit.scale.y = 1.41f;
             xInc = 10;
@@ -1269,7 +1269,7 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.scale.x = 1.0f;
         this->cherryDigit.scale.y = 1.0f;
 
-        if (g_Players[0].hasBorder == BORDER_ACTIVE)
+        if (CoopBorderActive())
         {
             this->cherryBorderActive.pos = this->cherryGauge.pos;
             this->cherryBorderActive.pos.x += 24.0f;

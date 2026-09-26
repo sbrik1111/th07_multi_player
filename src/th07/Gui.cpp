@@ -833,13 +833,10 @@ ZunResult GuiImpl::RunMsg()
     {
         this->msg.timer = (u32)this->msg.curInstr->time;
     }
+    CoopEndBorderForDialogue();
     i32 anyUp = 0;
     for (i32 seat = 0; seat < PlayerCount(); seat++)
     {
-        if (g_Players[seat].hasBorder != BORDER_NONE)
-        {
-            g_Players[seat].BreakBorderNaturally();
-        }
         if (g_Players[seat].playerState != PLAYER_STATE_DEAD && !IsGhost(&g_Players[seat]))
         {
             anyUp = 1;

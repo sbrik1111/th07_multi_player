@@ -636,13 +636,13 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, Float3 *pos,
 
 // FUNCTION: TH07 0x0041c610
 Effect *EffectManager::SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectIdx,
-                                          i32 param_4, D3DCOLOR color)
+                                          i32 param_4, D3DCOLOR color, i32 ownerSeat)
 {
     Effect *effect;
 
     effect = &this->effects[effectIdx + MAX_NORMAL_EFFECTS];
     effect->is2D = 0;
-    effect->ownerSeat = (i8)g_CoopActiveSeat;
+    effect->ownerSeat = (i8)(ownerSeat >= 0 ? ownerSeat : g_CoopActiveSeat);
     effect->inUseFlag = 1;
     effect->effectId = effectId;
     effect->pos1 = *pos;
@@ -662,6 +662,13 @@ Effect *EffectManager::SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectI
         }
     }
     return effect;
+}
+
+// Each seat has its own fixed slots.
+Effect *EffectManager::SpawnPlayerEffect(i32 effectId, Float3 *pos, i32 slot, i32 seat, D3DCOLOR color)
+{
+    const i32 index = slot + (seat ? 8 + (seat - 1) * 5 : 0);
+    return SpawnSpecialEffect(effectId, pos, index, 1, color, seat);
 }
 
 #pragma var_order(effect, i)

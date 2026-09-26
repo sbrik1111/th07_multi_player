@@ -5,6 +5,7 @@
 #include "multi/LocalKeyboard.h"
 #include "Coop.hpp"
 #include "Controller.hpp"
+#include "EnemyManager.hpp"
 #include "Gui.hpp"
 #include "ItemManager.hpp"
 #include "Player.hpp"
@@ -209,6 +210,162 @@ bool RunCoopRuleTestsIfRequested()
     g_Gui.EndPlayerSpellcard(last);
     check(g_Gui.impl->bombSpellcardName.pendingInterrupt == 1,
           "own bomb ending dismisses current portrait");
+
+    auto resetBorder = [&]() {
+        ResetFixture();
+        g_GameManager.cherry = g_GameManager.globals->cherryStart + 100000;
+        g_GameManager.cherryMax = g_GameManager.globals->cherryStart + 300000;
+        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart;
+        for (int seat = 0; seat < PlayerCount(); ++seat) {
+            Player& p = g_Players[seat];
+            if (p.borderEffect) p.borderEffect->inUseFlag = 0;
+            p.borderEffect = NULL;
+            p.bombInfo.isInUse = 0;
+            p.borderInvulnerabilityTime = 0;
+            p.invulnerabilityTimer = 0;
+            p.respawnTimer = p.shooterData->initialRespawnTimer;
+            memset(p.bombClearBoxes, 0, sizeof(p.bombClearBoxes));
+        }
+    };
+    resetBorder();
+    const int threshold = seats >= 3 ? 75000 : 50000;
+    check(g_GameManager.BorderThreshold() == threshold, "shared border threshold follows player count");
+    g_ItemManager.SpawnItem(&g_Players[last].positionCenter, ITEM_CHERRY_SMALL, 0);
+    TickItems(1);
+    check(g_GameManager.cherryPlus == g_GameManager.globals->cherryStart + 30 &&
+          g_GameManager.cherry == g_GameManager.globals->cherryStart + 100100,
+          "partner cherry pickup feeds the one shared gauge exactly once");
+    g_GameManager.cherryPlus = g_GameManager.globals->cherryStart;
+    g_GameManager.cherryPlus += threshold - 20;
+    g_GameManager.AddCherryPlus(10);
+    check(!CoopBorderActive() && g_GameManager.cherryPlus == g_GameManager.globals->cherryStart + threshold - 10,
+          "shared border stays inactive below threshold");
+    g_GameManager.AddCherryPlus(10);
+    for (int seat = 0; seat < seats; ++seat) {
+        Player& p = g_Players[seat];
+        check(p.hasBorder == BORDER_ACTIVE && p.playerState == PLAYER_STATE_BORDER &&
+              p.invulnerabilityTimer.GetCurrent() == 540, "shared threshold activates every live player for 540 frames");
+        check(p.borderEffect && p.borderEffect->ownerSeat == seat, "border visual belongs to its player");
+        for (int other = 0; other < seat; ++other)
+            check(p.borderEffect != g_Players[other].borderEffect, "border visuals have independent fixed slots");
+    }
+    const int activeCherry = g_GameManager.cherry;
+    g_GameManager.AddCherryPlus(100);
+    check(g_GameManager.cherry == activeCherry + 100 &&
+          g_GameManager.cherryPlus == g_GameManager.globals->cherryStart + threshold,
+          "rewards during border increase shared cherry but not gauge");
+    g_Players[last].invulnerabilityTimer = 100;
+    g_Players[last].UpdateState();
+    check(g_GameManager.cherryPlus == g_GameManager.globals->cherryStart + threshold,
+          "partner countdown cannot overwrite shared gauge");
+    g_Players[0].invulnerabilityTimer = 270;
+    g_Players[0].UpdateState();
+    check(g_GameManager.cherryPlus == g_GameManager.globals->cherryStart + threshold / 2,
+          "first active player owns proportional shared countdown");
+
+    g_Players[0].invulnerabilityTimer = 1;
+    const unsigned scoreBeforeBorder = g_GameManager.globals->score;
+    const int cherryBeforeBorder = g_GameManager.cherry;
+    const int maxBeforeBorder = g_GameManager.cherryMax;
+    th07::rollback::Memory::Snapshot endingBorder;
+    check(memory->Capture(2, endingBorder), "capture shared border before natural expiry");
+    g_Players[0].UpdateState();
+    check(g_GameManager.cherryMax == maxBeforeBorder + 10000 &&
+          g_GameManager.cherry == cherryBeforeBorder + 10000 &&
+          g_GameManager.globals->score == scoreBeforeBorder +
+              (cherryBeforeBorder + 10000 - g_GameManager.globals->cherryStart),
+          "natural shared border awards cherry and score once");
+    for (int seat = 0; seat < seats; ++seat)
+        check(g_Players[seat].hasBorder == BORDER_NONE &&
+              g_Players[seat].invulnerabilityTimer.GetCurrent() == 40 &&
+              g_Players[seat].borderEffect == NULL, "natural expiry clears all active partners with 40-frame protection");
+    const u32 borderHash = SimFrameHash(NULL);
+    check(memory->Restore(endingBorder), "restore shared border before natural expiry");
+    g_Players[0].UpdateState();
+    check(SimFrameHash(NULL) == borderHash, "natural border replay has identical state and bonus");
+
+    resetBorder();
+    g_GameManager.AddCherryPlus(threshold);
+    const unsigned manualScore = g_GameManager.globals->score;
+    const int manualMax = g_GameManager.cherryMax;
+    const int bombs = (int)g_GameManager.Bombs(last);
+    g_SeatGameInput[last] = TH_BUTTON_BOMB;
+    g_Players[last].UpdateBorderAndBombState();
+    g_SeatGameInput[last] = 0;
+    check(!CoopBorderActive() && g_GameManager.cherryPlus == g_GameManager.globals->cherryStart,
+          "partner bomb button breaks shared border and resets gauge");
+    check((int)g_GameManager.Bombs(last) == bombs && g_GameManager.globals->score == manualScore &&
+          g_GameManager.cherryMax == manualMax, "manual border break consumes no bomb and grants no natural bonus");
+    check(g_EnemyManager.spellcardInfo.captureScore == 0 && !g_EnemyManager.spellcardInfo.isCapturing,
+          "manual border break cancels spell capture");
+    for (int seat = 0; seat < seats; ++seat)
+        check(g_Players[seat].hasBorder == BORDER_NONE &&
+              (g_Players[seat].bombClearBoxes[0].lifetime != 0) == (seat == last),
+              "only the breaking player emits the clearing burst");
+
+    resetBorder();
+    g_GameManager.AddCherryPlus(threshold);
+    g_Players[last].Die();
+    g_Players[last].UpdateDeath();
+    check(!CoopBorderActive() && g_Players[last].playerState == PLAYER_STATE_INVULNERABLE &&
+          g_GameManager.Lives(last) == 2, "hit during shared border protects the victim and ends all borders");
+
+    resetBorder();
+    g_Players[last].playerState = PLAYER_STATE_GHOST;
+    g_Players[0].playerState = PLAYER_STATE_INVULNERABLE;
+    g_GameManager.AddCherryPlus(threshold);
+    check(g_Players[last].hasBorder == BORDER_NONE && g_Players[last].playerState == PLAYER_STATE_GHOST,
+          "shared activation does not resurrect ghosts");
+    check(g_Players[0].hasBorder == BORDER_READY, "invulnerable player queues shared border");
+    g_Players[0].playerState = PLAYER_STATE_ALIVE;
+    g_Players[0].ActivateBorder();
+    check(g_Players[0].hasBorder == BORDER_ACTIVE && g_Players[last].hasBorder == BORDER_NONE,
+          "queued border activates after protection without involving ghost");
+    g_Players[0].ClearBorderLocal();
+    g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + threshold;
+    g_Players[0].playerState = PLAYER_STATE_SPAWNING;
+    CoopRestoreBorder();
+    check(g_Players[0].hasBorder == BORDER_READY && g_Players[last].hasBorder == BORDER_NONE,
+          "full shared gauge survives stage reentry while ghosts remain ghosts");
+
+    resetBorder();
+    g_Players[last].bombInfo.isInUse = 1;
+    g_GameManager.AddCherryPlus(threshold);
+    check(g_Players[last].hasBorder == BORDER_READY && g_Players[0].hasBorder == BORDER_ACTIVE,
+          "bombing player queues border while ready partners activate");
+    g_Players[last].bombInfo.isInUse = 0;
+    g_Players[last].ActivateBorder();
+    check(g_Players[last].hasBorder == BORDER_ACTIVE, "queued bombing player joins shared border");
+    const int grazeMax = g_GameManager.cherryMax;
+    g_Players[last].isFocus = 1;
+    g_Players[last].ScoreGraze(&drop);
+    g_Players[last].isFocus = 0;
+    g_Players[last].ScoreGraze(&drop);
+    check(g_GameManager.cherryMax == grazeMax + 30 + 80, "partner border graze keeps reference 30/80 cherry growth");
+
+    resetBorder();
+    g_GameManager.AddCherryPlus(threshold);
+    const int dialogueMax = g_GameManager.cherryMax;
+    CoopEndBorderForDialogue();
+    CoopEndBorderForDialogue();
+    check(!CoopBorderActive() && g_GameManager.cherryMax == dialogueMax + 10000,
+          "dialogue finishes shared border once even when called again");
+
+    resetBorder();
+    g_Players[0].playerState = PLAYER_STATE_GHOST;
+    g_GameManager.AddCherryPlus(threshold);
+    check(CoopBorderActive() && CoopBorderOwner() == &g_Players[1] && g_Players[0].hasBorder == BORDER_NONE,
+          "shared gauge and HUD remain active when first player is a ghost");
+
+    resetBorder();
+    g_GameManager.playerCount = 1;
+    check(g_GameManager.BorderThreshold() == 50000, "single player retains 50000 threshold");
+    g_GameManager.AddCherryPlus(50000);
+    check(g_Players[0].hasBorder == BORDER_ACTIVE, "single player border still activates");
+    g_Players[0].BreakBorderNaturally();
+    check(!CoopBorderActive() && g_GameManager.cherryMax == g_GameManager.globals->cherryStart + 310000,
+          "single player natural bonus remains unchanged");
+    g_GameManager.playerCount = seats;
 
     check(memory->Restore(original), "restore original game state");
     g_SoundSilenced = sound;

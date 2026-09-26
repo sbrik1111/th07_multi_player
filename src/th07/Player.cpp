@@ -1254,7 +1254,7 @@ void Player::ScoreGraze(Float3 *param_1)
 void Player::Die()
 {
     g_GameManager.RegenerateGameIntegrityCsum();
-    g_EffectManager.SpawnSpecialEffect(12, &this->positionCenter, 3, 1, 0xff4040ff);
+    g_EffectManager.SpawnPlayerEffect(12, &this->positionCenter, 3, this->seat, 0xff4040ff);
     g_EffectManager.SpawnEffect(6, &this->positionCenter, 16, 0xffffffff);
     this->playerState = PLAYER_STATE_DEAD;
     this->invulnerabilityTimer = 0;
@@ -1463,8 +1463,8 @@ i32 Player::HandlePlayerInputs()
             if (this->isFocus)
             {
                 this->optionState = OPTION_FOCUSING;
-                this->focusEffect = g_EffectManager.SpawnSpecialEffect(
-                    24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnPlayerEffect(
+                    24, &this->positionCenter, 2, this->seat, 0xffffffff);
             }
             else
             {
@@ -1522,8 +1522,8 @@ i32 Player::HandlePlayerInputs()
             {
                 this->optionState = OPTION_FOCUSING;
                 this->focusMovementTimer = 8 - this->focusMovementTimer.GetCurrent();
-                this->focusEffect = g_EffectManager.SpawnSpecialEffect(
-                    24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnPlayerEffect(
+                    24, &this->positionCenter, 2, this->seat, 0xffffffff);
                 goto CASE_OPTION_FOCUSING;
             }
         }
@@ -1546,8 +1546,8 @@ i32 Player::HandlePlayerInputs()
             if (this->isFocus)
             {
                 this->optionState = OPTION_FOCUSING;
-                this->focusEffect = g_EffectManager.SpawnSpecialEffect(
-                    24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnPlayerEffect(
+                    24, &this->positionCenter, 2, this->seat, 0xffffffff);
                 goto CASE_OPTION_FOCUSING_2;
             }
             this->optionsPosition[0].x -= optionOffsetX;
@@ -1614,8 +1614,8 @@ i32 Player::HandlePlayerInputs()
             {
                 this->optionState = OPTION_FOCUSING;
                 this->focusMovementTimer = 8 - this->focusMovementTimer.GetCurrent();
-                this->focusEffect = g_EffectManager.SpawnSpecialEffect(
-                    24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnPlayerEffect(
+                    24, &this->positionCenter, 2, this->seat, 0xffffffff);
                 goto CASE_OPTION_FOCUSING_2;
             }
             this->focusMovementTimer++;
@@ -1981,13 +1981,13 @@ void Player::UpdateState()
         {
             this->borderEffect->pos1 = this->positionCenter;
         }
-        g_GameManager.CherryPlus(this->seat) = this->invulnerabilityTimer.GetCurrent() * 50000 /
-                                   this->borderTimer.GetCurrent();
-        if (g_GameManager.CherryPlus(this->seat) < 0)
+        if (CoopBorderOwner() == this)
         {
-            g_GameManager.CherryPlus(this->seat) = 0;
+            i32 gauge = this->invulnerabilityTimer.GetCurrent() * g_GameManager.BorderThreshold() /
+                        this->borderTimer.GetCurrent();
+            if (gauge < 0) gauge = 0;
+            g_GameManager.cherryPlus = gauge + g_GameManager.globals->cherryStart;
         }
-        g_GameManager.CherryPlus(this->seat) += g_GameManager.globals->cherryStart;
         this->invulnerabilityTimer--;
         if (this->invulnerabilityTimer.GetCurrent() <= 0)
         {
@@ -2033,7 +2033,7 @@ void Player::UpdateState()
 }
 
 // FUNCTION: TH07 0x00441670
-void Player::BreakBorderNaturally()
+void Player::BreakBorderNaturallyLocal()
 {
     i32 cherryDiff;
 
@@ -2043,7 +2043,7 @@ void Player::BreakBorderNaturally()
     cherryDiff *= 10;
     g_GameManager.AddScore(cherryDiff);
     g_Gui.ShowStatusPopup(cherryDiff, 4);
-    g_GameManager.CherryPlus(this->seat) = g_GameManager.globals->cherryStart;
+    g_GameManager.cherryPlus = g_GameManager.globals->cherryStart;
     g_SoundPlayer.PlaySoundByIdx(SOUND_BORDER_BREAK, 0);
     if (this->playerState == PLAYER_STATE_SPAWNING)
     {
@@ -2116,11 +2116,11 @@ BombClearBox *Player::SpawnBombEffect(Float3 *pos, f32 sizeY, f32 sizeZ,
 }
 
 // FUNCTION: TH07 0x00441960
-void Player::ActivateBorder()
+void Player::ActivateBorderLocal()
 {
     Effect *spawnedEffect;
 
-    if (this->bombInfo.isInUse || g_Gui.HasCurrentMsgIdx())
+    if (this->bombInfo.isInUse)
     {
         this->hasBorder = BORDER_READY;
         return;
@@ -2135,7 +2135,7 @@ void Player::ActivateBorder()
     case PLAYER_STATE_DEAD:
         if (this->respawnTimer != 0)
         {
-            BreakBorder(0);
+            BreakBorderLocal(0);
             return;
         }
 
@@ -2155,7 +2155,7 @@ void Player::ActivateBorder()
             this->effect->inUseFlag = 0;
             this->effect = NULL;
         }
-        spawnedEffect = g_EffectManager.SpawnSpecialEffect(28, &this->positionCenter, 4, 1,
+        spawnedEffect = g_EffectManager.SpawnPlayerEffect(28, &this->positionCenter, 4, this->seat,
                                                            0xffffffff);
         spawnedEffect->vm.interpStartTimes[4] = 0;
         spawnedEffect->vm.interpEndTimes[4] = this->invulnerabilityTimer.GetCurrent();
@@ -2177,7 +2177,7 @@ void Player::ActivateBorder()
 
 #pragma var_order(effect, i, angle)
 // FUNCTION: TH07 0x00441bd0
-void Player::BreakBorder(u32 unused)
+void Player::BreakBorderLocal(u32 unused)
 {
     f32 angle;
     i32 i;
@@ -2188,7 +2188,7 @@ void Player::BreakBorder(u32 unused)
         this->borderEffect->inUseFlag = 0;
         this->borderEffect = NULL;
     }
-    effect = g_EffectManager.SpawnSpecialEffect(28, &this->positionCenter, 4, 1,
+    effect = g_EffectManager.SpawnPlayerEffect(28, &this->positionCenter, 4, this->seat,
                                                 0xffffffff);
     effect->vm.interpStartTimes[4] = 0;
     effect->vm.interpEndTimes[4] = 30;
@@ -2210,7 +2210,7 @@ void Player::BreakBorder(u32 unused)
     this->playerState = PLAYER_STATE_INVULNERABLE;
     this->invulnerabilityTimer = 40;
     this->borderInvulnerabilityTime = 40;
-    g_GameManager.CherryPlus(this->seat) = g_GameManager.globals->cherryStart;
+    g_GameManager.cherryPlus = g_GameManager.globals->cherryStart;
     SpawnBombEffect(&this->positionCenter, 32.0f, 16.0f, 50, 8);
     angle = -ZUN_PI;
     for (i = 0; i < 32; i++, angle += 0.19634955f)
@@ -2558,11 +2558,6 @@ ZunResult Player::AddedCallback(Player *arg)
         arg->lifeGiveTarget = 0;
         CoopKeepGhost(arg, 1);
     }
-    else if (g_GameManager.CherryPlus(arg->seat) >= g_GameManager.globals->cherryStart + 50000)
-    {
-        g_GameManager.CherryPlus(arg->seat) = g_GameManager.globals->cherryStart + 50000;
-        arg->ActivateBorder();
-    }
     return ZUN_SUCCESS;
 }
 
@@ -2616,6 +2611,7 @@ ZunResult Player::RegisterChain(u32 param_1)
         g_Chain.AddToDrawChain(mgr->drawChain1, 6);
         g_Chain.AddToDrawChain(mgr->drawChain2, 8);
     }
+    CoopRestoreBorder();
     return ZUN_SUCCESS;
 }
 

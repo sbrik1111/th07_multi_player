@@ -131,6 +131,7 @@ u32 SimFrameHash(u32 *parts)
         f.I32(g->extendsFromPointItems);
         f.I32(g_GameManager.cherry);
         f.I32(g_GameManager.cherryMax);
+        f.I32(g_GameManager.cherryPlus);
         f.I32(g_GameManager.currentStage);
         f.I32(g_GameManager.difficulty);
         f.I32(g_GameManager.rank.rank);
@@ -144,7 +145,6 @@ u32 SimFrameHash(u32 *parts)
         s.F32(g_GameManager.Lives(seat));
         s.F32(g_GameManager.Bombs(seat));
         s.F32(g_GameManager.Power(seat));
-        s.I32(g_GameManager.CherryPlus(seat));
         s.I32(g_GameManager.PowerItemCount(seat));
         Player *player = &g_Players[seat];
         if (player->calcChain != NULL)

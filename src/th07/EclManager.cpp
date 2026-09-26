@@ -1976,11 +1976,7 @@ restart:
                 }
                 break;
             case ECL_ADD_CHERRY_PLUS:
-                g_GameManager.AddCherry(GET_INT_VALUE(enemy, 0));
-                for (i32 seat = 0; seat < PlayerCount(); seat++)
-                {
-                    g_GameManager.AddCherryGauge(GET_INT_VALUE(enemy, 0), seat);
-                }
+                g_GameManager.AddCherryPlus(GET_INT_VALUE(enemy, 0));
                 break;
             case ECL_FREEZE_ECL_DURING_BOMB:
                 enemy->freezeEclDuringBombs = GET_INT_VALUE(enemy, 0);

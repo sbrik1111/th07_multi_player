@@ -29,7 +29,7 @@ using netcode::Timeline;
 using netcode::Inputs;
 
 const unsigned kMagic = 0x4E373054u; // "T07N"
-const unsigned short kVersion = 3;
+const unsigned short kVersion = 4;
 const unsigned kHistory = netcode::History;
 const unsigned kHashRing = 256;
 const unsigned kHashPeriod = 16;
