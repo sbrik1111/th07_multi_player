@@ -8,6 +8,7 @@
 #include "multi/RollbackHeap.h"
 #include "multi/RollbackMemory.h"
 #include "multi/SessionFrame.h"
+#include "AnmManager.hpp"
 #include "Chain.hpp"
 #include "Coop.hpp"
 #include "GameWindow.hpp"
@@ -249,6 +250,10 @@ bool RegisterSection(const char* name, unsigned key)
 void Capture(Checkpoint& c, unsigned frame)
 {
     unsigned long long begin = PerfNow();
+    // A queued batch still references the vertex scratch: never save one.
+    if (g_AnmManager != NULL && g_AnmManager->spritesToDraw != 0) {
+        Fail("capture with an unfinished sprite batch");
+    }
     if (!c.cpu.Capture()) {
         Fail("capture FP environment");
     }

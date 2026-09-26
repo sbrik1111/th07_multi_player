@@ -641,7 +641,8 @@ struct AnmManager
     IDirect3DVertexBuffer8 *vertexBuffer;
     RenderVertexInfo vertexBufferContents[4];
     u32 spritesToDraw;
-    VertexTex1DiffuseXyzrhw spriteVertexBuffer[49152];
+    // Outside the rollback arena.
+    VertexTex1DiffuseXyzrhw *spriteVertexBuffer;
     VertexTex1DiffuseXyzrhw *vertexBufferCurPtr;
     VertexTex1DiffuseXyzrhw *vertexBufferStartPtr;
     i32 screenshotTextureId;

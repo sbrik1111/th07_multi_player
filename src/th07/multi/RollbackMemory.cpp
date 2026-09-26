@@ -16,7 +16,7 @@
 namespace th07 { namespace rollback {
 namespace {
 constexpr std::size_t kPage = 4096;
-constexpr std::size_t kDirtyList = 8192;
+constexpr std::size_t kDirtyListMin = 1024;
 constexpr std::uint32_t kMagic = 0x52424D31;
 constexpr std::uint32_t kBlockMagic = 0x52424231;
 struct Header {
@@ -237,7 +237,7 @@ std::uint64_t Memory::Image::Hash() const {
 }
 
 Memory::Memory() : base_(nullptr), capacity_(0), committed_(0), sealed_(false),
-    forceInspect_(false), wideQuery_(false), error_(""), writtenCount_(0) {}
+    forceInspect_(false), wideQuery_(false), dirtyCapacity_(kDirtyListMin), error_(""), writtenCount_(0) {}
 Memory::~Memory() { if (base_) VirtualFree(base_, 0, MEM_RELEASE); }
 bool Memory::Fail(const char* message) { error_ = message; return false; }
 
@@ -451,7 +451,7 @@ bool Memory::QueryDirtyPages(bool reset, bool& complete) {
     if (previous_) pages = std::max(pages, previous_->regions[0].Pages());
     pages = std::min(pages, committed_ / kPage);
     // A truncated reset query is never repeated (which pages it reset is undocumented).
-    std::size_t capacity = wideQuery_ ? pages : std::min(pages, kDirtyList);
+    std::size_t capacity = wideQuery_ ? pages : std::min(pages, dirtyCapacity_);
     ULONG_PTR count = 0;
     for (;;) {
         if (reset) forceInspect_ = true;
@@ -466,6 +466,8 @@ bool Memory::QueryDirtyPages(bool reset, bool& complete) {
     }
     wideQuery_ = !complete;
     if (!complete) return true;
+    const std::size_t wanted = std::max(kDirtyListMin, std::size_t(count) * 2);
+    dirtyCapacity_ = std::max(wanted, dirtyCapacity_ - dirtyCapacity_ / 8);
     for (ULONG_PTR i = 0; i < count; ++i) {
         const auto offset = static_cast<unsigned char*>(writtenPages_[i]) - base_;
         if (offset < 0 || static_cast<std::size_t>(offset) >= pages * kPage || offset % kPage)

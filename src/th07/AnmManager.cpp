@@ -1,4 +1,5 @@
 #include "AnmManager.hpp"
+#include "multi/RenderScratch.h"
 
 #include <d3d8.h>
 #include <d3d8types.h>
@@ -47,6 +48,7 @@ const i32 g_TextureBytesPerPixel[7] = {4, 4, 2, 2, 3, 2, 0};
 AnmManager::AnmManager()
 {
     memset(this, 0, sizeof(AnmManager));
+    this->spriteVertexBuffer = th07::render::SpriteVertexScratch();
 
     for (i32 i = 0; i < ARRAY_SIZE_SIGNED(this->sprites); i++)
     {

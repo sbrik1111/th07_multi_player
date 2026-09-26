@@ -102,6 +102,7 @@ private:
     bool sealed_;
     bool forceInspect_;
     bool wideQuery_;
+    std::size_t dirtyCapacity_;
     const char* error_;
     Profile profile_ = {};
     std::shared_ptr<Owner> owner_;

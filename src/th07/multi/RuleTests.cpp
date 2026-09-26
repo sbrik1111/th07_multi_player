@@ -77,6 +77,17 @@ bool RunCoopRuleTestsIfRequested()
     const int last = PlayerCount() - 1;
     Float3 drop(192.0f, 200.0f, 0.0f);
 
+    check(!memory->Owns(g_AnmManager->spriteVertexBuffer), "render scratch lives outside rollback arena");
+    check(g_AnmManager->spritesToDraw == 0, "snapshot boundary has no pending sprite batch");
+    unsigned char* scratch = reinterpret_cast<unsigned char*>(g_AnmManager->spriteVertexBuffer);
+    const unsigned lastByte = 49152 * sizeof(VertexTex1DiffuseXyzrhw) - 1;
+    const unsigned char first = scratch[0], end = scratch[lastByte];
+    scratch[0] ^= 0x5a;
+    scratch[lastByte] ^= 0xa5;
+    check(memory->Compare(original), "drawing scratch does not change saved simulation bytes");
+    scratch[0] = first;
+    scratch[lastByte] = end;
+
     const th07::input::KeyBinding fallback = {'I', DIK_I};
     auto q = th07::input::ParseKeyBinding("key_q", fallback);
     check(q.virtualKey == 'Q' && q.scanCode == DIK_Q, "custom letter binding");
