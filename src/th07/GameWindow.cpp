@@ -27,6 +27,7 @@ typedef __w64 long SHANDLE_PTR; // i dont know anymore bro
 #include "multi/Session.h"
 #include <float.h>
 #include "multi/Launcher.h"
+#include "multi/ReplaySession.h"
 // Runtime state: not rolled back.
 #include "multi/RuntimeData.h"
 
@@ -254,7 +255,7 @@ RenderResult GameWindow::Render()
     {
         s_MpNextFrameTime = now;
     }
-    if (now < s_MpNextFrameTime)
+    if (!th07::replay::FastPlayback() && now < s_MpNextFrameTime)
     {
         if ((s_MpNextFrameTime - now) * 1000.0 >= 1.5)
         {

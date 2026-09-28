@@ -18,6 +18,7 @@
 #include "multi/SessionFrame.h"
 #include "multi/Session.h"
 #include "multi/RollbackGame.h"
+#include "multi/ReplaySession.h"
 #include "SimHash.hpp"
 #include "multi/RuntimeData.h"
 
@@ -79,6 +80,7 @@ struct HashCell {
 };
 
 struct Segment {
+    unsigned recorded;
     bool active;
     unsigned index;
     Phase phase;
@@ -231,6 +233,7 @@ void StartSegment(unsigned index)
     if (s.rollback) {
         rollback_game::BeginSegment();
     }
+    if (s.phase == kGameplay) replay::BeginGameplay();
     mp::Log("SEGMENT index=%u phase=%s delay=%u window=%u rollback=%d host_frame=%u", index,
             s.phase == kMenu ? "menu" : "gameplay", s.delay, window, s.rollback ? 1 : 0, g_net.hostFrames);
 }
@@ -646,6 +649,27 @@ void RecordHash(Segment& s, unsigned frame)
     }
 }
 
+void PublishReplay(Segment& s)
+{
+    if (!replay::Recording()) return;
+    while (s.recorded < s.timeline.Confirmed()) {
+        const unsigned frame = s.recorded;
+        Inputs inputs;
+        if (!s.timeline.ReadConfirmed(frame, inputs)) {
+            replay::RecordingError("confirmed input no longer retained");
+            return;
+        }
+        const HashCell& hash = s.own[frame % kHashRing];
+        const bool sampled = frame % kHashPeriod == 0;
+        if (sampled && hash.frame != frame) {
+            replay::RecordingError("confirmed hash no longer retained");
+            return;
+        }
+        replay::Record(s.index, frame, inputs.held, sampled ? hash.hash : 0, sampled ? hash.parts : nullptr);
+        ++s.recorded;
+    }
+}
+
 void SwitchTo(unsigned index)
 {
     Segment& old = Current();
@@ -690,6 +714,7 @@ int RunLockstep(Segment& s, int* present)
         Fail(s.timeline.Error());
     }
     g_net.framesRun++;
+    PublishReplay(s);
     if (s.phase == kMenu && SessionGameplayActive()) {
         SwitchTo(s.index + 1);
     }
@@ -829,6 +854,7 @@ int RunRollback(Segment& s, int* present)
         return 0;
     }
     PublishFinalHashes(s);
+    PublishReplay(s);
     if (r == 2) {
         SwitchTo(s.index + 1);
         return 1;

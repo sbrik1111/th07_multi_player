@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+namespace th07 { namespace replay { struct Settings; } }
+
 namespace th07 {
 namespace mp {
 
@@ -50,6 +52,7 @@ struct Config {
 };
 
 const Config& Cfg();
+void ConfigureReplay(const replay::Settings& settings);
 
 bool UdpEnabled();
 bool LocalEnabled();

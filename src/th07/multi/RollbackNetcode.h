@@ -175,6 +175,12 @@ public:
         out = c->used;
         return true;
     }
+    bool ReadConfirmed(unsigned frame, Inputs& out) const {
+        const auto* c = Find(frame);
+        if (frame >= confirmed_ || !c || !c->simulated || !AllKnown(c)) return false;
+        out = c->actual;
+        return true;
+    }
     // predict=false: advance only on a final frame.
     bool CanAdvance(bool predict = true) const {
         const auto* c = Find(next_);
@@ -187,8 +193,8 @@ public:
     // packets.
     static unsigned RestoredFrom(unsigned frame, unsigned) { return frame; }
     static unsigned RestoredFrom(bool restored, unsigned first) { return restored ? first : NoFrame; }
-    template<class Restore, class Step>
-    bool Repair(Restore restore, Step step) {
+    template<class Restore, class Step, class Blocked>
+    bool Repair(Restore restore, Step step, Blocked blocked) {
         if (error_) return false;
         if (dirty_ == NoFrame) { Confirm(); return true; }
         const unsigned first = dirty_;
@@ -198,7 +204,7 @@ public:
         if (from == NoFrame || from > first) return Fail("checkpoint restore failed");
         for (unsigned f = from; f < next_; ++f) {
             auto input = Select(f);
-            const int r = step(f, input, true);
+            const int r = blocked(f) ? -1 : step(f, input, true);
             if (r < 0) {
                 for (unsigned g = f; g < next_; ++g) {
                     auto& c = cells_[g % Ring];
@@ -214,6 +220,10 @@ public:
         ++rollbacks_;
         Confirm();
         return true;
+    }
+    template<class Restore, class Step>
+    bool Repair(Restore restore, Step step) {
+        return Repair(restore, step, [](unsigned) { return false; });
     }
     bool Rewind(unsigned first) {
         if (error_) return false;

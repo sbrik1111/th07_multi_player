@@ -12,6 +12,7 @@ compile_commands.json
 prefix/
 run/
 wk/
+replay/*.mpr
 *.[mM][dD]
 !/README.md
 !/CONTRIBUTING.md

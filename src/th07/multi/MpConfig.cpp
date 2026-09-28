@@ -1,4 +1,5 @@
-﻿#ifndef WIN32_LEAN_AND_MEAN
+﻿#include "ReplayFile.h"
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
@@ -220,6 +221,27 @@ const Config& Cfg()
 {
     InitConfig();
     return g_cfg;
+}
+
+void ConfigureReplay(const replay::Settings& settings)
+{
+    InitConfig();
+    g_cfg.mode = kLocal;
+    g_cfg.localSeat = settings.viewSeat;
+    g_cfg.playerCount = settings.players;
+    g_cfg.sessionId = settings.session;
+    g_cfg.rollback = false;
+    g_cfg.testBot = g_cfg.testTitleBot = g_cfg.testRules = g_cfg.testCampaign = false;
+    g_cfg.testKeepAlive = settings.keepAlive != 0;
+    g_cfg.testStartStage = settings.startStage;
+    g_cfg.testStageClearFrame = settings.clearFrame;
+    g_cfg.testStageClearLast = settings.clearLast;
+    g_cfg.testGhostFrame = settings.ghostFrame;
+    for (int seat = 0; seat < kMaxPlayers; ++seat) {
+        g_cfg.testCharacters[seat] = settings.characters[seat];
+        g_cfg.testShotTypes[seat] = settings.shots[seat];
+        CleanMultiplayerPlayerName(g_cfg.playerName[seat], settings.names[seat], sizeof(settings.names[seat]), seat);
+    }
 }
 
 bool UdpEnabled()

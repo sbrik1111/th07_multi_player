@@ -68,6 +68,68 @@ void IndependentClocks()
     std::puts("PASS independent RTT echoes with unrelated/wrapping clocks");
 }
 
+void CorrectedSceneBoundary()
+{
+    Timeline t;
+    CHECK(t.Initialize(0, 8, 4));
+    struct Scene { State value = 1; bool pending = false; } scene;
+    std::map<unsigned, Scene> checkpoints;
+    unsigned loads = 0, stops = 0;
+    const auto restore = [&](unsigned frame) -> bool {
+        if (!checkpoints.count(frame)) return false;
+        scene = checkpoints.at(frame);
+        return true;
+    };
+    const auto step = [&](unsigned frame, const Inputs& in, bool replay) -> int {
+        checkpoints[frame] = scene;
+        if (scene.pending) {
+            CHECK(!replay);
+            CHECK(!t.NeedsCheckpoint(frame));
+            ++loads;
+            scene.pending = false;
+        }
+        scene.value = Step(scene.value, frame, in, 4);
+        if (frame == 1 && in.held[1]) scene.pending = true;
+        return 1;
+    };
+    const auto blocked = [&](unsigned) -> bool {
+        if (scene.pending) ++stops;
+        return scene.pending;
+    };
+    for (unsigned frame = 0; frame < 6; ++frame) {
+        CHECK(t.SampleLocal(0));
+        if (!frame) for (unsigned seat = 1; seat < 4; ++seat) CHECK(t.Receive(seat, frame, 0));
+        CHECK(t.Advance(step));
+    }
+    CHECK(t.Next() == 6 && t.Confirmed() == 1 && loads == 0);
+    CHECK(t.Receive(1, 1, 1)); // the correction reaches the load at frame 2
+    CHECK(t.Receive(2, 1, 0)); // seat 3's preceding input is still missing
+    for (unsigned seat = 1; seat < 4; ++seat) CHECK(t.Receive(seat, 2, 0));
+    CHECK(t.Repair(restore, step, blocked));
+    CHECK(t.Next() == 2 && t.Confirmed() == 1 && loads == 0 && stops == 1);
+    CHECK(!t.CanAdvance(false));
+    Inputs used;
+    CHECK(!t.Used(2, used)); // discard the whole predicted suffix
+    CHECK(t.Receive(3, 1, 2));
+    CHECK(t.Repair(restore, step, blocked));
+    CHECK(t.Confirmed() == 2 && t.CanAdvance(false));
+    CHECK(t.Advance(step, false));
+    CHECK(loads == 1 && t.Confirmed() == 3);
+    for (unsigned frame = 3; frame < 6; ++frame) {
+        for (unsigned seat = 1; seat < 4; ++seat) CHECK(t.Receive(seat, frame, 0));
+        CHECK(t.Dirty() == NoFrame && t.CanAdvance(false));
+        CHECK(t.Advance(step, false));
+    }
+    State expected = 1;
+    for (unsigned frame = 0; frame < 6; ++frame) {
+        Inputs in;
+        if (frame == 1) { in.held[1] = 1; in.held[3] = 2; }
+        expected = Step(expected, frame, in, 4);
+    }
+    CHECK(scene.value == expected && t.Confirmed() == 6 && loads == 1);
+    std::puts("PASS corrected scene boundary waits for confirmed inputs and loads once");
+}
+
 struct Peer {
     Timeline timeline;
     State state = 1;
@@ -156,5 +218,6 @@ int main()
 {
     DelayEdges();
     IndependentClocks();
+    CorrectedSceneBoundary();
     for (unsigned players = 2; players <= 4; ++players) Network(players);
 }

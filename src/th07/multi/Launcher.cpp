@@ -13,6 +13,7 @@
 #include "multi/Launcher.h"
 #include "multi/Lobby.h"
 #include "multi/MpConfig.h"
+#include "multi/ReplaySession.h"
 
 namespace th07 {
 namespace launcher {
@@ -1470,6 +1471,8 @@ bool Run(Selection* selection)
     return true;
 #else
     ResolveSettingsPath();
+
+    if (replay::Requested()) return true;
 
     char value[24] = {};
     char force[24] = {};

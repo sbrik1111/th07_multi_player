@@ -512,7 +512,12 @@ int RunFrame(netcode::Timeline& timeline, int* present, FrameDone done, void* co
         return 1;
     };
     const unsigned repairedBefore = g_stats.replayedFrames;
-    if (!timeline.Repair(restore, step)) {
+    const auto blocked = [&](unsigned frame) -> bool {
+        if (!SessionPredictionBlocked()) return false;
+        mp::Log("RB_BOUNDARY frame=%u next=%u confirmed=%u", frame, timeline.Next(), timeline.Confirmed());
+        return true;
+    };
+    if (!timeline.Repair(restore, step, blocked)) {
         mp::Log("FAIL rollback repair: %s", timeline.Error());
         return 0;
     }

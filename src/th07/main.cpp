@@ -20,6 +20,7 @@
 #include "multi/MpConfig.h"
 #include "multi/RollbackHeap.h"
 #include "multi/Session.h"
+#include "multi/ReplaySession.h"
 
 // FUNCTION: TH07 0x00433f90
 void AnmManager::TakeScreenshotIfRequested()
@@ -45,6 +46,7 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     tagMSG msg;
 
     th07::mp::InstallCrashFilter();
+    th07::replay::ReadCommandLine();
     {
         th07::launcher::Selection launch = {};
         if (!th07::launcher::Run(&launch) || launch.mode == th07::launcher::kCancelled)
@@ -59,6 +61,7 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
             }
         }
     }
+    if (!th07::replay::PreparePlayback()) return 1;
     MpInitSession();
 
     res = RENDER_RESULT_KEEP_RUNNING;
@@ -84,6 +87,7 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
     th07::launcher::ApplyGameConfig(); // after th07.cfg, which would overwrite it
 
+    th07::replay::ApplyGameConfig();
     GameWindow::ChecksumExecutable();
     QueryPerformanceFrequency(&g_GameWindow.lpFrequency);
 
@@ -127,6 +131,7 @@ start:
         goto cleanup;
     }
     res = RENDER_RESULT_KEEP_RUNNING;
+    th07::replay::StartRecording();
     while (!g_GameWindow.isAppClosing)
     {
         if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
@@ -210,6 +215,7 @@ stop:
         }
         goto start;
     }
+    th07::replay::RestoreGameConfig();
     th07::launcher::RestoreGameConfig();
     FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
                                 sizeof(GameConfiguration));
@@ -220,6 +226,8 @@ stop:
     SystemParametersInfoA(SPI_SETPOWEROFFACTIVE, g_GameWindow.power_off_active,
                           NULL, 2);
     WINNLSEnableIME(0, 1);
+    th07::replay::FinishSession();
     g_GameErrorContext.Flush();
-    return 0;
+    th07::replay::RestartIfRequested();
+    return th07::replay::Failed() ? 1 : 0;
 }

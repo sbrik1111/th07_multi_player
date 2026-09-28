@@ -4,6 +4,8 @@
 #include "multi/MpConfig.h"
 #include "multi/Net.h"
 #include "multi/RollbackGame.h"
+#include "multi/ReplaySession.h"
+#include "SimHash.hpp"
 #include "AsciiManager.hpp"
 #include "multi/Bot.h"
 #include "multi/RuleTests.h"
@@ -38,6 +40,7 @@ namespace
 
 bool g_shutdown;
 unsigned g_localFrame;
+unsigned g_localSegment, g_segmentFrame;
 
 void CoopLogToSeatLog(const char *line)
 {
@@ -168,7 +171,7 @@ void MpInitSession()
     g_CoopTestStartStage = cfg.testStartStage;
     g_CoopTestStageClearFrame = cfg.testStageClearFrame != th07::mp::kNoFrame ? (i32)cfg.testStageClearFrame : -1;
     g_CoopTestStageClearLast = cfg.testStageClearLast;
-    if (cfg.mode == th07::mp::kUdp && cfg.rollback && !th07::rollback_game::Start())
+    if (((cfg.mode == th07::mp::kUdp && cfg.rollback) || th07::replay::UsesArena()) && !th07::rollback_game::Start())
     {
         th07::mp::Log("FAIL rollback could not start");
     }
@@ -177,6 +180,7 @@ void MpInitSession()
     g_CoopShowStageNames = cfg.showStageNames;
     if (cfg.testKeepAlive) th07::mp::Log("TEST_KEEP_ALIVE enabled=1");
     g_CoopViewSeat = cfg.mode == th07::mp::kUdp ? cfg.localSeat : 0;
+    if (th07::replay::Playing()) g_CoopViewSeat = th07::replay::ViewSeat();
     th07::mp::Log("SESSION mode=%s seat=%d players=%d rollback=%d delay=%u menu_delay=%u session=%08X",
                   cfg.mode == th07::mp::kUdp ? "udp" : "local", cfg.localSeat, cfg.playerCount, cfg.rollback ? 1 : 0,
                   cfg.artificialDelay, cfg.menuInputDelay, cfg.sessionId);
@@ -195,6 +199,7 @@ int MpRunHostTick(int *present)
         return 0;
     }
     g_localFrame++;
+    if (th07::replay::Playing()) return th07::replay::RunPlayback(present);
     if (th07::mp::UdpEnabled())
     {
         return th07::net::RunHostTick(present);
@@ -214,7 +219,26 @@ int MpRunHostTick(int *present)
             buttons[seat] = SessionBotMask(seat);
         }
     }
+    if ((g_localSegment & 1) && SessionGameplayExitPending()) {
+        SessionLogGameEnd();
+        ++g_localSegment;
+        g_segmentFrame = 0;
+    }
     int status = RunFrame(buttons, count, 1);
+    if (status == 1 && th07::replay::Recording()) {
+        unsigned short encoded[MAX_PLAYERS] = {};
+        for (int seat = 0; seat < count; ++seat) encoded[seat] = SessionEncodeButtons(buttons[seat]);
+        unsigned parts[SIM_HASH_PART_COUNT];
+        const bool sampled = g_segmentFrame % th07::replay::kHashInterval == 0;
+        const unsigned hash = sampled ? SimFrameHash(parts) : 0;
+        th07::replay::Record(g_localSegment, g_segmentFrame, encoded, hash, sampled ? parts : nullptr);
+    }
+    ++g_segmentFrame;
+    if (!(g_localSegment & 1) && SessionGameplayActive()) {
+        ++g_localSegment;
+        g_segmentFrame = 0;
+        th07::replay::BeginGameplay();
+    }
     *present = 1;
     return status;
 }
@@ -403,6 +427,7 @@ void WaitingText(char *text, size_t size, unsigned mask)
 
 void MpDrawTitleSession()
 {
+    if (th07::replay::SaveFailed()) DrawSessionLine(401.0f, "REPLAY SAVE FAILED", 0xffff5050);
     const th07::mp::Config &cfg = th07::mp::Cfg();
     char lines[8][48];
     D3DCOLOR colors[8];
@@ -456,6 +481,11 @@ void MpDrawTitleSession()
 
 void MpDrawPlaySession()
 {
+    if (th07::replay::SaveFailed()) DrawSessionLine(437.0f, "REPLAY SAVE FAILED", 0xffff5050);
+    if (th07::replay::Playing()) {
+        DrawSessionLine(455.0f, "REPLAY  [ESC: BACK]", 0xff80c0ff);
+        return;
+    }
     if (!th07::mp::UdpEnabled())
     {
         return;

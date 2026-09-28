@@ -1,6 +1,7 @@
 #include "MainMenu.hpp"
 #include "multi/Session.h"
 #include "multi/MpConfig.h"
+#include "multi/ReplaySession.h"
 
 #include <direct.h>
 #include <stdio.h>
@@ -165,6 +166,11 @@ const char *g_MainMenuStrings[8] = {
 // FUNCTION: TH07 0x004554d6
 u32 MainMenu::OnUpdate(MainMenu *arg)
 {
+    if (th07::replay::OpenMenuOnStart() && arg->gameState == STATE_PRE_INPUT &&
+        arg->menuSubState == 1)
+    {
+        arg->SetGameState(STATE_SELECT_REPLAY);
+    }
     u32 result;
 
     switch (arg->gameState)
@@ -308,8 +314,10 @@ u32 MainMenu::OnUpdatePreInput()
         {
             break;
         }
+        // Not in network sessions: peers must not diverge.
         if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU) &&
-            (this->cursor == 3 || this->cursor == 4 || (this->cursor == 6 && !th07::mp::LocalEnabled())))
+            ((this->cursor == 3 && !th07::replay::MenuAllowed()) || this->cursor == 4 ||
+             (this->cursor == 6 && !th07::mp::LocalEnabled())))
         {
             g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
         }
@@ -367,6 +375,7 @@ u32 MainMenu::OnUpdatePreInput()
                     return CHAIN_CALLBACK_RESULT_CONTINUE;
                 }
             case 3:
+                th07::replay::FinishSession();
                 g_GameManager.practice = 0;
                 this->prevGameState = this->gameState;
                 this->gameState = STATE_SELECT_REPLAY;
@@ -1990,68 +1999,75 @@ u32 MainMenu::OnUpdateSelectReplay()
             this->inputDelayTimer = 0;
             this->cursorVm = NULL;
             local_10 = 0;
-            for (i = 0; i < 15; i++)
+            if (th07::replay::MenuAllowed())
             {
-                // STRING: TH07 0x004967bc
-                sprintf(local_54, "./replay/th7_%.2d.rpy", i + 1);
-                file = (ReplayFile *)FileSystem::OpenFile(local_54, 1);
-                if (!file)
-                {
-                    continue;
-                }
-
-                file =
-                    ReplayManager::ValidateReplayData(file, g_LastFileSize);
-                if (file)
-                {
-                    this->replays[local_10] = *file;
-                    strcpy(this->replayFilenames[local_10], local_54);
-                    // STRING: TH07 0x00496460
-                    sprintf(this->replayLabels[local_10], "No.%.2d", i + 1);
-                    local_10++;
-                    GameFree(file);
-                }
+                local_10 = th07::replay::FillMenu(this);
             }
-            // STRING: TH07 0x00495674
-            _mkdir("./replay");
-            _chdir("./replay");
-            // STRING: TH07 0x00495664
-            local_c = FindFirstFileA("th7_ud????.rpy", &local_194);
-            if (local_c != INVALID_HANDLE_VALUE)
+            else
             {
-                for (i = 0; i < 45; i++)
+                for (i = 0; i < 15; i++)
                 {
-                    file = (ReplayFile *)FileSystem::OpenFile(
-                        local_194.cFileName, 1);
+                    // STRING: TH07 0x004967bc
+                    sprintf(local_54, "./replay/th7_%.2d.rpy", i + 1);
+                    file = (ReplayFile *)FileSystem::OpenFile(local_54, 1);
                     if (!file)
                     {
                         continue;
                     }
-                    else
+
+                    file =
+                        ReplayManager::ValidateReplayData(file, g_LastFileSize);
+                    if (file)
                     {
-                        file =
-                            ReplayManager::ValidateReplayData(file, g_LastFileSize);
-                        if (file)
+                        this->replays[local_10] = *file;
+                        strcpy(this->replayFilenames[local_10], local_54);
+                        // STRING: TH07 0x00496460
+                        sprintf(this->replayLabels[local_10], "No.%.2d", i + 1);
+                        local_10++;
+                        GameFree(file);
+                    }
+                }
+                // STRING: TH07 0x00495674
+                _mkdir("./replay");
+                _chdir("./replay");
+                // STRING: TH07 0x00495664
+                local_c = FindFirstFileA("th7_ud????.rpy", &local_194);
+                if (local_c != INVALID_HANDLE_VALUE)
+                {
+                    for (i = 0; i < 45; i++)
+                    {
+                        file = (ReplayFile *)FileSystem::OpenFile(
+                            local_194.cFileName, 1);
+                        if (!file)
                         {
-                            this->replays[local_10] = *file;
-                            // STRING: TH07 0x00495658
-                            sprintf(this->replayFilenames[local_10], "./replay/%s",
-                                    local_194.cFileName);
-                            // STRING: TH07 0x00495650
-                            sprintf(this->replayLabels[local_10], "User ");
-                            GameFree(file);
-                            local_10++;
+                            continue;
                         }
-                        if (FindNextFileA(local_c, &local_194) == 0)
+                        else
                         {
-                            break;
+                            file =
+                                ReplayManager::ValidateReplayData(file, g_LastFileSize);
+                            if (file)
+                            {
+                                this->replays[local_10] = *file;
+                                // STRING: TH07 0x00495658
+                                sprintf(this->replayFilenames[local_10], "./replay/%s",
+                                        local_194.cFileName);
+                                // STRING: TH07 0x00495650
+                                sprintf(this->replayLabels[local_10], "User ");
+                                GameFree(file);
+                                local_10++;
+                            }
+                            if (FindNextFileA(local_c, &local_194) == 0)
+                            {
+                                break;
+                            }
                         }
                     }
                 }
+                FindClose(local_c);
+                // STRING: TH07 0x0049564c
+                _chdir("../");
             }
-            FindClose(local_c);
-            // STRING: TH07 0x0049564c
-            _chdir("../");
             this->replayFilesNum = local_10;
             this->replayPage = 0;
         }
@@ -2098,6 +2114,11 @@ u32 MainMenu::OnUpdateSelectReplay()
             }
 
             g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
+            if (th07::replay::MenuAllowed())
+            {
+                th07::replay::SelectMenuReplay(this, this->chosenReplay);
+                break;
+            }
             this->menuSubState = 2;
             g_AnmManager->SetInterruptActiveVms(this->vmHead, this->vmCount, 15);
             this->vmHead[this->chosenReplay % 15 + 135].SetInterrupt(17);
@@ -2232,6 +2253,7 @@ u32 MainMenu::OnUpdateSelectReplay()
     case 4:
         if (this->inputDelayTimer >= 30)
         {
+            th07::replay::LeaveMenu();
             SetGameState(STATE_PRE_INPUT);
             this->cursor = 3;
             return CHAIN_CALLBACK_RESULT_CONTINUE;
