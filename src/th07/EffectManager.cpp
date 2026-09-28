@@ -746,6 +746,25 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     }
 }
 
+// Proximity scales the rendered color, not the animation's alpha.
+static void DrawScreenEffect(Effect *effect)
+{
+    D3DCOLOR color = effect->vm.color.color;
+    D3DCOLOR color2 = effect->vm.color2.color;
+    if (effect->effectId == 24 && effect->ownerSeat >= 0 && effect->ownerSeat < PlayerCount())
+    {
+        u32 fade = CoopPlayerAlpha(&g_Players[effect->ownerSeat]);
+        effect->vm.color.bytes.a = (u8)(effect->vm.color.bytes.a * fade / 255);
+        effect->vm.color2.bytes.a = (u8)(effect->vm.color2.bytes.a * fade / 255);
+    }
+    effect->vm.pos = effect->pos1;
+    effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+    effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    g_AnmManager->Draw(&effect->vm);
+    effect->vm.color.color = color;
+    effect->vm.color2.color = color2;
+}
+
 // FUNCTION: TH07 0x0041ca10
 u32 EffectManager::OnDraw(EffectManager *arg)
 {
@@ -754,10 +773,7 @@ u32 EffectManager::OnDraw(EffectManager *arg)
     effect = arg->layer0.next;
     while (effect)
     {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        g_AnmManager->Draw(&effect->vm);
+        DrawScreenEffect(effect);
         effect = effect->next;
     }
     effect = arg->layer2.next;
@@ -770,10 +786,7 @@ u32 EffectManager::OnDraw(EffectManager *arg)
     effect = arg->layer3.next;
     while (effect)
     {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        g_AnmManager->Draw(&effect->vm);
+        DrawScreenEffect(effect);
         effect = effect->next;
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
