@@ -1,5 +1,6 @@
 #include "Controller.hpp"
 #include "FrameInput.hpp"
+#include "multi/Launcher.h"
 
 #include <dinput.h>
 
@@ -343,13 +344,26 @@ u8 *Controller::GetControllerState()
 // FUNCTION: TH07 0x00430b50
 u16 Controller::GetInput()
 {
-    u8 keyboardState[256];
+    u8 keyboardState[256] = {};
 
     u16 buttons = 0;
+    const bool lowLatency = th07::launcher::LowLatencyEnabled();
+    if (lowLatency && GetForegroundWindow() != g_Supervisor.hwndGameWindow)
+        return 0;
 
-    if (!g_Supervisor.keyboard)
+    if (lowLatency || !g_Supervisor.keyboard)
     {
-        GetKeyboardState(keyboardState);
+        if (lowLatency) {
+            static const unsigned keys[] = {
+                VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD4, VK_NUMPAD6,
+                VK_NUMPAD7, VK_NUMPAD9, VK_NUMPAD1, VK_NUMPAD3, VK_HOME, 'D', 'Z', 'X', VK_SHIFT,
+                VK_ESCAPE, VK_CONTROL, 'Q', 'S', 'R', VK_RETURN
+            };
+            for (unsigned key : keys)
+                keyboardState[key] = (GetAsyncKeyState(key) & 0x8000) ? 0x80 : 0;
+        } else {
+            GetKeyboardState(keyboardState);
+        }
 
         buttons |= KEY_PRESSED(VK_UP, TH_BUTTON_UP);
         buttons |= KEY_PRESSED(VK_DOWN, TH_BUTTON_DOWN);

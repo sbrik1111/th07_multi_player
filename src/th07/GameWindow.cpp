@@ -1,4 +1,5 @@
 #include "GameWindow.hpp"
+#include "FramePacing.hpp"
 
 #include <d3d8.h>
 #include <direct.h>
@@ -99,7 +100,10 @@ void GameWindow::Present()
     char snapshotPath[252];
     i32 i;
 
-    if (FAILED(g_Supervisor.d3dDevice->Present(NULL, NULL, NULL, NULL)))
+    th07::frame::PresentStarted();
+    const HRESULT presented = g_Supervisor.d3dDevice->Present(NULL, NULL, NULL, NULL);
+    th07::frame::Presented(g_Supervisor.d3dDevice, SUCCEEDED(presented));
+    if (FAILED(presented))
     {
         g_AnmManager->ReleaseSurfaces();
         g_Supervisor.d3dDevice->Reset(&g_Supervisor.presentParameters);
@@ -169,14 +173,7 @@ static void MpPinFpu()
 
 static f64 MpNow()
 {
-    static LARGE_INTEGER frequency;
-    if (frequency.QuadPart == 0)
-    {
-        QueryPerformanceFrequency(&frequency);
-    }
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    return (f64)now.QuadPart / (f64)frequency.QuadPart;
+    return th07::frame::Now();
 }
 
 static unsigned long long CostNow()
@@ -254,17 +251,19 @@ f32 MpDisplayedFps()
 RenderResult GameWindow::Render()
 {
     f64 now = MpNow();
-    if (s_MpNextFrameTime < 0.0 || now - s_MpNextFrameTime > 0.25)
-    {
-        s_MpNextFrameTime = now;
-    }
-    if (!th07::replay::FastPlayback() && now < s_MpNextFrameTime)
-    {
-        if ((s_MpNextFrameTime - now) * 1000.0 >= 1.5)
-        {
-            Sleep(1);
+    const bool lowLatency = th07::launcher::LowLatencyEnabled();
+    const bool paced = lowLatency && !th07::replay::FastPlayback();
+    if (paced) {
+        if (!th07::frame::WaitForFrame(th07::replay::FrameSeconds())) return RENDER_RESULT_KEEP_RUNNING;
+    } else {
+        th07::frame::Unpaced();
+        if (s_MpNextFrameTime < 0.0 || now - s_MpNextFrameTime > 0.25)
+            s_MpNextFrameTime = now;
+        if (!th07::replay::FastPlayback() && now < s_MpNextFrameTime) {
+            if ((s_MpNextFrameTime - now) * 1000.0 >= 1.5) Sleep(1);
+            return RENDER_RESULT_KEEP_RUNNING;
         }
-        return RENDER_RESULT_KEEP_RUNNING;
+        th07::frame::Begin(s_MpNextFrameTime);
     }
     i32 present = 0;
     i32 status = MpRunHostTick(&present);
@@ -278,15 +277,17 @@ RenderResult GameWindow::Render()
     }
     if (present == 2)
     {
-        s_MpNextFrameTime += th07::replay::FrameSeconds();
+        if (paced) th07::frame::Complete(false);
+        else s_MpNextFrameTime += th07::replay::FrameSeconds();
     }
     else if (present)
     {
-        s_MpNextFrameTime += th07::replay::FrameSeconds();
+        if (!paced) s_MpNextFrameTime += th07::replay::FrameSeconds();
         {
             th07::rollback::heap::RuntimeScope runtime;
             Present();
         }
+        if (paced) th07::frame::Complete(true);
         s_MpFpsFrames++;
         f64 shown = MpNow();
         if (s_MpFpsSecond < 0.0 || shown < s_MpFpsSecond)
@@ -303,7 +304,8 @@ RenderResult GameWindow::Render()
     }
     else
     {
-        Sleep(1);
+        if (lowLatency) th07::frame::WaitForNetwork();
+        else Sleep(1);
     }
     return RENDER_RESULT_KEEP_RUNNING;
 }
@@ -761,6 +763,8 @@ void GameWindow::FormatD3DCapabilities(D3DCAPS8 *caps, char *buf)
 // FUNCTION: TH07 0x004356a0
 void GameWindow::ResetRenderState()
 {
+    s_MpNextFrameTime = -1.0;
+    th07::frame::Reset();
     if (!g_Supervisor.cfg.disableZBuffer)
     {
         g_Supervisor.d3dDevice->SetRenderState(D3DRS_ZENABLE, 1);

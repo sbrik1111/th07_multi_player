@@ -11,6 +11,7 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "FramePacing.hpp"
 #include "ResultScreen.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
@@ -175,6 +176,7 @@ cleanup:
         ;
 
 stop:
+    th07::frame::Shutdown();
     g_SoundPlayer.Release();
     delete g_AnmManager;
     g_AnmManager = NULL;

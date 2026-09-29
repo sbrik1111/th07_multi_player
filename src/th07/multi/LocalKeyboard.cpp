@@ -110,8 +110,12 @@ u16 ReadLocalSecondKeyboardButtons()
     if (GetForegroundWindow() != g_Supervisor.hwndGameWindow)
         return 0;
     u8 keys[256] = {};
-    const bool directInput = g_Supervisor.keyboard != nullptr;
-    if (directInput) {
+    const bool lowLatency = th07::launcher::LowLatencyEnabled();
+    const bool directInput = g_Supervisor.keyboard != nullptr && !lowLatency;
+    if (lowLatency) {
+        for (const auto& binding : g_bindings)
+            keys[binding.key.virtualKey] = (GetAsyncKeyState(binding.key.virtualKey) & 0x8000) ? 0x80 : 0;
+    } else if (directInput) {
         HRESULT hr = g_Supervisor.keyboard->GetDeviceState(sizeof(keys), keys);
         if (hr == DIERR_INPUTLOST)
             g_Supervisor.keyboard->Acquire();

@@ -18,6 +18,7 @@ struct Selection {
     int playerCount;
     int localSeat;
     bool bot;
+    bool lowLatency;
     int displayMode; // resolution (0 640, 1 960, 2 1280) + 3 when windowed
     bool displaySelected;
     bool bgm;
@@ -34,6 +35,7 @@ void ApplyGameConfig();
 void RestoreGameConfig();
 // In halves of 640 x 480.
 int WindowScale();
+bool LowLatencyEnabled();
 const wchar_t* SettingsPath();
 
 }

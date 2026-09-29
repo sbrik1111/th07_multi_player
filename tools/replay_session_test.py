@@ -61,8 +61,8 @@ def main():
     count = 1 if args.local else args.players
     tag = "rpr_" + str(time.time_ns()) + "_"
     # Keep the recording and every playback on the exact same binary.
-    exe = out / "th07.exe"
-    shutil.copy2(ROOT / "build/th07.exe", exe)
+    exe = out / "th07_multi.exe"
+    shutil.copy2(ROOT / "build/th07_multi.exe", exe)
     command = [sys.executable, str(ROOT / "tools/mptest.py"), "local" if args.local else "udp",
                "--players", str(args.players), "--seconds", str(args.seconds), "--tag", tag,
                "--port", str(args.port), "--out", str(out / "live"), "--exe", str(exe),
@@ -158,7 +158,7 @@ def main():
                    TH07_MP_LOG=str(out / (name + ".log")))
         if stage:
             env["TH07_MP_REPLAY_STAGE"] = str(stage)
-        return subprocess.Popen([str(folder / "th07.exe")], cwd=folder, env=env)
+        return subprocess.Popen([str(folder / "th07_multi.exe")], cwd=folder, env=env)
 
     for seat, games in enumerate(games_by_seat):
         for path in games:

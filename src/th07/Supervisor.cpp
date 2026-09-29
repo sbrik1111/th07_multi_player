@@ -5,6 +5,7 @@
 #include "multi/Session.h"
 #include "Coop.hpp"
 #include "GameWindow.hpp"
+#include "multi/Launcher.h"
 
 #include <dinput.h>
 #include <stdio.h>
@@ -674,7 +675,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     // STRING: TH07 0x00497038
     g_AnmManager->LoadSurface(0, "data/title/th07logo.jpg");
     g_Supervisor.isInEnding = 1;
-    if (!g_Supervisor.vsyncEnabled)
+    if (!g_Supervisor.vsyncEnabled && !th07::launcher::LowLatencyEnabled())
     {
         if (CheckVSync())
         {

@@ -26,7 +26,7 @@ RUN = ROOT / "run"
 def prepare(name, exe):
     d = RUN / "mptest" / name
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(exe, d / "th07.exe")
+    shutil.copy2(exe, d / "th07_multi.exe")
     for data in ("th07.dat", "thbgm.dat"):
         target = d / data
         if not target.exists():
@@ -53,7 +53,7 @@ def main():
     ap.add_argument("--seconds", type=float, default=40)
     ap.add_argument("--shots", default="")
     ap.add_argument("--out", default="wk/mptest")
-    ap.add_argument("--exe", default=str(ROOT / "build" / "th07.exe"))
+    ap.add_argument("--exe", default=str(ROOT / "build" / "th07_multi.exe"))
     ap.add_argument("--port", type=int, default=28020)
     ap.add_argument("--env", action="append", default=[])
     ap.add_argument("--seat-env", action="append", default=[])
@@ -115,7 +115,7 @@ def main():
             if int(s) == seat:
                 k, v = kv.split("=", 1)
                 env[k] = v
-        procs.append(subprocess.Popen([str(d / "th07.exe")], cwd=str(d), env=env))
+        procs.append(subprocess.Popen([str(d / "th07_multi.exe")], cwd=str(d), env=env))
     start = time.time()
     metadata = dict(arguments=vars(args), started=start,
                     executable_sha256=hashlib.sha256(Path(args.exe).read_bytes()).hexdigest(),

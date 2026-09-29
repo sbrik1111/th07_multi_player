@@ -53,6 +53,9 @@ enum Control {
     kPlayers3,
     kPlayers4,
     kStatusLabel,
+    kAdvancedSettings,
+    kLowLatency,
+    kLowLatencyHint,
 };
 
 enum Language {
@@ -110,6 +113,9 @@ enum TextId {
     kTextErrorTimeout,
     kTextErrorHandoff,
     kTextStatusLabel,
+    kTextAdvancedSettings,
+    kTextLowLatency,
+    kTextLowLatencyHint,
     kTextCount,
 };
 
@@ -167,6 +173,11 @@ const wchar_t* const kText[kTextCount][kLanguageCount] = {
     {L"Could not hand the UDP socket to the game.", L"UDP ソケットをゲームへ引き渡せませんでした。",
      L"无法将 UDP 套接字交给游戏。"},
     {L"cur state:", L"接続状態:", L"连接状态:"},
+    {L"Advanced settings", L"Advanced settings", L"Advanced settings"},
+    {L"lowlatency", L"lowlatency", L"lowlatency"},
+    {L"Adjust input sampling and frame timing to reduce latency.",
+     L"入力取得と描画のタイミングを調整して遅延を減らします。",
+     L"调整输入采样和绘制时机以减少延迟。"},
 };
 
 enum LobbyResult {
@@ -222,6 +233,7 @@ struct Ui {
     bool networkAttempting;
     bool networkConnected;
     bool settingsReady;
+    bool advancedOpen;
     bool ownRollback;
     int inputDelay;
 };
@@ -236,6 +248,7 @@ Lobby g_lobby = {INVALID_SOCKET};
 Selection g_launchSelection = {};
 bool g_hasLaunchSelection;
 bool g_audioApplied;
+bool g_lowLatency;
 char g_savedBgm;
 char g_savedSe;
 wchar_t g_settingsPath[MAX_PATH] = {};
@@ -847,6 +860,7 @@ void ReadSelection(Mode mode)
         ReadPlayerName(selection.playerName[0], 0);
     }
     selection.bot = IsDlgButtonChecked(g_ui.window, kBot) == BST_CHECKED;
+    selection.lowLatency = IsDlgButtonChecked(g_ui.window, kLowLatency) == BST_CHECKED;
     const int resolution = IsDlgButtonChecked(g_ui.window, kDisplay1280) == BST_CHECKED  ? 2
                            : IsDlgButtonChecked(g_ui.window, kDisplay960) == BST_CHECKED ? 1
                                                                                          : 0;
@@ -882,6 +896,7 @@ void SaveSettings()
     SaveNumber("bgm", IsDlgButtonChecked(g_ui.window, kBgm) == BST_CHECKED ? 1 : 0);
     SaveNumber("se", IsDlgButtonChecked(g_ui.window, kSe) == BST_CHECKED ? 1 : 0);
     SaveNumber("bot", IsDlgButtonChecked(g_ui.window, kBot) == BST_CHECKED ? 1 : 0);
+    SaveNumber("lowlatency", IsDlgButtonChecked(g_ui.window, kLowLatency) == BST_CHECKED ? 1 : 0);
     SaveNumber("language", static_cast<int>(g_ui.language));
 }
 
@@ -902,6 +917,7 @@ bool IsLiveSettingControl(int id)
     case kBgm:
     case kSe:
     case kBot:
+    case kLowLatency:
     case kLanguageCombo:
     case kPlayers2:
     case kPlayers3:
@@ -1001,6 +1017,7 @@ void Finish(Mode mode)
             ConfigureEnvironment(mode);
         }
         g_launchSelection = *g_ui.result;
+        g_lowLatency = g_launchSelection.lowLatency;
         g_hasLaunchSelection = true;
     } else {
         g_ui.result->mode = kCancelled;
@@ -1208,10 +1225,13 @@ void ApplyLanguage()
         {kStartSingle, kTextSinglePlayer},
         {kStartGame, kTextStartGame},
         {kStatusLabel, kTextStatusLabel},
+        {kAdvancedSettings, kTextAdvancedSettings},
+        {kLowLatency, kTextLowLatency},
+        {kLowLatencyHint, kTextLowLatencyHint},
     };
     HFONT oldFont = g_ui.font;
     g_ui.font = MakeFont(g_ui.language);
-    for (int id = kRoleHost; id <= kStatusLabel; ++id) {
+    for (int id = kRoleHost; id <= kLowLatencyHint; ++id) {
         HWND control = GetDlgItem(g_ui.window, id);
         if (control != nullptr) {
             SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(g_ui.font), TRUE);
@@ -1249,6 +1269,7 @@ void LoadSettings()
     CheckDlgButton(g_ui.window, kBgm, SettingNumber("bgm", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kSe, SettingNumber("se", 1, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(g_ui.window, kBot, SettingNumber("bot", 0, 0, 1) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(g_ui.window, kLowLatency, g_lowLatency ? BST_CHECKED : BST_UNCHECKED);
     g_ui.ownRollback = SettingNumber("rollback", 1, 0, 1) != 0;
     CheckDlgButton(g_ui.window, kRollback, g_ui.ownRollback ? BST_CHECKED : BST_UNCHECKED);
     const int language = SettingNumber("language", static_cast<int>(g_ui.language), 0, kLanguageCount - 1);
@@ -1258,6 +1279,28 @@ void LoadSettings()
     } else {
         FillLanguageCombo();
     }
+}
+
+void ToggleAdvancedSettings()
+{
+    g_ui.advancedOpen = !g_ui.advancedOpen;
+    const int offset = g_ui.advancedOpen ? 80 : -80;
+    const int controls[] = {kStartNetwork, kStatusLabel, kStatus, kStartGame, kStartLocal, kStartSingle, kCancel};
+    for (int id : controls) {
+        HWND control = GetDlgItem(g_ui.window, id);
+        RECT rectangle;
+        GetWindowRect(control, &rectangle);
+        MapWindowPoints(nullptr, g_ui.window, reinterpret_cast<POINT*>(&rectangle), 2);
+        SetWindowPos(control, nullptr, rectangle.left, rectangle.top + offset, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    ShowWindow(GetDlgItem(g_ui.window, kLowLatency), g_ui.advancedOpen ? SW_SHOW : SW_HIDE);
+    ShowWindow(GetDlgItem(g_ui.window, kLowLatencyHint), g_ui.advancedOpen ? SW_SHOW : SW_HIDE);
+    RECT window;
+    GetWindowRect(g_ui.window, &window);
+    SetWindowPos(g_ui.window, nullptr, 0, 0, window.right - window.left, window.bottom - window.top + offset,
+                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    InvalidateRect(g_ui.window, nullptr, TRUE);
 }
 
 void CreateForm()
@@ -1292,6 +1335,9 @@ void CreateForm()
         {kDelayEdit, L"EDIT", kTextCount, WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, 110, 306, 100, 24},
         {kRollback, L"BUTTON", kTextRollback, BS_AUTOCHECKBOX | WS_TABSTOP, 20, 340, 330, 24},
         {kBot, L"BUTTON", kTextBot, BS_AUTOCHECKBOX | WS_TABSTOP, 20, 368, 170, 24},
+        {kAdvancedSettings, L"BUTTON", kTextAdvancedSettings, BS_PUSHBUTTON | WS_TABSTOP, 208, 366, 182, 26},
+        {kLowLatency, L"BUTTON", kTextLowLatency, BS_AUTOCHECKBOX | WS_TABSTOP, 36, 406, 340, 22},
+        {kLowLatencyHint, L"STATIC", kTextLowLatencyHint, SS_LEFT, 36, 432, 344, 38},
         {kStartNetwork, L"BUTTON", kTextStartHosting, BS_PUSHBUTTON | WS_TABSTOP, 20, 398, 370, 32},
         {kStatusLabel, L"STATIC", kTextStatusLabel, SS_LEFT, 20, 438, 80, 20},
         {kStatus, L"STATIC", kTextStatusReady, SS_LEFT | WS_BORDER, 20, 458, 370, 72},
@@ -1335,6 +1381,8 @@ void CreateForm()
         GetPrivateProfileStringW(kSettingsSection, L"name", L"Player", name, 64, g_settingsPath);
     SetText(g_ui.name, name);
     SendMessageW(g_ui.name, EM_LIMITTEXT, kMultiplayerPlayerNameBytes - 1, 0);
+    ShowWindow(GetDlgItem(g_ui.window, kLowLatency), SW_HIDE);
+    ShowWindow(GetDlgItem(g_ui.window, kLowLatencyHint), SW_HIDE);
     LoadSettings();
     UpdateRole();
     g_ui.settingsReady = true;
@@ -1396,9 +1444,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM lp)
                 CheckRadioButton(window, kDisplay640, kDisplayFullscreen, LOWORD(wp));
                 SaveLiveSettings(LOWORD(wp));
                 return 0;
+            case kAdvancedSettings:
+                ToggleAdvancedSettings();
+                return 0;
             case kBgm:
             case kSe:
             case kBot:
+            case kLowLatency:
                 SaveLiveSettings(LOWORD(wp));
                 return 0;
             case kStartNetwork:
@@ -1471,6 +1523,9 @@ bool Run(Selection* selection)
     return true;
 #else
     ResolveSettingsPath();
+    char lowLatency[8] = {};
+    g_lowLatency = HasEnvironment("TH07_LOW_LATENCY", lowLatency, sizeof(lowLatency))
+        ? lowLatency[0] == '1' : SettingNumber("lowlatency", 0, 0, 1) != 0;
 
     if (replay::Requested()) return true;
 
@@ -1584,6 +1639,11 @@ void RestoreGameConfig()
         config.playSounds = g_savedSe;
     }
     g_audioApplied = false;
+}
+
+bool LowLatencyEnabled()
+{
+    return g_lowLatency;
 }
 
 int WindowScale()

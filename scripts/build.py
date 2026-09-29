@@ -1,4 +1,4 @@
-"""Build build/th07.exe (the multiplayer fork) with cl 19.10 (VS2017, prefix/msvc1410),
+"""Build build/th07_multi.exe (the multiplayer fork) with cl 19.10 (VS2017, prefix/msvc1410),
 the Windows 10 SDK and the DirectX 8 SDK (thirdparty/dx8).
 
 Usage:
@@ -31,7 +31,7 @@ DX8 = ROOT / "thirdparty" / "dx8"
 KITS = Path(r"C:\Program Files (x86)\Windows Kits\10")
 KITS_VER = "10.0.19041.0"
 
-EXE = BUILD / "th07.exe"
+EXE = BUILD / "th07_multi.exe"
 PDB = BUILD / "th07.pdb"
 
 CFLAGS = [
