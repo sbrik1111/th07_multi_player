@@ -171,7 +171,7 @@ void MpInitSession()
     g_CoopTestStartStage = cfg.testStartStage;
     g_CoopTestStageClearFrame = cfg.testStageClearFrame != th07::mp::kNoFrame ? (i32)cfg.testStageClearFrame : -1;
     g_CoopTestStageClearLast = cfg.testStageClearLast;
-    if (((cfg.mode == th07::mp::kUdp && cfg.rollback) || th07::replay::UsesArena()) && !th07::rollback_game::Start())
+    if ((cfg.mode == th07::mp::kUdp && cfg.rollback) && !th07::rollback_game::Start())
     {
         th07::mp::Log("FAIL rollback could not start");
     }
@@ -224,6 +224,8 @@ int MpRunHostTick(int *present)
         ++g_localSegment;
         g_segmentFrame = 0;
     }
+    th07::replay::SetSegment(g_localSegment);
+    th07::replay::FrameStarting(g_segmentFrame);
     int status = RunFrame(buttons, count, 1);
     if (status == 1 && th07::replay::Recording()) {
         unsigned short encoded[MAX_PLAYERS] = {};
@@ -237,7 +239,6 @@ int MpRunHostTick(int *present)
     if (!(g_localSegment & 1) && SessionGameplayActive()) {
         ++g_localSegment;
         g_segmentFrame = 0;
-        th07::replay::BeginGameplay();
     }
     *present = 1;
     return status;
@@ -308,6 +309,8 @@ unsigned short SessionBotMask(int seat)
     return th07::bot::GameplayMask(g_localFrame, seat);
 }
 
+unsigned short SessionMenuInput() { return SessionEncodeButtons(LocalDeviceButtons(0)); }
+
 unsigned short SessionLocalInput(bool gameplay)
 {
     const th07::mp::Config &cfg = th07::mp::Cfg();
@@ -321,6 +324,7 @@ unsigned short SessionLocalInput(bool gameplay)
 
 void SessionLogGameEnd()
 {
+    th07::replay::FinishSession();
     th07::mp::Log("GAME_END difficulty=%d stage=%d stage_frame=%d finished=%d scene=%d score=%u",
                   g_GameManager.difficulty, g_GameManager.currentStage, g_GameManager.framesThisStage,
                   g_GameManager.finished ? 1 : 0, g_Supervisor.curState, g_GameManager.globals->score);
@@ -483,7 +487,7 @@ void MpDrawPlaySession()
 {
     if (th07::replay::SaveFailed()) DrawSessionLine(437.0f, "REPLAY SAVE FAILED", 0xffff5050);
     if (th07::replay::Playing()) {
-        DrawSessionLine(455.0f, "REPLAY  [ESC: BACK]", 0xff80c0ff);
+        DrawSessionLine(455.0f, "REPLAY", 0xff80c0ff);
         return;
     }
     if (!th07::mp::UdpEnabled())

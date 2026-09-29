@@ -1,3 +1,4 @@
+#include "multi/ReplaySession.h"
 #include "Player.hpp"
 
 #include <new>
@@ -2463,8 +2464,8 @@ ZunResult Player::AddedCallback(Player *arg)
         return ZUN_ERROR;
     }
 
-    if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
-              g_Supervisor.curState != 12))
+    if ((u32)(th07::replay::LoadingStage() || (g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
+              g_Supervisor.curState != 12)))
     {
         switch (g_GameManager.Character(arg->seat))
         {
@@ -2543,8 +2544,8 @@ ZunResult Player::AddedCallback(Player *arg)
     arg->respawnTimer = arg->shooterData->initialRespawnTimer;
     if (arg->seat == 0)
     {
-        if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
-                  g_Supervisor.curState != 12))
+        if ((u32)(th07::replay::LoadingStage() || (g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
+                  g_Supervisor.curState != 12)))
         {
             g_AsciiManager.cherryGauge.pendingInterrupt = 1;
             g_AsciiManager.uiFadeState = 1;

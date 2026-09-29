@@ -1,4 +1,5 @@
 #include "GameManager.hpp"
+#include "multi/ReplaySession.h"
 
 #include <stdio.h>
 
@@ -511,6 +512,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     i32 shotTypeAndChar;
     u32 size;
 
+    th07::replay::StageLoading();
     g_Supervisor.checkTiming = 0;
     arg->difficultyMask = 1 << arg->difficulty;
     for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
@@ -871,6 +873,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     // STRING: TH07 0x00497e08
     Supervisor::DebugPrint2("random seed %d %d\r\n", (u32)g_Rng.seed,
                             g_Rng.GetGenCount());
+    th07::replay::StageLoaded();
     return ZUN_SUCCESS;
 }
 

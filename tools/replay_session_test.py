@@ -21,7 +21,7 @@ def clean_environment():
 def records(path):
     data = path.read_bytes()
     header = struct.unpack_from("<I", data, 12)[0]
-    assert header == 288 and data[:8] == b"T07MPR1\0"
+    assert header == 4608 and data[:8] == b"T07MPR2\0"
     frames = []
     for offset in range(header, len(data) - 83, 84):
         frame = data[offset:offset + 84]
@@ -68,7 +68,7 @@ def main():
                "--port", str(args.port), "--out", str(out / "live"), "--exe", str(exe),
                "--env", "TH07_MP_TEST_KEEP_ALIVE=1", "--env", "TH07_MP_TEST_BOT_MASH=1"]
     if not args.local:
-        command += ["--lag", args.lag, "--lag-schedule", args.lag_schedule]
+        command += ["--lag", args.lag, "--lag-schedule", args.lag_schedule, "--progress-timeout", "45"]
         if not args.lockstep:
             command += ["--rollback", "--delay", "0", "--env", "TH07_MP_TEST_DELAY_CYCLE=180"]
             if args.players > 2:
@@ -102,6 +102,7 @@ def main():
     if not args.local:
         report["network"] = json.loads((out / "live/lag.json").read_text())
     frame_sets = []
+    games_by_seat = []
     for seat, path in enumerate(replay_paths):
         log = (out / "live" / f"seat{seat + 1}.log").read_text(encoding="cp932", errors="replace")
         assert not re.search(r"^(?:FAIL|CRASH|DESYNC\S*|REPLAY_(?:FAIL|SAVE_FAIL|DESYNC))\b", log, re.M), log[-2000:]
@@ -123,46 +124,76 @@ def main():
                                    hash_mismatches=maximum("hash_mismatches"),
                                    completed_games=[int(x) for x in re.findall(r"GAME_END difficulty=(\d+)", log)],
                                    stages=[int(x) for x in re.findall(r"STAGE_START stage=(\d+)", log)]))
-        _, frames = records(path)
-        assert len(frames) > 600
-        frame_sets.append(frames)
-    common = min(map(len, frame_sets))
-    assert all(frames[:common] == frame_sets[0][:common] for frames in frame_sets), "peer replay streams differ"
-    report.update(frames=list(map(len, frame_sets)), common_frames=common)
+        games = sorted(out.glob(f"seat{seat + 1}*.mpr"))
+        assert games, "no gameplay recordings"
+        games_by_seat.append(games)
+        frame_sets.append([records(game)[1] for game in games])
+        assert sum(map(len, frame_sets[-1])) > 600
+        for game in games:
+            header, _ = records(game)
+            difficulty = struct.unpack_from("<I", header, 268)[0]
+            stages = [i + 1 for i in range(8) if struct.unpack_from("<I", header, 304 + i * 540)[0]]
+            assert stages and all((difficulty < 4 and stage <= 6) or
+                                  (difficulty == 4 and stage == 7) or
+                                  (difficulty == 5 and stage == 8) for stage in stages)
+    common = 0
+    for game in range(min(map(len, frame_sets))):
+        shared = min(len(seat[game]) for seat in frame_sets)
+        def simulation_frame(frame):
+            normalized = bytearray(frame[:80])
+            struct.pack_into("<I", normalized, 12, struct.unpack_from("<I", frame, 12)[0] & 1)
+            return normalized
+        expected = [simulation_frame(f) for f in frame_sets[0][game][:shared]]
+        assert all([simulation_frame(f) for f in seat[game][:shared]] == expected for seat in frame_sets), "peer replay streams differ"
+        common += shared
+    report.update(frames=[sum(map(len, seat)) for seat in frame_sets], common_frames=common,
+                  games=[[path.name for path in games] for games in games_by_seat])
     save_report("playback")
     print(f"Recorded {report['frames']} frames; all peers share {common} identical confirmed frames.", flush=True)
 
-    def launch(path, name):
+    def launch(path, name, stage=0):
         folder, _ = prepare(tag + name, exe)
         env = clean_environment()
         env.update(TH07_MP_REPLAY=str(path), TH07_MP_REPLAY_TEST="1", TH07_MP_REPLAY_FAST="1",
                    TH07_MP_LOG=str(out / (name + ".log")))
+        if stage:
+            env["TH07_MP_REPLAY_STAGE"] = str(stage)
         return subprocess.Popen([str(folder / "th07.exe")], cwd=folder, env=env)
 
-    running = [(seat, launch(path, f"play{seat + 1}")) for seat, path in enumerate(replay_paths)]
-    try:
-        for seat, process in running:
-            assert process.wait(timeout=max(120, args.seconds * 2)) == 0
-            log = (out / f"play{seat + 1}.log").read_text(encoding="cp932", errors="replace")
-            assert not re.search(r"REPLAY_(FAIL|DESYNC)|CRASH", log), log[-2000:]
-            done = re.search(r"REPLAY_DONE frames=(\d+) hashes=(\d+) complete=(\d)", log)
-            assert done and int(done[1]) == len(frame_sets[seat]) and int(done[2]) > 0, log[-1000:]
-            report["playback"].append(dict(seat=seat + 1, frames=int(done[1]), matching_hashes=int(done[2]),
-                                          complete=bool(int(done[3])), exit_code=process.returncode))
-            save_report("playback")
-            print(f"Playback seat {seat + 1}: {done[1]} frames, {done[2]} matching hashes.", flush=True)
-    finally:
-        for _, process in running:
-            if process.poll() is None:
-                process.kill()
-                process.wait()
+    for seat, games in enumerate(games_by_seat):
+        for path in games:
+            header, frames = records(path)
+            for stage in range(1, 9):
+                entry = 284 + (stage - 1) * 540
+                if not struct.unpack_from("<I", header, entry + 20)[0]:
+                    continue
+                name = path.stem + f"_stage{stage}"
+                process = launch(path, name, stage)
+                try:
+                    assert process.wait(timeout=max(120, len(frames) // 20)) == 0
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+                log = (out / (name + ".log")).read_text(encoding="cp932", errors="replace")
+                assert not re.search(r"REPLAY_(FAIL|DESYNC)|CRASH", log), log[-2000:]
+                done = re.search(r"REPLAY_DONE frames=(\d+) hashes=(\d+) complete=(\d)", log)
+                start = struct.unpack_from("<I", header, entry)[0]
+                expected_hashes = sum(bool(struct.unpack_from("<I", f, 12)[0] & 1) for f in frames[start:])
+                assert done and int(done[1]) == len(frames) and int(done[2]) == expected_hashes, log[-1000:]
+                observed_stages = re.findall(r"STAGE_START stage=(\d+)", log)
+                assert observed_stages and int(observed_stages[0]) == stage, "playback must start at chosen stage"
+                report["playback"].append(dict(file=path.name, stage=stage, frames=len(frames) - start,
+                                              matching_hashes=int(done[2]), complete=bool(int(done[3])), exit_code=0))
+                save_report("playback")
+                print(f"{name}: {len(frames) - start} frames, {done[2]} matching hashes.", flush=True)
 
     # A plausible, checksummed edit must still fail the simulation hash check.
     corrupt = bytearray(replay_paths[0].read_bytes())
     _, frames = records(replay_paths[0])
     index = next(i for i, f in enumerate(frames) if struct.unpack_from("<I", f, 4)[0] == 1 and
-                 struct.unpack_from("<I", f, 12)[0] == 1)
-    offset = 288 + index * 84
+                 struct.unpack_from("<I", f, 12)[0] & 1)
+    offset = 4608 + index * 84
     corrupt[offset + 16] ^= 0x10
     struct.pack_into("<I", corrupt, offset + 80, checksum(corrupt[offset:offset + 80]))
     bad_path = out / "modified_input.mpr"

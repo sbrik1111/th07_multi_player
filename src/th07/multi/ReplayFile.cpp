@@ -18,7 +18,7 @@ uint32_t Checksum(const void* data, size_t bytes, uint32_t seed)
 Header MakeHeader(const Settings& settings)
 {
     Header h = {};
-    memcpy(h.magic, "T07MPR1", 8);
+    memcpy(h.magic, "T07MPR2", 8);
     h.version = kReplayVersion;
     h.bytes = sizeof(h);
     h.settings = settings;
@@ -29,7 +29,7 @@ Header MakeHeader(const Settings& settings)
 
 bool ValidHeader(const Header& h)
 {
-    if (memcmp(h.magic, "T07MPR1", 8) || h.version != kReplayVersion || h.bytes != sizeof(h) ||
+    if (memcmp(h.magic, "T07MPR2", 8) || h.version != kReplayVersion || h.bytes != sizeof(h) ||
         h.checksum != Checksum(&h, offsetof(Header, checksum))) return false;
     const Settings& s = h.settings;
     if (s.players < 1 || s.players > 4 || s.viewSeat >= s.players || s.startStage < 1 || s.startStage > 6 ||
@@ -39,7 +39,26 @@ bool ValidHeader(const Header& h)
         if (s.characters[seat] < -1 || s.characters[seat] > 2 || s.shots[seat] < -1 || s.shots[seat] > 1 ||
             !memchr(s.names[seat], 0, sizeof(s.names[seat]))) return false;
     }
+    for (unsigned i = 0; i < 8; ++i) {
+        const StageState& state = h.stages[i].state;
+        if (!state.stage) continue;
+        if (state.stage != i + 1 || (state.scene != 2 && state.scene != 3 && state.scene != 10) ||
+            state.difficulty != h.difficulty || state.flags & ~31u || state.ghosts & ~15u ||
+            state.rngSeed > 65535 || state.rngBackup > 65535) return false;
+        if ((h.difficulty < 4 && i >= 6) || (h.difficulty == 4 && i != 6) ||
+            (h.difficulty == 5 && i != 7)) return false;
+        for (unsigned seat = 0; seat < 4; ++seat)
+            if (state.seats[seat].character > 2 || state.seats[seat].shot > 1) return false;
+    }
     return true;
+}
+
+void Stream::Reset()
+{
+    Close();
+    error_ = nullptr;
+    count_ = segment_ = next_ = 0;
+    rolling_ = 2166136261u;
 }
 
 bool Stream::Fail(const char* error)
@@ -57,15 +76,16 @@ void Stream::Close()
 
 bool Stream::Accept(const Frame& f)
 {
-    if (f.index != count_ || count_ == UINT32_MAX || f.flags & ~kHasHash)
+    if (f.index != count_ || count_ == UINT32_MAX || f.flags & ~(kHasHash | kFpsMask))
         return Fail("invalid replay frame index/flags");
+    if (!count_) { segment_ = f.segment; next_ = f.frame; }
     if (f.segment == segment_) {
         if (f.frame != next_) return Fail("replay frame gap");
     } else if (count_ && f.segment == segment_ + 1 && !f.frame) {
         segment_ = f.segment;
         next_ = 0;
     } else return Fail("replay segment gap");
-    if (f.frame == UINT32_MAX || ((f.flags & kHasHash) != 0) != (f.frame % kHashInterval == 0))
+    if ((f.flags >> kFpsShift) > 60 || f.frame == UINT32_MAX || ((f.flags & kHasHash) != 0) != (f.frame % kHashInterval == 0))
         return Fail("invalid replay hash interval");
     for (unsigned seat = 0; seat < 4; ++seat)
         if (f.held[seat] & 0x8000) return Fail("invalid replay input");
@@ -77,6 +97,7 @@ bool Stream::Accept(const Frame& f)
 
 bool Writer::Open(const wchar_t* path, const Header& header)
 {
+    if (!file_) Reset();
     if (file_ || error_ || !ValidHeader(header)) return Fail("invalid replay header");
     int fd = -1;
     if (_wsopen_s(&fd, path, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _SH_DENYWR, _S_IREAD | _S_IWRITE))
@@ -126,10 +147,32 @@ bool Writer::Finish()
 
 bool Reader::Open(const wchar_t* path)
 {
-    if (file_ || error_) return Fail("replay reader already used");
+    if (file_) return Fail("replay reader already open");
+    Reset();
+    complete_ = ended_ = false;
     if (_wfopen_s(&file_, path, L"rb") || !file_) return Fail("cannot open replay");
     if (fread(&header_, sizeof(header_), 1, file_) != 1 || !ValidHeader(header_))
         return Fail("invalid or unsupported replay header");
+    return true;
+}
+
+bool Reader::SeekStage(unsigned stage)
+{
+    if (!file_ || error_ || stage < 1 || stage > 8) return false;
+    const StageEntry& entry = header_.stages[stage - 1];
+    if (entry.state.stage != stage || _fseeki64(file_, sizeof(Header) + (__int64)entry.index * sizeof(Frame), SEEK_SET))
+        return Fail("invalid replay stage");
+    const __int64 offset = _ftelli64(file_);
+    Frame first = {};
+    if (fread(&first, sizeof(first), 1, file_) != 1 || first.flags & ~(kHasHash | kFpsMask) ||
+        first.index != entry.index || first.segment != entry.segment || first.frame != entry.frame ||
+        first.checksum != Checksum(&first, offsetof(Frame, checksum)) || _fseeki64(file_, offset, SEEK_SET))
+        return Fail("replay stage has no valid input");
+    count_ = entry.index;
+    segment_ = entry.segment;
+    next_ = entry.frame;
+    rolling_ = entry.rolling;
+    complete_ = ended_ = false;
     return true;
 }
 

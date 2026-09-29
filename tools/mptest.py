@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,8 @@ def main():
     ap.add_argument("--tag", default="", help="instance folder prefix (run/mptest/<tag><a..d>), for runs side by side")
     ap.add_argument("--lag", default="", help="delay_ms,jitter_ms,loss through tools/udp_lag_proxy.py")
     ap.add_argument("--lag-schedule", default="", help="seconds:delay_ms,jitter_ms,loss;... (during a connection)")
+    ap.add_argument("--progress-timeout", type=float, default=0,
+                    help="fail UDP tests when confirmed simulation frames stop advancing for this many seconds")
     args = ap.parse_args()
 
     out = (ROOT / args.out).resolve()
@@ -119,10 +122,34 @@ def main():
                     pids=[p.pid for p in procs])
     (out / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     shots = sorted(float(s) for s in args.shots.split(",") if s)
+    progress = [[0, None, start] for _ in procs]
+    next_progress_check = start
+    failure = None
     try:
         while time.time() - start < args.seconds:
             if any(p.poll() is not None for p in procs):
                 break
+            if args.mode == "udp" and args.progress_timeout > 0 and time.time() >= next_progress_check:
+                next_progress_check = time.time() + 1
+                for seat, state in enumerate(progress):
+                    log = out / f"seat{seat + 1}.log"
+                    if log.exists():
+                        with log.open("rb") as stream:
+                            stream.seek(state[0])
+                            data = stream.read()
+                        end = data.rfind(b"\n") + 1
+                        state[0] += end
+                        for segment, frame in re.findall(
+                                rb"^NET_PERF [^\r\n]*segment=(\d+) [^\r\n]*confirmed=(\d+)\b",
+                                data[:end], re.M):
+                            current = (int(segment), int(frame))
+                            if current != state[1]:
+                                state[1], state[2] = current, time.time()
+                    if time.time() - state[2] > args.progress_timeout:
+                        failure = f"seat {seat + 1}: no confirmed simulation progress for {args.progress_timeout:g}s"
+                        break
+                if failure:
+                    break
             now = time.time() - start
             while shots and shots[0] <= now:
                 t = shots.pop(0)
@@ -146,7 +173,8 @@ def main():
         if proxy is not None:
             proxy.kill()
             proxy.wait()
-        metadata.update(elapsed_seconds=time.time() - start, test_seconds=test_seconds, exit_codes=codes)
+        metadata.update(elapsed_seconds=time.time() - start, test_seconds=test_seconds, exit_codes=codes,
+                        progress_failure=failure)
         (out / "run.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print("exit codes:", " ".join(codes))
     for seat in range(count):
@@ -156,6 +184,8 @@ def main():
             print(f"--- seat {seat + 1}: {len(lines)} lines")
             for line in lines[-8:]:
                 print("   ", line)
+    if failure:
+        sys.exit(failure)
 
 
 if __name__ == "__main__":

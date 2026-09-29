@@ -1,3 +1,4 @@
+#include "multi/ReplaySession.h"
 #include "BulletManager.hpp"
 #include <new>
 #include "Coop.hpp"
@@ -1319,8 +1320,8 @@ ZunResult BulletManager::AddedCallback(BulletManager *arg)
 {
     u32 i;
 
-    if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
-              g_Supervisor.curState != 12))
+    if ((u32)(th07::replay::LoadingStage() || (g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
+              g_Supervisor.curState != 12)))
     {
         if (g_AnmManager->LoadAnms(ANM_FILE_BULLETS, "data/etama.anm", ANM_OFFSET_BULLETS) != ZUN_SUCCESS)
         {

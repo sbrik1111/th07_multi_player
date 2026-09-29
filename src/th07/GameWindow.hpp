@@ -50,5 +50,6 @@ extern GameWindow g_GameWindow;
 
 // 0 quit, -1 restart, else 1.
 i32 RunLogicalFrame(i32 draw);
+void DrawLogicalFrame();
 f32 MpDisplayedFps();
 void TakeFrameCosts(unsigned long long *tickUs, unsigned *ticks, unsigned long long *drawUs, unsigned *draws);

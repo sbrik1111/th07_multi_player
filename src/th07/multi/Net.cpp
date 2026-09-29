@@ -233,7 +233,7 @@ void StartSegment(unsigned index)
     if (s.rollback) {
         rollback_game::BeginSegment();
     }
-    if (s.phase == kGameplay) replay::BeginGameplay();
+    replay::SetSegment(s.index);
     mp::Log("SEGMENT index=%u phase=%s delay=%u window=%u rollback=%d host_frame=%u", index,
             s.phase == kMenu ? "menu" : "gameplay", s.delay, window, s.rollback ? 1 : 0, g_net.hostFrames);
 }
@@ -703,6 +703,7 @@ int RunLockstep(Segment& s, int* present)
     int status = 1;
     s.timeline.Advance(
         [&](unsigned frame, const Inputs& inputs, bool) -> int {
+            replay::FrameStarting(frame);
             status = SessionRunFrame(inputs.held, g_net.players, 1);
             RecordHash(s, frame);
             return 1;

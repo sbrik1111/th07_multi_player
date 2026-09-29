@@ -223,6 +223,8 @@ const Config& Cfg()
     return g_cfg;
 }
 
+void RestoreConfig(const Config& config) { g_cfg = config; }
+
 void ConfigureReplay(const replay::Settings& settings)
 {
     InitConfig();

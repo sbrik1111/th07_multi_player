@@ -224,22 +224,25 @@ i32 RunLogicalFrame(i32 draw)
     {
         return -1;
     }
-    if (draw)
-    {
-        th07::rollback::heap::SimulationScope scope;
-        CoopRefreshFadeSet();
-        g_Supervisor.d3dDevice->BeginScene();
-        g_AnmManager->ResetVertexBuffer();
-        g_Supervisor.fogEnabled = 255;
-        g_Supervisor.DisableFog();
-        g_Chain.RunDrawChain();
-        g_AnmManager->Flush();
-        g_Supervisor.d3dDevice->SetTexture(0, NULL);
-        g_Supervisor.d3dDevice->EndScene();
-        s_DrawUs += CostNow() - tickEnd;
-        s_Draws++;
-    }
+    if (draw) DrawLogicalFrame();
     return 1;
+}
+
+void DrawLogicalFrame()
+{
+    unsigned long long begin = CostNow();
+    th07::rollback::heap::SimulationScope scope;
+    CoopRefreshFadeSet();
+    g_Supervisor.d3dDevice->BeginScene();
+    g_AnmManager->ResetVertexBuffer();
+    g_Supervisor.fogEnabled = 255;
+    g_Supervisor.DisableFog();
+    g_Chain.RunDrawChain();
+    g_AnmManager->Flush();
+    g_Supervisor.d3dDevice->SetTexture(0, NULL);
+    g_Supervisor.d3dDevice->EndScene();
+    s_DrawUs += CostNow() - begin;
+    s_Draws++;
 }
 
 f32 MpDisplayedFps()
@@ -275,11 +278,11 @@ RenderResult GameWindow::Render()
     }
     if (present == 2)
     {
-        s_MpNextFrameTime += 1.0 / 60.0;
+        s_MpNextFrameTime += th07::replay::FrameSeconds();
     }
     else if (present)
     {
-        s_MpNextFrameTime += 1.0 / 60.0;
+        s_MpNextFrameTime += th07::replay::FrameSeconds();
         {
             th07::rollback::heap::RuntimeScope runtime;
             Present();

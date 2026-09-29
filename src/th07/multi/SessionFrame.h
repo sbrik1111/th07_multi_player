@@ -3,6 +3,7 @@
 // As RunLogicalFrame: 0 quit, -1 restart, else 1.
 int SessionRunFrame(const unsigned short* held, int count, int draw);
 unsigned short SessionLocalInput(bool gameplay);
+unsigned short SessionMenuInput();
 unsigned short SessionBotMask(int seat);
 int SessionGameplayActive();
 void SessionLogGameEnd();

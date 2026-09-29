@@ -52,6 +52,7 @@ struct Config {
 };
 
 const Config& Cfg();
+void RestoreConfig(const Config& config);
 void ConfigureReplay(const replay::Settings& settings);
 
 bool UdpEnabled();

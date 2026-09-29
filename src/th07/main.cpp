@@ -228,6 +228,5 @@ stop:
     WINNLSEnableIME(0, 1);
     th07::replay::FinishSession();
     g_GameErrorContext.Flush();
-    th07::replay::RestartIfRequested();
     return th07::replay::Failed() ? 1 : 0;
 }

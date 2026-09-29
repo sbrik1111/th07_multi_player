@@ -1,4 +1,5 @@
 #include "Supervisor.hpp"
+#include "multi/ReplaySession.h"
 #include "FrameInput.hpp"
 #include "multi/RollbackHeap.h"
 #include "multi/Session.h"
@@ -207,6 +208,7 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
         {
         case 0:
         CASE_0:
+            th07::replay::ReturnedToMenu();
             arg->curState = 1;
             g_Supervisor.d3dDevice->ResourceManagerDiscardBytes(0);
             if (MainMenu::RegisterChain(0) != ZUN_SUCCESS)

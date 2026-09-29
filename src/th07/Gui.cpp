@@ -1,3 +1,4 @@
+#include "multi/ReplaySession.h"
 #include "Gui.hpp"
 #include "Coop.hpp"
 
@@ -417,7 +418,8 @@ ZunResult Gui::ActualAddedCallback()
     i32 i;
 
     this->frameCounter = 0;
-    if (g_Supervisor.curState == 3 || g_Supervisor.curState == 11 || g_Supervisor.curState == 12 ? 0 : 1)
+    if (th07::replay::LoadingStage() || (g_Supervisor.curState != 3 &&
+        g_Supervisor.curState != 11 && g_Supervisor.curState != 12))
     {
         memset(this->impl, 0, sizeof(GuiImpl));
 
@@ -653,7 +655,8 @@ ZunResult Gui::ActualAddedCallback()
     default:
         return ZUN_ERROR;
     }
-    if (g_Supervisor.curState == 3 || g_Supervisor.curState == 11 || g_Supervisor.curState == 12 ? 0 : 1)
+    if (th07::replay::LoadingStage() || (g_Supervisor.curState != 3 &&
+        g_Supervisor.curState != 11 && g_Supervisor.curState != 12))
     {
         for (k = 0; k < ARRAY_SIZE_SIGNED(this->impl->vms0); k++)
         {
@@ -2152,8 +2155,8 @@ ZunResult Gui::RegisterChain()
 {
     Gui *mgr = &g_Gui;
 
-    if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
-              g_Supervisor.curState != 12) != 0)
+    if (th07::replay::LoadingStage() || (g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
+              g_Supervisor.curState != 12))
     {
         memset(mgr, 0, sizeof(Gui));
         mgr->impl = new GuiImpl;

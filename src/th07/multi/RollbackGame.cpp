@@ -1,4 +1,5 @@
-﻿
+﻿#include "ReplaySession.h"
+
 #include <string.h>
 #include <stdlib.h>
 
@@ -487,6 +488,7 @@ int RunFrame(netcode::Timeline& timeline, int* present, FrameDone done, void* co
         g_perf.replayed += replay ? 1 : 0;
         // A frame run again is not drawn: drawing changes nothing the simulation reads.
         g_ChainCalcProfile = replay ? ProfileReplayTick : NULL;
+        th07::replay::FrameStarting(frame, replay);
         int r = SessionRunFrame(inputs.held, mp::PlayerCount(), replay && !g_drawReplay ? 0 : 1);
         g_ChainCalcProfile = NULL;
         RecordHits(frame, g_FrameMayRollBack == 0);

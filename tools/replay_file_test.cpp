@@ -27,7 +27,8 @@ static replay::Frame Frame(unsigned segment, unsigned frame)
     replay::Frame f = {};
     f.segment = segment;
     f.frame = frame;
-    if (frame % replay::kHashInterval == 0) f.flags = replay::kHasHash;
+    f.flags = (frame % 60 + 1) << replay::kFpsShift;
+    if (frame % replay::kHashInterval == 0) f.flags |= replay::kHasHash;
     for (int seat = 0; seat < 4; ++seat) f.held[seat] = (unsigned short)(frame + seat);
     return f;
 }
@@ -148,6 +149,63 @@ int main()
                 Check(inputs.held[seat] == frame + seat + 1, "corrected seat input");
         }
         Check(!t.ReadConfirmed(6, inputs), "unsimulated frame excluded");
+    }
+    {
+        DeleteFileW(L"stages.mpr");
+        DeleteFileW(L"extra.mpr");
+        auto h = Header();
+        h.difficulty = 1;
+        replay::Writer writer;
+        h.checksum = replay::Checksum(&h, offsetof(replay::Header, checksum));
+        Check(writer.Open(L"stages.mpr", h), "open game");
+        for (unsigned stage = 1; stage <= 2; ++stage) {
+            auto& entry = h.stages[stage - 1];
+            entry.index = writer.Count();
+            entry.segment = 7;
+            entry.frame = 80 + writer.Count();
+            entry.rolling = writer.Rolling();
+            entry.state.stage = stage;
+            entry.state.scene = stage == 1 ? 2 : 3;
+            entry.state.difficulty = 1;
+            entry.state.ghosts = 8;
+            entry.state.seats[3].power = 96;
+            Check(writer.UpdateHeader(h), "publish stage start");
+            for (unsigned i = 0; i < 32; ++i) Check(writer.Append(Frame(7, 80 + writer.Count())), "game frame");
+        }
+        Check(writer.Finish(), "finish game");
+        replay::Reader reader;
+        Check(reader.Open(L"stages.mpr") && reader.SeekStage(2), "seek directly to stage 2");
+        replay::Frame f;
+        Check(reader.Next(f) == 1 && f.index == 32 && f.frame == 112, "first frame is chosen stage");
+        Check((f.flags >> replay::kFpsShift) == 53, "per-frame playback speed retained");
+        Check(reader.Info().stages[1].state.ghosts == 8 && reader.Info().stages[1].state.seats[3].power == 96,
+              "stage stocks and ghosts survive");
+        while (reader.Next(f) == 1) {}
+        Check(reader.Complete() && !reader.Error(), "seek preserves full-stream footer validation");
+        Check(reader.SeekStage(1) && reader.Next(f) == 1 && f.index == 0, "seek backwards after completion");
+        Check(!reader.SeekStage(3), "unrecorded stage refused");
+        reader.Close();
+        auto extra = Header();
+        extra.difficulty = 4;
+        extra.stages[6].state.stage = 7;
+        extra.stages[6].state.scene = 2;
+        extra.stages[6].state.difficulty = 4;
+        extra.stages[6].rolling = 2166136261u;
+        extra.checksum = replay::Checksum(&extra, offsetof(replay::Header, checksum));
+        Check(writer.Open(L"extra.mpr", extra) && writer.Append(Frame(0, 0)) && writer.Finish(), "reuse writer for Extra");
+        Check(reader.Open(L"extra.mpr") && reader.SeekStage(7) && reader.Next(f) == 1 && f.index == 0,
+              "reuse reader without carrying old counters");
+        auto invalid = extra;
+        invalid.stages[0] = h.stages[0];
+        invalid.checksum = replay::Checksum(&invalid, offsetof(replay::Header, checksum));
+        Check(!replay::ValidHeader(invalid), "normal and extra cannot share a game");
+        auto corrupt = Read(L"stages.mpr");
+        auto* ch = reinterpret_cast<replay::Header*>(corrupt.data());
+        ch->stages[1].index = 2000000;
+        ch->checksum = replay::Checksum(ch, offsetof(replay::Header, checksum));
+        Write(L"bad_stage.mpr", corrupt);
+        reader.Close();
+        Check(reader.Open(L"bad_stage.mpr") && !reader.SeekStage(2), "out-of-file stage rejected");
     }
     printf("PASS replay format and confirmed inputs: %d checks\n", checks);
     return 0;
