@@ -13,9 +13,18 @@ from your own legitimate copy of the game.
 
 Three-player netplay has been confirmed working in testing.
 
-The current development line also includes independent character/shot
+This release also includes independent character/shot
 selection for all three players, shared-border handling, synchronized enemy
 drops, and predictive rollback across stage transitions.
+
+**v0.2.0**
+
+* Reworked the core multiplayer systems.
+* Added multiplayer replay recording and playback.
+* Added an optional `lowlatency` setting for input sampling and frame timing.
+* Added F5/F6 controls to adjust input delay during rollback netplay.
+* Delayed hit sounds until the hit is confirmed and suppressed duplicate sounds
+  when rollback replays a frame.
 
 **v0.1.7**
 
@@ -54,10 +63,7 @@ This is still an experimental release, so other desyncs and bugs may remain.
 
 - **A session can still desync.** v0.1.2 fixed the known item-drop
   synchronization issue, but this does not guarantee that every possible cause
-  has been found. If a session drifts apart, everyone should leave and rematch.
-  `netplay_trace.txt`, written next to the executable, records what the peers
-  stopped agreeing about. It can be switched off under `Advanced settings`, at
-  the cost of leaving nothing to read if a session does go wrong
+  has been found. If a session drifts apart, everyone should leave and rematch
 - **The title screen and the ending run very slowly in three player
   sessions.** Both are outside the synchronized gameplay loop, and the extra
   peer makes them noticeably worse
@@ -70,21 +76,26 @@ This is still an experimental release, so other desyncs and bugs may remain.
 * Each player picks their **own character and shot type**
 * Lives, bombs and power are per player; cherry and score are shared
 * Life transfer between players, and revival of a player who is out of lives
-* **Predictive rollback** so movement is not held back by the round trip (on by default, zero added delay)
+* **Predictive rollback** so movement is not held back by the round trip
+  (selected by default; the host chooses the input delay)
 
 
 ## Playing
 
-1. Copy `th07.dat` and `thbgm.dat` next to `th07_multi_net.exe`
-2. Everyone double-clicks `th07_multi_net.exe`, which opens the connection
+1. Copy `th07.dat` and `thbgm.dat` next to `th07_multi.exe`
+2. Everyone double-clicks `th07_multi.exe`, which opens the connection
    launcher
 3. Choose Host or Guest under `Connect as`. Guests enter the host's IP address
 4. Press the button below it (`Start hosting` or `Connect to host`)
-5. When `cur state` lists the other players and `Start Game` lights up, anyone
-   can press it; one message starts every PC
-6. In game, choose a character and shot for P1, then P2, then P3
+5. When `cur state` lists the other players and `Start Game` lights up, the host
+   presses it to start the game on every PC
+6. In game, choose a character and shot for each player in turn
 
 `Start Game (local)` in the same launcher starts a two player game on one PC.
+
+Multiplayer replays are saved automatically as `.mpr` files in `replay/`.
+To watch one, choose `Start Game (local)` in the launcher, then select
+`Replay` from the game menu.
 
 The host has to allow its UDP port through Windows Firewall. Playing over the
 internet also needs a port forward on the host's router.
@@ -102,6 +113,7 @@ guests included.
 | Focus | `Shift` |
 | Skip dialogue | `Ctrl` |
 | Menu | `Esc` |
+| Input delay during rollback netplay | `F5` decreases by one frame; `F6` increases by one frame |
 
 Pads use each PC's own `th07.cfg`, so configure them before matching. While
 the window is not focused the keyboard is ignored and only the pad is read.
@@ -120,28 +132,13 @@ There is no keyboard mapping for a third local player.
 
 ## Launcher settings
 
-`Advanced settings` holds eight switches. Display and diagnostic choices are
-stored locally, so Host and Guests may choose different values.
+The host chooses rollback and input delay; guests receive these session
+settings when they connect. Display and audio choices are local to each PC.
+The `BOT` checkbox in the launcher is intended for testing.
 
-| Setting | Effect |
-| --- | --- |
-| Guest evasive bot (test) | Hands the guest's ship to a bot that dodges, collects power and lives, keeps its distance from a boss, and bombs its way out of a hit |
-| Net diagnostics | Draws `NET H RTT 25ms D0` at the top of the playfield |
-| Show player names at stage start | Each player's name over their ship for the first four seconds of a stage |
-| Show contribution stats (K/D) | Shows each player's defeated-enemy count and applied damage in the HUD |
-| Write netplay_trace.txt | Records what the peers stopped agreeing about, for diagnosing a desync. A few megabytes an hour. Turn it on before a session you expect to report |
-| Pin FPU control word | Holds the x87 control word to one value every frame, so a graphics driver cannot change how floats round mid-session |
-| Verify EXE/game data compatibility | Rejects peers with incompatible executable, game data, or settings identities |
-| Chain character-specific Stage 4 cards | Runs the Stage 4 character-specific boss cards for each distinct active character |
-
-The Guest bot, display switches, trace setting, and compatibility display are
-per-PC preferences; players do not have to agree on them. Contribution totals
-remain synchronized for rollback even when their local HUD drawing is disabled.
-The FPU pin and Stage 4 chain are simulation-affecting options, so the Host's
-answer is applied to everyone.
-
-A lost or recovering connection is always reported regardless of the
-diagnostics setting.
+`Advanced settings` contains the optional `lowlatency` setting. It adjusts
+input sampling and frame timing to reduce latency. It is off by default and
+can be chosen separately on each PC.
 
 ## What changes in multiplayer
 
@@ -167,39 +164,35 @@ diagnostics setting.
 - **Rank** loses less to a death or a bomb than in single player, divided by the
   player count, so that three ships losing lives do not flatten the difficulty
   curve three times as fast
-- Replay saving is disabled during multiplayer
 
 ## Predictive rollback
 
-Predictive rollback continues using the last confirmed remote input until the actual input arrives. If the prediction differs, the game rewinds to the affected frame and replays the simulation using a 24-frame history.
-
-A 24-frame history is required for three-player sessions because input exchanged between guests must pass through two network links.
+Predictive rollback continues using recent remote input until the actual input
+arrives. If the prediction differs, the game rewinds to the affected frame and
+replays the simulation. If an input remains missing beyond the prediction
+window, play waits for it.
 
 
 ## Building
 
-A 32-bit Windows build with MSVC 2002.
+A 32-bit Windows build using MSVC 19.10 (Visual Studio 2017), the Windows 10
+SDK, and the DirectX 8 SDK. Put the compiler under `prefix/msvc1410`, or set
+`TH07_PREFIX` to a checkout containing that prefix.
 
 ```
-uv run scripts/build.py --no-matching
+python scripts/build.py
 ```
 
-The result is `build/th07_multi_net.exe`. Placing the original `th07.exe` in
-`resources/` lets the build take its icon; without it, add `--no-icon`.
-
-`--no-matching` is required. The multiplayer executable is deliberately not
-byte-identical to the original, so a matching build stops after a while on the
-integrity check.
-
-Dependencies: uv, ninja, and wine on Linux.
+The result is `build/th07_multi.exe`. The build script fetches the DirectX 8
+SDK files if they are missing.
 
 ## Limitations
 
 - Experimental. There is no NAT traversal and no encryption
 - A NAT rebind after matching cannot be recovered from
 - Intended for playing with people you trust, not for a public server
-- Everyone must run the **same `th07_multi_net.exe` and the same game data**
-- Latency or packet loss beyond the 24 frame history stalls the game while it
+- Everyone must run the **same `th07_multi.exe` and the same game data**
+- Latency or packet loss beyond the prediction window stalls the game while it
   waits for the missing input
 
 ## Data and rights
