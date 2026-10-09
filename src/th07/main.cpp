@@ -11,12 +11,17 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
-#include "Netplay.hpp"
+#include "FramePacing.hpp"
 #include "ResultScreen.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
+#include "multi/Launcher.h"
+#include "multi/MpConfig.h"
+#include "multi/RollbackHeap.h"
+#include "multi/Session.h"
+#include "multi/ReplaySession.h"
 
 // FUNCTION: TH07 0x00433f90
 void AnmManager::TakeScreenshotIfRequested()
@@ -41,21 +46,26 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     i32 res;
     tagMSG msg;
 
-    res = RENDER_RESULT_KEEP_RUNNING;
-    if (!Netplay::Initialize(lpCmdline))
+    th07::mp::InstallCrashFilter();
+    th07::replay::ReadCommandLine();
     {
-        if (!Netplay::WasStartupCancelled())
+        th07::launcher::Selection launch = {};
+        if (!th07::launcher::Run(&launch) || launch.mode == th07::launcher::kCancelled)
         {
-            MessageBoxA(NULL, Netplay::GetStatusText(), "th07_multi_net",
-                        MB_OK | MB_ICONERROR);
+            return 0;
         }
-        Netplay::Shutdown();
-        // Connection compatibility failures happen before the normal game
-        // shutdown path. Preserve their exact local/remote IDs in log.txt so
-        // a rejected match can be diagnosed after the error dialog closes.
-        g_GameErrorContext.Flush();
-        return Netplay::WasStartupCancelled() ? 0 : 1;
+        if (launch.mode != th07::launcher::kSkipped)
+        {
+            for (i32 seat = 0; seat < launch.playerCount; seat++)
+            {
+                th07::mp::SetPlayerName(seat, launch.playerName[seat]);
+            }
+        }
     }
+    if (!th07::replay::PreparePlayback()) return 1;
+    MpInitSession();
+
+    res = RENDER_RESULT_KEEP_RUNNING;
     g_Supervisor.hInstance = hInstance;
     SystemParametersInfoA(SPI_GETSCREENSAVEACTIVE, 0,
                           &g_GameWindow.screen_save_active, 0);
@@ -66,8 +76,7 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE, 0, NULL, 2);
     SystemParametersInfoA(SPI_SETLOWPOWERACTIVE, 0, NULL, 2);
     SystemParametersInfoA(SPI_SETPOWEROFFACTIVE, 0, NULL, 2);
-    if (!Netplay::AllowsMultipleInstances() &&
-        GameWindow::CheckForRunningGameInstance(hInstance) == ZUN_ERROR)
+    if (GameWindow::CheckForRunningGameInstance(hInstance) == ZUN_ERROR)
     {
         goto stop;
     }
@@ -77,7 +86,9 @@ i32 WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     {
         goto stop;
     }
+    th07::launcher::ApplyGameConfig(); // after th07.cfg, which would overwrite it
 
+    th07::replay::ApplyGameConfig();
     GameWindow::ChecksumExecutable();
     QueryPerformanceFrequency(&g_GameWindow.lpFrequency);
 
@@ -91,7 +102,6 @@ start:
     {
         goto stop;
     }
-    SetWindowTextA(g_GameWindow.window, "th07_multi_net");
 
     if (GameWindow::InitD3dRendering())
     {
@@ -101,14 +111,17 @@ start:
     g_SoundPlayer.InitializeDSound(g_GameWindow.window);
     Controller::GetJoystickCaps();
     Controller::ResetKeyboard();
-    g_AnmManager = new AnmManager();
-    if (Netplay::ForceFullscreen() ||
-        (!g_Supervisor.cfg.windowed && !Netplay::ForceWindowed()))
     {
-        WINNLSEnableIME(0, 0);
-        ShowCursor(0);
+        // Game objects from here on live in the rollback arena.
+        th07::rollback::heap::SimulationScope initScope;
+        g_AnmManager = new AnmManager();
+        if (!g_Supervisor.cfg.windowed)
+        {
+            WINNLSEnableIME(0, 0);
+            ShowCursor(0);
+        }
+        res = g_Supervisor.RegisterChain();
     }
-    res = g_Supervisor.RegisterChain();
     if (res != ZUN_SUCCESS)
     {
         if (res == ZUN_ERROR)
@@ -119,15 +132,9 @@ start:
         goto cleanup;
     }
     res = RENDER_RESULT_KEEP_RUNNING;
-    g_GameWindow.curFrame = -30;
-    Netplay::StartTestTimer();
+    th07::replay::StartRecording();
     while (!g_GameWindow.isAppClosing)
     {
-        if (Netplay::HasTestTimedOut())
-        {
-            res = RENDER_RESULT_EXIT_SUCCESS;
-            break;
-        }
         if (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE))
         {
             TranslateMessage(&msg);
@@ -143,7 +150,7 @@ start:
                 {
                     break;
                 }
-                g_Supervisor.flags = g_Supervisor.flags & 0xffffffef;
+                g_Supervisor.deviceNotReset = 0;
             }
             else if (d3dDeviceStatus == D3DERR_DEVICENOTRESET)
             {
@@ -155,12 +162,12 @@ start:
                 }
                 GameWindow::ResetRenderState();
                 g_Supervisor.renderSkipFrames = 3;
-                g_Supervisor.flags = g_Supervisor.flags | 16;
+                g_Supervisor.deviceNotReset = 1;
             }
         }
     }
 cleanup:
-    if (g_GameManager.plst.magic != 0 && !Netplay::NoSave())
+    if (g_GameManager.plst.magic != 0)
     {
         ResultScreen::RegisterChain(2);
     }
@@ -169,6 +176,7 @@ cleanup:
         ;
 
 stop:
+    th07::frame::Shutdown();
     g_SoundPlayer.Release();
     delete g_AnmManager;
     g_AnmManager = NULL;
@@ -192,9 +200,8 @@ stop:
         g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
         *g_GameErrorContext.m_BufferEnd = NULL;
         // STRING: TH07 0x00497c28
-        g_GameErrorContext.Log("ï¿½Ä‹Nï¿½ï¿½ï¿½ï¿½vï¿½ï¿½ï¿½ï¿½Iï¿½vï¿½Vï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÏXï¿½ï¿½ï¿½ê‚½ï¿½Ì‚ÅÄ‹Nï¿½ï¿½ï¿½ï¿½ï¿½Ü‚ï¿½\r\n");
-        if (Netplay::ForceFullscreen() ||
-            (!g_Supervisor.cfg.windowed && !Netplay::ForceWindowed()))
+        g_GameErrorContext.Log("Ä‹N“®‚ð—v‚·‚éƒIƒvƒVƒ‡ƒ“‚ª•ÏX‚³‚ê‚½‚Ì‚ÅÄ‹N“®‚µ‚Ü‚·\r\n");
+        if (!g_Supervisor.cfg.windowed)
         {
             WINNLSEnableIME(0, 1);
         }
@@ -210,11 +217,10 @@ stop:
         }
         goto start;
     }
-    if (!Netplay::NoSave())
-    {
-        FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
-                                    sizeof(GameConfiguration));
-    }
+    th07::replay::RestoreGameConfig();
+    th07::launcher::RestoreGameConfig();
+    FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg,
+                                sizeof(GameConfiguration));
     SystemParametersInfoA(SPI_SETSCREENSAVEACTIVE,
                           g_GameWindow.screen_save_active, NULL, 2);
     SystemParametersInfoA(SPI_SETLOWPOWERACTIVE, g_GameWindow.low_power_active,
@@ -222,10 +228,7 @@ stop:
     SystemParametersInfoA(SPI_SETPOWEROFFACTIVE, g_GameWindow.power_off_active,
                           NULL, 2);
     WINNLSEnableIME(0, 1);
-    // Shutdown writes the end-of-run measurements, so it has to run before the
-    // error context is flushed to log.txt. With the old order the peer that
-    // closed the window logged them into a buffer nobody read again.
-    Netplay::Shutdown();
+    th07::replay::FinishSession();
     g_GameErrorContext.Flush();
-    return 0;
+    return th07::replay::Failed() ? 1 : 0;
 }

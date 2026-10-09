@@ -74,9 +74,9 @@ ChainElem g_StageCalcChain;
 Stage::Stage()
 {
     memset(this, NULL, sizeof(Stage));
-    this->cam.pos = D3DXVECTOR3(0.0f, 0.0f, 1000.0f);
-    this->cam.lookAt = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-    this->cam.up = D3DXVECTOR3(0.0f, 1.0f, 0.0f);
+    this->cam.pos = Float3(0.0f, 0.0f, 1000.0f);
+    this->cam.lookAt = Float3(0.0f, 0.0f, 0.0f);
+    this->cam.up = Float3(0.0f, 1.0f, 0.0f);
     this->cam.fov = ZUN_PI / 6.0f;
     this->camEnd = this->cam;
     this->camStart = this->cam;
@@ -96,9 +96,9 @@ f32 InterpCubic(f32 p0, f32 p1, f32 p2, f32 p3, f32 t)
 
 // FUNCTION: TH07 0x00405370
 void Stage::UpdateScriptAndCamera(Stage *stage, i32 param_2,
-                                  D3DXVECTOR3 *param_3, D3DXVECTOR3 *param_4,
-                                  D3DXVECTOR3 *param_5, D3DXVECTOR3 *param_6,
-                                  D3DXVECTOR3 *param_7)
+                                  Float3 *param_3, Float3 *param_4,
+                                  Float3 *param_5, Float3 *param_6,
+                                  Float3 *param_7)
 {
     f32 t;
 
@@ -114,30 +114,30 @@ void Stage::UpdateScriptAndCamera(Stage *stage, i32 param_2,
         t = 1.0f;
         stage->timersMax[param_2] = 0;
     }
-    switch (stage->interpModes[param_2])
+    switch (stage->easeModes[param_2])
     {
-    case 1:
+    case STAGE_EASE_OUT_QUAD:
         t = 1.0f - t;
         t = 1.0f - t * t;
         break;
-    case 2:
+    case STAGE_EASE_OUT_CUBIC:
         t = 1.0f - t;
         t = 1.0f - t * t * t;
         break;
-    case 3:
+    case STAGE_EASE_OUT_QUART:
         t = 1.0f - t;
         t = 1.0f - t * t * t * t;
         break;
-    case 4:
+    case STAGE_EASE_IN_QUAD:
         t = t * t;
         break;
-    case 5:
+    case STAGE_EASE_IN_CUBIC:
         t = t * t * t;
         break;
-    case 6:
+    case STAGE_EASE_IN_QUART:
         t = t * t * t * t;
     }
-    if (stage->interpModes[param_2] != 7)
+    if (stage->easeModes[param_2] != STAGE_EASE_CUBIC_INTERP)
     {
         *param_3 = *param_5 - *param_4;
         *param_3 = t * *param_3 + *param_4;
@@ -156,7 +156,7 @@ void Stage::UpdateScriptAndCamera(Stage *stage, i32 param_2,
 // FUNCTION: TH07 0x00405690
 u32 Stage::OnUpdate(Stage *arg)
 {
-    D3DXVECTOR3 pos;
+    Float3 pos;
     StdRawInstr *curInstr;
 
     if (!arg->stdData)
@@ -192,16 +192,16 @@ loop_begin:
             if (curInstr->frame == -1)
             {
                 arg->positionInterpInitial = *curInstr->args.AsVec();
-                arg->position.x = arg->positionInterpInitial.x;
-                arg->position.y = arg->positionInterpInitial.y;
-                arg->position.z = arg->positionInterpInitial.z;
+                arg->pos.x = arg->positionInterpInitial.x;
+                arg->pos.y = arg->positionInterpInitial.y;
+                arg->pos.z = arg->positionInterpInitial.z;
             }
             else
             {
                 pos = *curInstr->args.AsVec();
-                arg->position.x = pos.x;
-                arg->position.y = pos.y;
-                arg->position.z = pos.z;
+                arg->pos.x = pos.x;
+                arg->pos.y = pos.y;
+                arg->pos.z = pos.z;
                 arg->positionInterpInitial = pos;
                 arg->positionInterpStartTime = curInstr->frame;
                 curInstr++;
@@ -227,8 +227,8 @@ loop_begin:
         case 5:
             if (arg->cameraTeleported)
             {
-                D3DXVECTOR3 diff = *curInstr->args.AsVec() - arg->camEnd.pos;
-                EffectManager::DoSomethingWithEffects(&diff);
+                Float3 diff = *curInstr->args.AsVec() - arg->camEnd.pos;
+                EffectManager::ShiftEffectsAfterCameraTeleport(&diff);
                 arg->cameraTeleported = 0;
             }
             arg->camStart.pos = arg->camEnd.pos;
@@ -241,7 +241,7 @@ loop_begin:
         case 6:
             arg->timersMax[0] = curInstr->args.args[0].i;
             arg->timers[0] = 0;
-            arg->interpModes[0] = curInstr->args.args[1].i;
+            arg->easeModes[0] = curInstr->args.args[1].i;
             break;
         case 7:
             arg->camStart.lookAt = arg->camEnd.lookAt;
@@ -254,7 +254,7 @@ loop_begin:
         case 8:
             arg->timersMax[1] = curInstr->args.args[0].i;
             arg->timers[1] = 0;
-            arg->interpModes[1] = curInstr->args.args[1].i;
+            arg->easeModes[1] = curInstr->args.args[1].i;
             break;
         case 9:
             arg->camStart.up = arg->camEnd.up;
@@ -266,7 +266,7 @@ loop_begin:
             break;
         case 10:
             arg->timersMax[2] = curInstr->args.args[0].i;
-            arg->interpModes[2] = curInstr->args.args[1].i;
+            arg->easeModes[2] = curInstr->args.args[1].i;
             arg->timers[2] = 0;
             break;
         case 11:
@@ -280,7 +280,7 @@ loop_begin:
         case 12:
             arg->timersMax[3] = curInstr->args.args[0].i;
             arg->timers[3] = 0;
-            arg->interpModes[3] = curInstr->args.args[1].i;
+            arg->easeModes[3] = curInstr->args.args[1].i;
             break;
         case 13:
             arg->color = curInstr->args.args[0].u;
@@ -313,7 +313,7 @@ loop_begin:
         case 18:
             arg->timersMax[0] = curInstr->args.args[0].i;
             arg->timers[0] = 0;
-            arg->interpModes[0] = 7;
+            arg->easeModes[0] = STAGE_EASE_CUBIC_INTERP;
             break;
         case 19:
             arg->camStart.lookAt = *curInstr->args.AsVec();
@@ -330,7 +330,7 @@ loop_begin:
         case 23:
             arg->timersMax[1] = curInstr->args.args[0].i;
             arg->timers[1] = 0;
-            arg->interpModes[1] = 7;
+            arg->easeModes[1] = STAGE_EASE_CUBIC_INTERP;
             break;
         case 24:
             arg->camStart.up = *curInstr->args.AsVec();
@@ -347,7 +347,7 @@ loop_begin:
         case 28:
             arg->timersMax[2] = curInstr->args.args[0].i;
             arg->timers[2] = 0;
-            arg->interpModes[2] = 7;
+            arg->easeModes[2] = STAGE_EASE_CUBIC_INTERP;
             break;
         case 29:
             if (curInstr->args.args[0].i >= 0)
@@ -415,34 +415,34 @@ LAB_004061aa: {
             t = 1.0f;
             arg->timersMax[camIdx] = 0;
         }
-        switch (arg->interpModes[camIdx])
+        switch (arg->easeModes[camIdx])
         {
-        case 1:
+        case STAGE_EASE_OUT_QUAD:
             t = 1.0f - t;
             t = 1.0f - t * t;
             break;
-        case 2:
+        case STAGE_EASE_OUT_CUBIC:
             t = 1.0f - t;
             t = 1.0f - t * t * t;
             break;
-        case 3:
+        case STAGE_EASE_OUT_QUART:
             t = 1.0f - t;
             t = 1.0f - t * t * t * t;
             break;
-        case 4:
+        case STAGE_EASE_IN_QUAD:
             t = t * t;
             break;
-        case 5:
+        case STAGE_EASE_IN_CUBIC:
             t = t * t * t;
             break;
-        case 6:
+        case STAGE_EASE_IN_QUART:
             t = t * t * t * t;
         }
         fovDiff = arg->camEnd.fov - arg->camStart.fov;
         arg->cam.fov = fovDiff * t + arg->camStart.fov;
     }
 }
-    D3DXVec3Normalize(&arg->cam.lookAtDir, &arg->cam.lookAt);
+    D3DXVec3Normalize(arg->cam.lookAtDir.asD3DX(), arg->cam.lookAt.asD3DX());
     if (arg->skyFogInterpDuration != 0)
     {
         arg->skyFogInterpTimer++;
@@ -625,12 +625,12 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
-#pragma var_order(fog, alpha, local_1c, i)
+#pragma var_order(fog, alpha, rect, i)
 // FUNCTION: TH07 0x00406de0
 u32 Stage::OnDrawLowPrio(Stage *arg)
 {
     i32 i;
-    ZunRect local_1c;
+    ZunRect rect;
     i32 alpha;
     f32 fog;
 
@@ -644,13 +644,13 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
             {
                 g_Supervisor.DisableFog();
             }
-            g_EffectManager.UpdateSpecialEffect();
+            g_EffectManager.DrawLayer1Effects();
             if (arg->spellCardState == 1)
             {
-                local_1c.left = 32.0f;
-                local_1c.top = 16.0f;
-                local_1c.right = 416.0f;
-                local_1c.bottom = 464.0f;
+                rect.left = 32.0f;
+                rect.top = 16.0f;
+                rect.right = 416.0f;
+                rect.bottom = 464.0f;
                 alpha = arg->ticksSinceSpellcardStarted * 255 / 60;
                 g_AnmManager->Flush();
                 g_Supervisor.SetRenderState(D3DRS_ZFUNC, 8);
@@ -658,7 +658,7 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
                 {
                     g_Supervisor.SetRenderState(D3DRS_FOGENABLE, 0);
                 }
-                ScreenEffect::DrawSquare(&local_1c, alpha << 24);
+                ScreenEffect::DrawSquare(&rect, alpha << 24);
             }
         }
     }
@@ -697,9 +697,9 @@ ZunResult Stage::AddedCallback(Stage *arg)
 
     arg->scriptTime = 0;
     arg->instructionIndex = 0;
-    arg->position.x = 0.0f;
-    arg->position.y = 0.0f;
-    arg->position.z = 0.0f;
+    arg->pos.x = 0.0f;
+    arg->pos.y = 0.0f;
+    arg->pos.z = 0.0f;
     arg->spellCardState = 0;
     arg->skyFogInterpDuration = 0;
     switch (g_GameManager.currentStage)
@@ -781,13 +781,13 @@ ZunResult Stage::AddedCallback(Stage *arg)
     arg->skyFog.color.color = 0xff000000;
     arg->skyFog.nearPlane = 200.0f;
     arg->skyFog.farPlane = 500.0f;
-    arg->cam.pos = D3DXVECTOR3(0.0f, 0.0f, 1000.0f);
-    arg->cam.lookAt = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-    arg->cam.up = D3DXVECTOR3(0.0f, 1.0f, 0.0f);
+    arg->cam.pos = Float3(0.0f, 0.0f, 1000.0f);
+    arg->cam.lookAt = Float3(0.0f, 0.0f, 0.0f);
+    arg->cam.up = Float3(0.0f, 1.0f, 0.0f);
     arg->cam.fov = ZUN_PI / 6.0f;
     arg->camEnd = arg->cam;
     arg->camStart = arg->cam;
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < ARRAY_SIZE_SIGNED(arg->timers); i++)
     {
         arg->timersMax[i] = 0;
         arg->timers[i] = 0;
@@ -895,7 +895,7 @@ ZunResult Stage::LoadStageData(const char *stdPath)
     return ZUN_SUCCESS;
 }
 
-#pragma var_order(local_8, vmCount, i, vm, object, quad)
+#pragma var_order(unused, vmCount, i, vm, object, quad)
 // FUNCTION: TH07 0x004077f0
 ZunResult Stage::UpdateObjects()
 {
@@ -904,7 +904,7 @@ ZunResult Stage::UpdateObjects()
     AnmVm *vm;
     i32 i;
     i32 vmCount;
-    StdRawQuadBasic *local_8;
+    StdRawQuadBasic *unused;
 
     for (i = 0; i < this->objectsCount; i++)
     {
@@ -922,7 +922,7 @@ ZunResult Stage::UpdateObjects()
                     g_AnmManager->ExecuteScript(vm);
                     break;
                 case 1:
-                    local_8 = quad;
+                    unused = quad;
                     g_AnmManager->ExecuteScript(vm);
                     break;
                 }
@@ -950,13 +950,13 @@ i32 Stage::RenderObjects(i32 zLevel)
 {
     ZunColor origColor;
     f32 var_98;
-    D3DXVECTOR3 projectSrc;
+    Float3 projectSrc;
     f32 radius;
     i32 didDraw;
     StdRawQuadBasic *curQuad;
-    D3DXVECTOR3 diffPos;
-    D3DXVECTOR3 quadPos;
-    D3DXVECTOR3 viewDir;
+    Float3 diffPos;
+    Float3 quadPos;
+    Float3 viewDir;
     f32 dotProd;
     StdRawObject *obj;
     D3DXMATRIX worldMatrix;
@@ -986,20 +986,20 @@ i32 Stage::RenderObjects(i32 zLevel)
         {
             curQuad = &obj->firstQuad;
 
-            quadPos.x = obj->pos.x + instance->pos.x - this->position.x + obj->size.x / 2.0f;
-            quadPos.y = obj->pos.y + instance->pos.y - this->position.y + obj->size.y / 2.0f;
-            quadPos.z = obj->pos.z + instance->pos.z - this->position.z + obj->size.z / 2.0f;
+            quadPos.x = obj->pos.x + instance->pos.x - this->pos.x + obj->size.x / 2.0f;
+            quadPos.y = obj->pos.y + instance->pos.y - this->pos.y + obj->size.y / 2.0f;
+            quadPos.z = obj->pos.z + instance->pos.z - this->pos.z + obj->size.z / 2.0f;
 
             quadPos = quadPos - this->cam.pos;
 
-            if (D3DXVec3LengthSq(&quadPos) > 1690000.0f)
+            if (D3DXVec3LengthSq(quadPos.asD3DX()) > 1690000.0f)
             {
                 // empty branch
             }
             else
             {
-                dotProd = D3DXVec3Dot(&quadPos, &this->cam.lookAtDir);
-                radius = D3DXVec3Length(&obj->size) / 2.0f + 880.0f;
+                dotProd = D3DXVec3Dot(quadPos.asD3DX(), this->cam.lookAtDir.asD3DX());
+                radius = D3DXVec3Length(obj->size.asD3DX()) / 2.0f + 880.0f;
 
                 if (dotProd > radius || dotProd < 60.0f)
                 {
@@ -1016,9 +1016,9 @@ i32 Stage::RenderObjects(i32 zLevel)
                         switch (curQuad->type)
                         {
                         case 0:
-                            curQuadVm->pos.x = curQuadVm->offset.x + curQuad->pos.x + instance->pos.x - this->position.x;
-                            curQuadVm->pos.y = curQuadVm->offset.y + curQuad->pos.y + instance->pos.y - this->position.y;
-                            curQuadVm->pos.z = curQuadVm->offset.z + curQuad->pos.z + instance->pos.z - this->position.z;
+                            curQuadVm->pos.x = curQuadVm->offset.x + curQuad->pos.x + instance->pos.x - this->pos.x;
+                            curQuadVm->pos.y = curQuadVm->offset.y + curQuad->pos.y + instance->pos.y - this->pos.y;
+                            curQuadVm->pos.z = curQuadVm->offset.z + curQuad->pos.z + instance->pos.z - this->pos.z;
 
                             if (curQuad->size.x != 0.0f)
                             {
@@ -1035,12 +1035,12 @@ i32 Stage::RenderObjects(i32 zLevel)
                                 worldMatrix.m[3][1] = curQuadVm->pos.y;
                                 worldMatrix.m[3][2] = curQuadVm->pos.z;
 
-                                D3DXVec3Project(&quadPos, &projectSrc, &g_Supervisor.viewport, &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &worldMatrix);
+                                D3DXVec3Project(quadPos.asD3DX(), projectSrc.asD3DX(), &g_Supervisor.viewport, &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &worldMatrix);
 
                                 viewDir.x = g_Supervisor.viewMatrix.m[0][0];
                                 viewDir.y = g_Supervisor.viewMatrix.m[0][1];
                                 viewDir.z = g_Supervisor.viewMatrix.m[0][2];
-                                D3DXVec3Normalize(&viewDir, &viewDir);
+                                D3DXVec3Normalize(viewDir.asD3DX(), viewDir.asD3DX());
 
                                 if (curQuad->size.x != 0.0f)
                                 {
@@ -1055,16 +1055,16 @@ i32 Stage::RenderObjects(i32 zLevel)
                                 worldMatrix.m[3][1] += viewDir.y * var_98 * curQuadVm->scale.x;
                                 worldMatrix.m[3][2] += viewDir.z * var_98 * curQuadVm->scale.x;
 
-                                D3DXVec3Project(&viewDir, &projectSrc, &g_Supervisor.viewport, &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &worldMatrix);
+                                D3DXVec3Project(viewDir.asD3DX(), projectSrc.asD3DX(), &g_Supervisor.viewport, &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &worldMatrix);
 
                                 diffPos = viewDir - quadPos;
 
-                                curQuadVm->scale.x = D3DXVec3Length(&diffPos) / var_98;
+                                curQuadVm->scale.x = D3DXVec3Length(diffPos.asD3DX()) / var_98;
                                 curQuadVm->scale.y = curQuadVm->scale.x;
 
                                 diffPos = curQuadVm->pos - this->cam.pos;
 
-                                var_98 = D3DXVec3Length(&diffPos);
+                                var_98 = D3DXVec3Length(diffPos.asD3DX());
                                 origColor = curQuadVm->color;
 
                                 if (this->skyFog.nearPlane < var_98)
@@ -1131,9 +1131,9 @@ i32 Stage::RenderObjects(i32 zLevel)
 // FUNCTION: TH07 0x00408180
 void Stage::SetupCameraStageBackground()
 {
-    D3DXVECTOR3 eyeVec;
-    D3DXVECTOR3 atVec;
-    D3DXVECTOR3 upVec;
+    Float3 eyeVec;
+    Float3 atVec;
+    Float3 upVec;
     f32 fov;
     f32 aspectRatio;
     f32 centerX;
@@ -1158,7 +1158,7 @@ void Stage::SetupCameraStageBackground()
     eyeVec.y = centerY;
     eyeVec.z = eyeZ;
 
-    D3DXMatrixLookAtLH(&g_Supervisor.viewMatrix, &eyeVec, &atVec, &upVec);
+    D3DXMatrixLookAtLH(&g_Supervisor.viewMatrix, eyeVec.asD3DX(), atVec.asD3DX(), upVec.asD3DX());
     D3DXMatrixPerspectiveFovLH(
         &g_Supervisor.projectionMatrix, fov,
         aspectRatio,
@@ -1171,8 +1171,8 @@ void Stage::SetupCameraStageBackground()
 // FUNCTION: TH07 0x004082b0
 void Stage::UpdateCamera()
 {
-    D3DXMatrixLookAtLH(&g_Supervisor.viewMatrix, &this->cam.pos,
-                       &(this->cam.lookAt + this->cam.pos), &this->cam.up);
+    D3DXMatrixLookAtLH(&g_Supervisor.viewMatrix, this->cam.pos.asD3DX(),
+                       (this->cam.lookAt + this->cam.pos).asD3DX(), this->cam.up.asD3DX());
     D3DXMatrixPerspectiveFovLH(&g_Supervisor.projectionMatrix, this->cam.fov,
                                (f32)g_Supervisor.viewport.Width /
                                    (f32)g_Supervisor.viewport.Height,
@@ -1180,6 +1180,6 @@ void Stage::UpdateCamera()
     g_Supervisor.d3dDevice->SetTransform(D3DTS_VIEW, &g_Supervisor.viewMatrix);
     g_Supervisor.d3dDevice->SetTransform(D3DTS_PROJECTION,
                                          &g_Supervisor.projectionMatrix);
-    D3DXVec3Cross(&this->cam.right, &this->cam.lookAt, &this->cam.up);
-    D3DXVec3Normalize(&this->cam.right, &this->cam.right);
+    D3DXVec3Cross(this->cam.right.asD3DX(), this->cam.lookAt.asD3DX(), this->cam.up.asD3DX());
+    D3DXVec3Normalize(this->cam.right.asD3DX(), this->cam.right.asD3DX());
 }

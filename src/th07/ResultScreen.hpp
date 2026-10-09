@@ -2,7 +2,7 @@
 
 #include <windows.h>
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
 #include "Chain.hpp"
 #include "ReplayManager.hpp"
 #include "ZunMemory.hpp"
@@ -18,6 +18,178 @@
 #define LSNM_MAGIC 'MNSL'
 #define VRSM_MAGIC 'MSRV'
 
+typedef enum Character
+{
+    CHAR_REIMU = 0,
+    CHAR_MARISA = 1,
+    CHAR_SAKUYA = 2
+} Character;
+
+typedef enum ShotType
+{
+    SHOT_REIMU_A = 0,
+    SHOT_REIMU_B = 1,
+    SHOT_MARISA_A = 2,
+    SHOT_MARISA_B = 3,
+    SHOT_SAKUYA_A = 4,
+    SHOT_SAKUYA_B = 5,
+    SHOT_COUNT = 6,
+} ShotType;
+
+typedef enum SpellcardNumber
+{
+    SPELLCARD_ST1_MBOSS_1H,
+    SPELLCARD_ST1_MBOSS_1L,
+    SPELLCARD_ST1_BOSS_1E,
+    SPELLCARD_ST1_BOSS_1N,
+    SPELLCARD_ST1_BOSS_1H,
+    SPELLCARD_ST1_BOSS_1L,
+    SPELLCARD_ST1_BOSS_2E,
+    SPELLCARD_ST1_BOSS_2N,
+    SPELLCARD_ST1_BOSS_2H,
+    SPELLCARD_ST1_BOSS_2L,
+
+    SPELLCARD_ST2_MBOSS_1E,
+    SPELLCARD_ST2_MBOSS_1N,
+    SPELLCARD_ST2_MBOSS_1H,
+    SPELLCARD_ST2_MBOSS_1L,
+    SPELLCARD_ST2_BOSS_1E,
+    SPELLCARD_ST2_BOSS_1N,
+    SPELLCARD_ST2_BOSS_1H,
+    SPELLCARD_ST2_BOSS_1L,
+    SPELLCARD_ST2_BOSS_2E,
+    SPELLCARD_ST2_BOSS_2N,
+    SPELLCARD_ST2_BOSS_2H,
+    SPELLCARD_ST2_BOSS_2L,
+    SPELLCARD_ST2_BOSS_3E,
+    SPELLCARD_ST2_BOSS_3N,
+    SPELLCARD_ST2_BOSS_3H,
+    SPELLCARD_ST2_BOSS_3L,
+
+    SPELLCARD_ST3_MBOSS_1H,
+    SPELLCARD_ST3_MBOSS_1L,
+    SPELLCARD_ST3_BOSS_1E,
+    SPELLCARD_ST3_BOSS_1N,
+    SPELLCARD_ST3_BOSS_1H,
+    SPELLCARD_ST3_BOSS_1L,
+    SPELLCARD_ST3_BOSS_2E,
+    SPELLCARD_ST3_BOSS_2N,
+    SPELLCARD_ST3_BOSS_2H,
+    SPELLCARD_ST3_BOSS_2L,
+    SPELLCARD_ST3_BOSS_3E,
+    SPELLCARD_ST3_BOSS_3N,
+    SPELLCARD_ST3_BOSS_3H,
+    SPELLCARD_ST3_BOSS_3L,
+    SPELLCARD_ST3_BOSS_4E,
+    SPELLCARD_ST3_BOSS_4N,
+    SPELLCARD_ST3_BOSS_4H,
+    SPELLCARD_ST3_BOSS_4L,
+
+    SPELLCARD_ST4_BOSS_1E,
+    SPELLCARD_ST4_BOSS_1N,
+    SPELLCARD_ST4_BOSS_1H,
+    SPELLCARD_ST4_BOSS_1L,
+    SPELLCARD_ST4_LUNASA_2E,
+    SPELLCARD_ST4_LUNASA_2N,
+    SPELLCARD_ST4_LUNASA_2H,
+    SPELLCARD_ST4_LUNASA_2L,
+    SPELLCARD_ST4_MERLIN_2E,
+    SPELLCARD_ST4_MERLIN_2N,
+    SPELLCARD_ST4_MERLIN_2H,
+    SPELLCARD_ST4_MERLIN_2L,
+    SPELLCARD_ST4_LYRICA_2E,
+    SPELLCARD_ST4_LYRICA_2N,
+    SPELLCARD_ST4_LYRICA_2H,
+    SPELLCARD_ST4_LYRICA_2L,
+    SPELLCARD_ST4_BOSS_3E,
+    SPELLCARD_ST4_BOSS_3N,
+    SPELLCARD_ST4_BOSS_3H,
+    SPELLCARD_ST4_BOSS_3L,
+    SPELLCARD_ST4_BOSS_4E,
+    SPELLCARD_ST4_BOSS_4N,
+    SPELLCARD_ST4_BOSS_4H,
+    SPELLCARD_ST4_BOSS_4L,
+
+    SPELLCARD_ST5_MBOSS_1E,
+    SPELLCARD_ST5_MBOSS_1N,
+    SPELLCARD_ST5_MBOSS_1H,
+    SPELLCARD_ST5_MBOSS_1L,
+    SPELLCARD_ST5_BOSS_1E,
+    SPELLCARD_ST5_BOSS_1N,
+    SPELLCARD_ST5_BOSS_1H,
+    SPELLCARD_ST5_BOSS_1L,
+    SPELLCARD_ST5_BOSS_2E,
+    SPELLCARD_ST5_BOSS_2N,
+    SPELLCARD_ST5_BOSS_2H,
+    SPELLCARD_ST5_BOSS_2L,
+    SPELLCARD_ST5_BOSS_3E,
+    SPELLCARD_ST5_BOSS_3N,
+    SPELLCARD_ST5_BOSS_3H,
+    SPELLCARD_ST5_BOSS_3L,
+    SPELLCARD_ST5_BOSS_4E,
+    SPELLCARD_ST5_BOSS_4N,
+    SPELLCARD_ST5_BOSS_4H,
+    SPELLCARD_ST5_BOSS_4L,
+
+    SPELLCARD_ST6_MBOSS_1E,
+    SPELLCARD_ST6_MBOSS_1N,
+    SPELLCARD_ST6_MBOSS_1H,
+    SPELLCARD_ST6_MBOSS_1L,
+    SPELLCARD_ST6_BOSS_1E,
+    SPELLCARD_ST6_BOSS_1N,
+    SPELLCARD_ST6_BOSS_1H,
+    SPELLCARD_ST6_BOSS_1L,
+    SPELLCARD_ST6_BOSS_2E,
+    SPELLCARD_ST6_BOSS_2N,
+    SPELLCARD_ST6_BOSS_2H,
+    SPELLCARD_ST6_BOSS_2L,
+    SPELLCARD_ST6_BOSS_3E,
+    SPELLCARD_ST6_BOSS_3N,
+    SPELLCARD_ST6_BOSS_3H,
+    SPELLCARD_ST6_BOSS_3L,
+    SPELLCARD_ST6_BOSS_4E,
+    SPELLCARD_ST6_BOSS_4N,
+    SPELLCARD_ST6_BOSS_4H,
+    SPELLCARD_ST6_BOSS_4L,
+    SPELLCARD_ST6_BOSS_5E,
+    SPELLCARD_ST6_BOSS_5N,
+    SPELLCARD_ST6_BOSS_5H,
+    SPELLCARD_ST6_BOSS_5L,
+    SPELLCARD_ST6_BOSS_6E,
+    SPELLCARD_ST6_BOSS_6N,
+    SPELLCARD_ST6_BOSS_6H,
+    SPELLCARD_ST6_BOSS_6L,
+
+    SPELLCARD_EX_MBOSS_1,
+    SPELLCARD_EX_MBOSS_2,
+    SPELLCARD_EX_BOSS_1,
+    SPELLCARD_EX_BOSS_2,
+    SPELLCARD_EX_BOSS_3,
+    SPELLCARD_EX_BOSS_4,
+    SPELLCARD_EX_BOSS_5,
+    SPELLCARD_EX_BOSS_6,
+    SPELLCARD_EX_BOSS_7,
+    SPELLCARD_EX_BOSS_8,
+    SPELLCARD_EX_BOSS_9,
+    SPELLCARD_EX_BOSS_10,
+
+    SPELLCARD_PH_MBOSS_1,
+    SPELLCARD_PH_MBOSS_2,
+    SPELLCARD_PH_BOSS_1,
+    SPELLCARD_PH_BOSS_2,
+    SPELLCARD_PH_BOSS_3,
+    SPELLCARD_PH_BOSS_4,
+    SPELLCARD_PH_BOSS_5,
+    SPELLCARD_PH_BOSS_6,
+    SPELLCARD_PH_BOSS_7,
+    SPELLCARD_PH_BOSS_8,
+    SPELLCARD_PH_BOSS_9,
+    SPELLCARD_PH_BOSS_10,
+    SPELLCARD_PH_BOSS_11,
+
+    SPELLCARD_COUNT,
+} SpellcardNumber;
+
 struct Th7k
 {
     u32 magic;
@@ -31,12 +203,12 @@ C_ASSERT(sizeof(Th7k) == 0xc);
 
 struct Catk : Th7k
 {
-    u32 highScorePerShot[7];
+    u32 highScorePerShot[SHOT_COUNT + 1];
     u16 idx;
     u8 nameCsum;
     char name[49];
-    u16 numAttemptsPerShot[7];
-    u16 numSuccessesPerShot[7];
+    u16 numAttemptsPerShot[SHOT_COUNT + 1];
+    u16 numSuccessesPerShot[SHOT_COUNT + 1];
 };
 C_ASSERT(sizeof(Catk) == 0x78);
 
@@ -56,8 +228,8 @@ C_ASSERT(sizeof(Hscr) == 0x28);
 
 struct Clrd : Th7k
 {
-    u8 difficultyClearedWithRetries[6];
-    u8 difficultyClearedWithoutRetries[6];
+    u8 difficultyClearedWithRetries[DIFF_COUNT];
+    u8 difficultyClearedWithoutRetries[DIFF_COUNT];
     u8 characterShotType;
     // pad 3
 };
@@ -77,7 +249,7 @@ C_ASSERT(sizeof(Pscr) == 0x18);
 struct PlstPlayCounts
 {
     u32 playCount;
-    u32 playCountPerShotType[6];
+    u32 playCountPerShotType[SHOT_COUNT];
     u32 clearCount;
     u32 noContinueClearCount;
     u32 retryCount;
@@ -94,7 +266,7 @@ struct Plst : Th7k
     u32 gameMinutes;
     u32 gameSeconds;
     u32 gameMilliseconds;
-    PlstPlayCounts playDataByDifficulty[7]; // 7 is Total
+    PlstPlayCounts playDataByDifficulty[DIFF_COUNT + 1]; // 7 is Total
 };
 
 struct Lsnm : Th7k
@@ -115,8 +287,6 @@ struct ScoreListNode
 {
     ScoreListNode()
     {
-        i32 unused[4];
-
         prev = NULL;
         next = NULL;
         data = NULL;
@@ -174,6 +344,7 @@ struct ResultScreen
     static i32 MoveCursorHorizontally(ResultScreen *screen, i32 max);
 
     static ScoreDat *OpenScore(const char *path);
+    static void UnlockAll();
     static i32 LinkScore(ScoreListNode *prevNode, Hscr *hscr);
     i32 LinkScoreEx(Hscr *out, i32 difficulty, i32 character);
     static u32 GetHighScore(ScoreDat *scoreDat, ScoreListNode *node,
@@ -208,7 +379,7 @@ struct ResultScreen
     i32 isClearingReplayName;
     char replayName[8];
     i32 unused_4c;
-    i32 totalPlayCountPerCharacter[7];
+    i32 totalPlayCountPerShot[SHOT_COUNT + 1];
     u8 lastTotalSeconds;
     // pad 3
     AnmVm vms[41];

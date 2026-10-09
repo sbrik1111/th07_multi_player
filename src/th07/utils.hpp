@@ -1,8 +1,10 @@
 #pragma once
 
-#include <d3dx8math.h>
-
+#include "ZunMath.hpp"
 #include "inttypes.hpp"
+
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+#define ARRAY_SIZE_SIGNED(x) ((i32)sizeof(x) / (i32)sizeof(x[0]))
 
 union AnyArg {
     i32 i;
@@ -17,31 +19,10 @@ union AnyArg {
 namespace utils
 {
 f32 AddNormalizeAngle(f32 a, f32 b);
-void Rotate(D3DXVECTOR3 *out, D3DXVECTOR3 *point, f32 angle);
+void Rotate(Float3 *out, Float3 *point, f32 angle);
 
 inline f32 NormalizeAngle(f32 a)
 {
     return AddNormalizeAngle(a, 0.0f);
 }
 } // namespace utils
-
-// completely useless functions for matching stack layout with temporaries
-// these are more so bandaid fixes since there could be something else causing
-// mismatches, like an improperly inlined function
-namespace UselessStack
-{
-inline void FourBytes()
-{
-    i32 idk;
-}
-
-inline void EightBytes()
-{
-    i32 idk[2];
-}
-
-inline void ThirtyTwoBytes()
-{
-    i32 idk[8];
-}
-} // namespace UselessStack

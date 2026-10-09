@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 
+#include "GameHeap.hpp"
+
 // the th08 decompilation has a ZunMemory class
 // (https://github.com/GensokyoClub/th08/blob/main/src/Global.hpp)
 // that was most likely used in debug to track allocations and frees,
@@ -16,12 +18,12 @@ namespace ZunMemory
 {
 inline void Free(void *p)
 {
-    free(p);
+    GameFree(p);
 }
 
 inline void *Alloc(size_t size)
 {
-    return malloc(size);
+    return GameAlloc(size);
 }
 
 // sometimes using zunmemory::alloc just doesnt work since the parameter isn't
@@ -29,6 +31,6 @@ inline void *Alloc(size_t size)
 inline void *Alloc2(size_t size)
 {
     size_t tmp = size;
-    return malloc(tmp);
+    return GameAlloc(tmp);
 }
 } // namespace ZunMemory

@@ -1,7 +1,7 @@
 address|name|type
 00401000|D3DXMatrixIdentity|function
 004010b0|ZunTimer::NextTick|function
-004010f0|AnmVm::Initialize|function
+004010f0|AnmVmBase::Initialize|function
 00401170|AnmVm::AnmVm|function
 004011b0|AnmVmBase::AnmVmBase|function
 004012b0|GameManager::RegenerateGameIntegrityCsum|function
@@ -131,7 +131,7 @@ address|name|type
 0041abe0|EffectManager::UpdateAttachToPlayer|function
 0041ac30|EffectManager::UpdateGather240Frames|function
 0041ad10|EffectManager::UpdateBurst30Frames|function
-0041adf0|EffectManager::DoSomethingWithEffects|function
+0041adf0|EffectManager::ShiftEffectsAfterCameraTeleport|function
 0041ae90|EffectManager::ModifyEffect1eAcceleration|function
 0041aef0|EffectManager::UpdateWeatherPhysics|function
 0041b0b0|EffectManager::InitWeatherForward|function
@@ -143,12 +143,12 @@ address|name|type
 0041bfd0|EffectManager::UpdateBurstEaseOut30Frames|function
 0041c100|EffectManager::UpdateAttachToCamera|function
 0041c1b0|EffectManager::UpdateNoOp|function
-0041c1c0|EffectManager::SpawnParticles|function
+0041c1c0|EffectManager::SpawnEffect|function
 0041c400|EffectManager::SpawnMovingParticles|function
-0041c610|EffectManager::SpawnEffect|function
+0041c610|EffectManager::SpawnSpecialEffect|function
 0041c790|EffectManager::OnUpdate|function
 0041ca10|EffectManager::OnDraw|function
-0041cb80|EffectManager::UpdateSpecialEffect|function
+0041cb80|EffectManager::DrawLayer1Effects|function
 0041cde0|EffectManager::AddedCallback|function
 0041d050|EffectManager::DeletedCallback|function
 0041d0a0|EffectManager::RegisterChain|function
@@ -231,9 +231,9 @@ address|name|type
 00427ba2|Gui::ClearActiveSprites|function
 00427be2|Gui::IsDialogueSkippable|function
 00427bf8|Gui::ShowBonusScore|function
-00427c81|Gui::ShowFullPowerMode|function
+00427c81|Gui::ShowStatusPopup|function
 00427d09|Gui::ShowSpellcardBonus|function
-00427d92|Gui::CopyTemplateSpriteToSprite|function
+00427d92|Gui::CopyEnemyNameTexture|function
 00427e7c|Gui::OnUpdate|function
 00427f22|Gui::OnDraw|function
 0042868d|Gui::ShowBombNamePortrait|function
@@ -325,7 +325,7 @@ address|name|type
 0043225b|TextHelper::CreateTextBuffer|function
 0043227e|TextHelper::ReleaseTextBuffer|function
 004322a3|TextHelper::RenderTextToTextureBold|function
-004325c0|ItemManager::AngleToVector|function
+004325c0|Float3::FromAngleMagnitude|function
 004325e0|GameManager::AddCurrentPower|function
 00432630|ItemManager::ItemManager|function
 00432690|Item::Item|function

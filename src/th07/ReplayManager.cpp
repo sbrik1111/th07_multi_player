@@ -1,4 +1,6 @@
 #include "ReplayManager.hpp"
+#include "FrameInput.hpp"
+#include "Player.hpp"
 
 #include "Chain.hpp"
 #include "EffectManager.hpp"
@@ -6,7 +8,6 @@
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
-#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "Supervisor.hpp"
@@ -41,16 +42,19 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
 
-    for (i32 playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    // th07's (the dialogue's) buttons are seat 0's.
+    g_LastFrameGameInput = g_CurFrameGameInput;
+    g_CurFrameGameInput = g_FrameInputs->held[0];
+    for (i32 seat = 0; seat < MAX_PLAYERS; seat++)
     {
-        g_LastFrameGameInputs[playerId] = g_CurFrameGameInputs[playerId];
-        g_CurFrameGameInputs[playerId] = g_CurFrameRawInputs[playerId];
+        g_SeatLastGameInput[seat] = g_SeatGameInput[seat];
+        g_SeatGameInput[seat] = g_FrameInputs->held[seat];
     }
     if (g_GameManager.defaultCfg->slowMode)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
-    if ((g_Supervisor.flags >> 3 & 1) != 0)
+    if (g_Supervisor.timingBad)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
@@ -60,7 +64,7 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
     {
         stage = 6;
     }
-    g_CurFrameGameInput = curInput = g_CurFrameRawInput;
+    g_CurFrameGameInput = curInput = g_FrameInputs->held[0];
     arg->replayInputs++;
     arg->replayInputsByStage[stage] = arg->replayInputs + 1;
     arg->replayInputs->frameNum = curInput;
@@ -120,11 +124,8 @@ u32 ReplayManager::OnUpdateDemoHighPrio(ReplayManager *arg)
     i32 idk = 0;
     g_LastFrameGameInput = g_CurFrameGameInput;
     g_CurFrameGameInput = arg->replayInputs->frameNum;
-    for (i32 playerId = 1; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        g_LastFrameGameInputs[playerId] = g_CurFrameGameInputs[playerId];
-        g_CurFrameGameInputs[playerId] = 0;
-    }
+    g_SeatLastGameInput[0] = g_LastFrameGameInput;
+    g_SeatGameInput[0] = g_CurFrameGameInput;
     arg->replayInputs = arg->replayInputs + 1;
     g_IsEighthFrameOfHeldInput = 0;
     if (g_LastFrameGameInput == g_CurFrameGameInput)
@@ -175,7 +176,7 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
         arg->data = new ReplayFile;
         // STRING: TH07 0x00496aa8
         arg->data->head.magic = *(u32 *)&"T7RP";
-        arg->data->data.shotType = g_GameManager.shotTypeAndCharacter;
+        arg->data->data.shotType = g_GameManager.ShotTypeAndCharacter(0);
         arg->data->head.version = 0x1100;
         arg->data->data.replayVersion = 256;
         arg->data->data.versionChar1 = 'b';
@@ -223,13 +224,13 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
     endData = arg->data->head.stageEndData[i].data;
 
     replayData->grazeInTotal = g_GameManager.globals->grazeInTotal;
-    replayData->bombsRemaining = g_GameManager.globals->bombsRemaining;
-    replayData->livesRemaining = g_GameManager.globals->livesRemaining;
-    replayData->currentPower = g_GameManager.globals->currentPower;
+    replayData->bombsRemaining = g_GameManager.Bombs(0);
+    replayData->livesRemaining = g_GameManager.Lives(0);
+    replayData->currentPower = g_GameManager.Power(0);
     replayData->rank = g_GameManager.rank.rank;
     replayData->pointItemsCollectedForExtend = g_GameManager.globals->pointItemsCollectedForExtend;
     replayData->stageRngSeed = g_GameManager.stageRngSeed;
-    replayData->powerItemCountForScore = g_GameManager.powerItemCountForScore;
+    replayData->powerItemCountForScore = g_GameManager.PowerItemCount(0);
     replayData->cherry = g_GameManager.cherry - g_GameManager.globals->cherryStart;
     replayData->cherryMax = g_GameManager.cherryMax - g_GameManager.globals->cherryStart;
     replayData->cherryPlus = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
@@ -291,7 +292,7 @@ ReplayManager::ValidateReplayData(ReplayFile *data, i32 size)
         goto bad;
     }
     dataDecompressed = (ReplayFile *)ZunMemory::Alloc(curData->head.sizeWithoutHeader +
-                                                               sizeof(ReplayHeader));
+                                                      sizeof(ReplayHeader));
     memcpy(dataDecompressed, data, sizeof(ReplayHeader));
     Lzss::Decompress(&curData->data.rngValue3, curData->head.compressedSize,
                      &dataDecompressed->data.rngValue3, curData->head.sizeWithoutHeader);
@@ -395,33 +396,31 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
     replayData = arg->data->head.stageReplayData[i].data;
     endData = arg->data->head.stageEndData[i].data;
 
-    g_GameManager.character = arg->data->data.shotType / 2;
-    g_GameManager.shotType = arg->data->data.shotType % 2;
-    g_GameManager.shotTypeAndCharacter = arg->data->data.shotType;
+    g_GameManager.Character(0) = arg->data->data.shotType / 2;
+    g_GameManager.ShotType(0) = arg->data->data.shotType % 2;
+    g_GameManager.ShotTypeAndCharacter(0) = arg->data->data.shotType;
     g_GameManager.difficulty = arg->data->data.difficulty;
     g_GameManager.globals->pointItemsCollectedForExtend =
         replayData->pointItemsCollectedForExtend;
     g_GameManager.rank.rank = replayData->rank;
-    g_GameManager.SetLivesRemaining(replayData->livesRemaining);
+    g_GameManager.Lives(0) = replayData->livesRemaining;
     g_GameManager.RegenerateGameIntegrityCsum();
-    g_GameManager.SetBombsRemainingAndComputeCsum(replayData->bombsRemaining);
-    g_GameManager.SetCurrentPower(replayData->currentPower);
+    g_GameManager.SetSeatBombs(0, replayData->bombsRemaining);
+    g_GameManager.Power(0) = replayData->currentPower;
     g_GameManager.RegenerateGameIntegrityCsum();
     g_GameManager.globals->grazeInTotal = replayData->grazeInTotal;
     arg->replayInputs = replayData->replayInputs;
-    g_GameManager.powerItemCountForScore = replayData->powerItemCountForScore;
+    g_GameManager.PowerItemCount(0) = replayData->powerItemCountForScore;
     g_GameManager.cherry = replayData->cherry +
                            g_GameManager.globals->cherryStart;
     g_GameManager.cherryMax = replayData->cherryMax +
                               g_GameManager.globals->cherryStart;
     g_GameManager.cherryPlus = replayData->cherryPlus +
                                g_GameManager.globals->cherryStart;
-    if (g_GameManager.cherryPlus >=
-        g_GameManager.globals->cherryStart + GetSharedBorderThreshold())
+    if (g_GameManager.cherryPlus >= g_GameManager.globals->cherryStart + 50000)
     {
-        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart +
-            GetSharedBorderThreshold();
-        g_Player.ActivateBorder();
+        g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + 50000;
+        g_Players[0].ActivateBorder();
     }
     *g_GameManager.defaultCfg = arg->data->data.cfg;
     g_Rng.SetSeed(replayData->stageRngSeed);
@@ -475,12 +474,8 @@ ZunResult ReplayManager::DeletedCallback(ReplayManager *arg)
 // FUNCTION: TH07 0x00443aa0
 ZunResult ReplayManager::RegisterChain(i32 isDemo, const char *replayFilename)
 {
-    i32 playerId;
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        g_LastFrameGameInputs[playerId] = 0;
-        g_CurFrameGameInputs[playerId] = 0;
-    }
+    g_LastFrameGameInput = 0;
+    g_CurFrameGameInput = 0;
     if (!g_ReplayManager)
     {
         ReplayManager *mgr = new ReplayManager();
@@ -494,8 +489,12 @@ ZunResult ReplayManager::RegisterChain(i32 isDemo, const char *replayFilename)
             mgr->calcChain = g_Chain.CreateElem((ChainCallback)OnUpdate);
             mgr->calcChain->addedCallback = (ChainLifecycleCallback)AddedCallback;
             mgr->calcChain->deletedCallback = (ChainLifecycleCallback)DeletedCallback;
+            // ReplayManager::OnDraw is almost certainly folded with
+            // EffectManager::UpdateNoOp, but I couldn't get it to fold
+            // from the (admittedly very little) attempts I put on it, so just
+            // do this
             mgr->drawChain = g_Chain.CreateElem(
-                (ChainCallback)EffectManager::UpdateNoOp); // idk either bro
+                (ChainCallback)EffectManager::UpdateNoOp);
             mgr->calcChain->arg = mgr;
             if (g_Chain.AddToCalcChain(mgr->calcChain, 16))
             {
@@ -583,11 +582,6 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
     DWORD bytesWritten;
     ReplayManager *mgr;
     i32 i;
-
-    if (Netplay::IsMultiplayer() || Netplay::NoSave())
-    {
-        return;
-    }
 
     if (g_ReplayManager)
     {
@@ -678,7 +672,7 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                 replayCopy.head.sizeWithoutHeader = replaySize - sizeof(ReplayHeader);
                 lpBuffer = Lzss::Compress(replayData, replayCopy.head.sizeWithoutHeader,
                                           &replayCopy.head.compressedSize);
-                free(replayData);
+                GameFree(replayData);
                 compressedSize = replayCopy.head.compressedSize;
                 csumPtr = &replayCopy.head.key;
                 csum = 0x3f000318;
@@ -759,11 +753,6 @@ void ReplayManager::SaveReplay2(const char *filename)
     ReplayManager *mgr;
     i32 i;
 
-    if (Netplay::IsMultiplayer() || Netplay::NoSave())
-    {
-        return;
-    }
-
     if (g_ReplayManager)
     {
         mgr = g_ReplayManager;
@@ -833,7 +822,7 @@ void ReplayManager::SaveReplay2(const char *filename)
             replayCopy.head.sizeWithoutHeader = replaySize - sizeof(ReplayHeader);
             lpBuffer = Lzss::Compress(replayData, replayCopy.head.sizeWithoutHeader,
                                       &replayCopy.head.compressedSize);
-            free(replayData);
+            GameFree(replayData);
             compressedSize = replayCopy.head.compressedSize;
             csumPtr = &replayCopy.head.key;
             csum = 0x3f000318;

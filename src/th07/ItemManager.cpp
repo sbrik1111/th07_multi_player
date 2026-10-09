@@ -1,14 +1,15 @@
 #include "ItemManager.hpp"
 
+#include <new>
+#include <math.h>
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
 #include "BulletManager.hpp"
 #include "EffectManager.hpp"
 #include "EnemyManager.hpp"
-#include "GameErrorContext.hpp"
+#include "Coop.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
-#include "Netplay.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -29,308 +30,16 @@ u8 g_ItemDropTable[32] = {0, 0, 1, 0, 1, 0, 0, 7, 1, 1, 0, 0, 7, 1, 1, 0, 1, 0,
                           1, 0, 1, 0, 1, 0, 1, 0, 7, 1, 1, 1, 0, 2};
 
 // GLOBAL: TH07 0x00575c70
-ItemManager g_ItemManager;
-
-static const i8 LIFE_TRANSFER_TARGET_P2 = 2;
-static const i8 LIFE_TRANSFER_TARGET_P1 = 3;
-static const i8 LIFE_TRANSFER_TARGET_P3 = 8;
-static const f32 MULTIPLAYER_RESOURCE_DROP_OFFSET = 16.0f;
-static bool g_sharedP1AutoCollectLogged = false;
-static bool g_sharedP2AutoCollectLogged = false;
-
-static void GetSeparatedResourceDropPosition(const D3DXVECTOR3 *heading,
-                                             i32 ordinal, i32 count,
-                                             D3DXVECTOR3 *position)
-{
-    f32 centerX = heading->x;
-    f32 halfSpan = MULTIPLAYER_RESOURCE_DROP_OFFSET * (count - 1);
-    f32 maximumCenterX = g_GameManager.arcadeRegionSize.x - halfSpan;
-
-    *position = *heading;
-    if (centerX < halfSpan)
-    {
-        centerX = halfSpan;
-    }
-    if (centerX > maximumCenterX)
-    {
-        centerX = maximumCenterX;
-    }
-    position->x = centerX - halfSpan +
-        ordinal * MULTIPLAYER_RESOURCE_DROP_OFFSET * 2.0f;
-}
-static const i8 AUTO_COLLECT_LEGACY = 1;
-static const i8 AUTO_COLLECT_TARGET_P1 = 4;
-static const i8 AUTO_COLLECT_TARGET_P2 = 5;
-static const i8 AUTO_COLLECT_TARGET_P3 = 9;
-static bool g_p2AutoCollectLogged = false;
-
-static i8 GetLifeTransferMarker(u8 playerId)
-{
-    switch (playerId)
-    {
-    case 0:
-        return LIFE_TRANSFER_TARGET_P1;
-    case 1:
-        return LIFE_TRANSFER_TARGET_P2;
-    case 2:
-        return LIFE_TRANSFER_TARGET_P3;
-    default:
-        return 0;
-    }
-}
-
-static i8 GetAutoCollectMarker(u8 playerId)
-{
-    switch (playerId)
-    {
-    case 0:
-        return AUTO_COLLECT_TARGET_P1;
-    case 1:
-        return AUTO_COLLECT_TARGET_P2;
-    case 2:
-        return AUTO_COLLECT_TARGET_P3;
-    default:
-        return 0;
-    }
-}
-
-static i32 GetMarkerPlayerId(i8 marker)
-{
-    if (marker == LIFE_TRANSFER_TARGET_P1 ||
-        marker == AUTO_COLLECT_TARGET_P1)
-    {
-        return 0;
-    }
-    if (marker == LIFE_TRANSFER_TARGET_P2 ||
-        marker == AUTO_COLLECT_TARGET_P2)
-    {
-        return 1;
-    }
-    if (marker == LIFE_TRANSFER_TARGET_P3 ||
-        marker == AUTO_COLLECT_TARGET_P3)
-    {
-        return 2;
-    }
-    return -1;
-}
-
-i32 GetLifeTransferSpawnState(u8 targetPlayerId)
-{
-    // Keep the legacy 3=P2 and 4=P1 states so existing diagnostics retain
-    // their animation. State 5 is the equivalent throw toward P3.
-    switch (targetPlayerId)
-    {
-    case 0:
-        return 4;
-    case 1:
-        return 3;
-    case 2:
-        return 5;
-    default:
-        return 0;
-    }
-}
-
-static bool IsItemTargetActive(const Player *player)
-{
-    return player && IsPlayerSlotActive(player->initParam) &&
-        !Netplay::IsPlayerTemporarilyAbsent(player->initParam) &&
-        (player->playerState == PLAYER_STATE_ALIVE ||
-         player->playerState == PLAYER_STATE_INVULNERABLE ||
-         player->playerState == PLAYER_STATE_BORDER);
-}
-
-static bool IsGenericAutoCollect(const Item *item)
-{
-    return item &&
-        (item->autoCollect == AUTO_COLLECT_LEGACY ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P1 ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P2 ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P3);
-}
-
-static bool HasFixedItemTarget(const Item *item)
-{
-    return item &&
-        (item->autoCollect == LIFE_TRANSFER_TARGET_P2 ||
-         item->autoCollect == LIFE_TRANSFER_TARGET_P1 ||
-         item->autoCollect == LIFE_TRANSFER_TARGET_P3 ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P1 ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P2 ||
-         item->autoCollect == AUTO_COLLECT_TARGET_P3);
-}
-
-static bool CanPlayerStartAutoCollect(const Player *player)
-{
-    return IsItemTargetActive(player) && player->shooterData &&
-        ((((i32)GetPlayerPower(player->initParam) >= 128 ||
-           g_GameManager.difficulty >= DIFF_EXTRA) &&
-          player->positionCenter.y < player->shooterData->pocY) ||
-         player->hasBorder == BORDER_ACTIVE);
-}
-
-static Player *GetAutoCollectTarget(const Item *item)
-{
-    bool eligible[TH07_MULTI_MAX_PLAYERS];
-    i32 eligibleIds[TH07_MULTI_MAX_PLAYERS];
-    i32 eligibleCount = 0;
-    i32 playerId;
-    i32 itemIndex;
-    Player *closest = NULL;
-    f32 closestDistance = 0.0f;
-
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        eligible[playerId] = IsPlayerSlotActive((u8)playerId) &&
-            CanPlayerStartAutoCollect(&g_Players[playerId]);
-        if (eligible[playerId])
-        {
-            eligibleIds[eligibleCount++] = playerId;
-        }
-    }
-
-    // Whenever auto-collect applies to more than one player at once -- the
-    // shared Shinra border, or several players at full power above the point
-    // of collection -- divide the pickups evenly instead of handing them all
-    // to the closest player. Fixed slot order plus the synchronized pool
-    // index gives an equal share without consuming RNG.
-    if (eligibleCount > 1)
-    {
-        itemIndex = item ? (i32)(item - g_ItemManager.items) : 0;
-        return &g_Players[eligibleIds[itemIndex % eligibleCount]];
-    }
-
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        f32 dx;
-        f32 dy;
-        f32 distance;
-        if (!eligible[playerId])
-        {
-            continue;
-        }
-        dx = g_Players[playerId].positionCenter.x - item->currentPosition.x;
-        dy = g_Players[playerId].positionCenter.y - item->currentPosition.y;
-        distance = dx * dx + dy * dy;
-        if (!closest || distance < closestDistance)
-        {
-            closest = &g_Players[playerId];
-            closestDistance = distance;
-        }
-    }
-    return closest;
-}
-
-static Player *GetItemTargetPlayer(Item *item)
-{
-    i32 fixedId = item ? GetMarkerPlayerId(item->autoCollect) : -1;
-    if (fixedId >= 0)
-    {
-        return &g_Players[fixedId];
-    }
-    return GetClosestActivePlayer(&item->currentPosition);
-}
-
-static i32 GetRoundRobinActivePlayerId(i32 itemIndex)
-{
-    i32 activeIds[TH07_MULTI_MAX_PLAYERS];
-    i32 activeCount = 0;
-    i32 playerId;
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        if (IsPlayerSlotActive((u8)playerId))
-        {
-            activeIds[activeCount++] = playerId;
-        }
-    }
-    return activeCount > 0 ? activeIds[itemIndex % activeCount] : -1;
-}
-
-// FUNCTION: TH07 0x004325c0
-void AngleToVector(D3DXVECTOR3 *vec, f32 angle, f32 speed)
-{
-    /* vec->x = cosf(angle) * speed;
-     * vec->y = sinf(angle) * speed;
-     */
-    __asm {
-        mov eax, vec
-        fld [angle]
-        fsincos
-        fmul [speed]
-        fstp float ptr [eax]
-        fmul [speed]
-        fstp float ptr [eax + 4]
-    }
-}
-
-// FUNCTION: TH07 0x004325e0
-void GameManager::AddCurrentPower(i32 amount)
-{
-    if (CheckGameIntegrity())
-    {
-        NUKE_SUPERVISOR();
-    }
-    this->globals->currentPower += (f32)amount;
-    RegenerateGameIntegrityCsum();
-}
-
-// FUNCTION: TH07 0x00432630
-ItemManager::ItemManager()
-{
-    i32 idk;
-
-    UselessStack::FourBytes();
-    UselessStack::FourBytes();
-    UselessStack::FourBytes();
-}
-
-// FUNCTION: TH07 0x00432690
-Item::Item()
-{
-}
+ItemManager &g_ItemManager = *new (GameStaticBlock(sizeof(ItemManager))) ItemManager();
 
 #pragma var_order(i, item)
 // FUNCTION: TH07 0x004326f0
-Item *ItemManager::SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state)
+Item *ItemManager::SpawnItem(Float3 *heading, i32 itemType, i32 state, i32 recipient)
 {
     Item *item;
     i32 i;
-    i32 powerTargetId;
-    i32 transferTargetId;
 
     item = &this->items[this->nextIndex];
-    // States 3 to 5 are a transfer thrown at one particular player. The
-    // Power-to-Cherry rule below asks whether some unrelated slot is at
-    // maximum, which has nothing to do with the player this was aimed at:
-    // letting it apply would turn a handed-over Power into Cherry on the
-    // way across.
-    if ((itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG) &&
-        state >= 3 && state <= 5)
-    {
-        /* deliberately not converted */
-    }
-    else if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
-    {
-        if (!Netplay::IsMultiplayer())
-        {
-            if ((i32)GetPlayerPower(0) >= 128)
-            {
-                itemType = ITEM_CHERRY;
-            }
-        }
-        else
-        {
-            // Assign each Power drop to an active slot in fixed round-robin
-            // order. A drop becomes Cherry only when that slot is already at
-            // MAX, so non-full P2/P3 keep receiving P even if a partner is
-            // full. Item index and active mask are rollback state.
-            powerTargetId = GetRoundRobinActivePlayerId(this->nextIndex);
-            if (powerTargetId >= 0 && GetPlayerPower((u8)powerTargetId) >= 128)
-            {
-                itemType = ITEM_CHERRY;
-            }
-        }
-    }
     for (i = 0; i < 1100; i++)
     {
         this->nextIndex++;
@@ -352,8 +61,16 @@ Item *ItemManager::SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state)
         {
             this->nextIndex = 0;
         }
+        if (recipient < 0 && (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG) &&
+            g_GameManager.Power(PowerDropSeat((i32)(item - this->items))) >= 128.0f)
+        {
+            itemType = ITEM_CHERRY;
+        }
         item->isInUse = 1;
+        item->targetSeat = (i8)recipient;
+        item->transfer = recipient >= 0;
         item->currentPosition = *heading;
+        item->targetPosition = Float3(0.0f, 0.0f, 0.0f);
         item->startPosition.x = 0.0f;
         item->startPosition.y = -2.2f;
         item->startPosition.z = 0.0f;
@@ -367,23 +84,21 @@ Item *ItemManager::SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state)
             item->targetPosition.z = 0.0f;
             item->startPosition = item->currentPosition;
         }
-        else if (state == 3 || state == 4 || state == 5)
+        else if (state == 3)
         {
-            // Match TH06multi's visible life handoff. Keep collision disabled
-            // while the item rises for 20 frames, then home it to the other
-            // player instead of letting the donor immediately recollect it.
             item->targetPosition = *heading;
             item->targetPosition.y -= 60.0f;
-            item->targetPosition.z = 0.0f;
-            item->startPosition = item->currentPosition;
+            item->startPosition = *heading;
+        }
+        else if (state == 4)
+        {
+            item->state = 0;
         }
         g_AnmManager->SetAnmIdxAndExecuteScript(&item->sprite, itemType + 708);
         item->sprite.color.color = 0xffffffff;
         item->sprite.zWriteDisable = 1;
-        transferTargetId = state == 3 ? 1 : (state == 4 ? 0 : 2);
-        item->autoCollect = state >= 3 && state <= 5
-            ? GetLifeTransferMarker((u8)transferTargetId)
-            : 0;
+        item->autoCollect = 0;
+        item->collector = 0;
         item->isOnscreen = 1;
         break;
     }
@@ -391,50 +106,26 @@ Item *ItemManager::SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state)
     return i < 1100 ? item : &this->items[1100];
 }
 
-Item *ItemManager::SpawnEnemyDrop(D3DXVECTOR3 *heading, i32 itemType,
-                                  i32 state)
+// Reserve every slot first: a full pool cannot eat a gift.
+bool ItemManager::SpawnTransfer(Float3 *heading, i32 itemType, i32 recipient, i32 amount)
 {
-    i32 activeCount = GetActivePlayerCount();
-    if (Netplay::IsMultiplayer() && activeCount > 1 &&
-        (itemType == ITEM_LIFE || itemType == ITEM_BOMB))
+    if (recipient < 0 || recipient >= PlayerCount() || amount <= 0 ||
+        (itemType != ITEM_LIFE && itemType != ITEM_POWER_SMALL))
+        return false;
+    const i32 bigCount = itemType == ITEM_POWER_SMALL ? amount / 8 : 0;
+    const i32 smallCount = itemType == ITEM_POWER_SMALL ? amount % 8 : amount;
+    const i32 needed = bigCount + smallCount;
+    i32 available = 0;
+    for (i32 i = 0; i < 1100 && available < needed; i++)
+        available += !this->items[i].isInUse;
+    if (available < needed)
+        return false;
+    for (i32 i = 0; i < needed; i++)
     {
-        D3DXVECTOR3 position;
-        Item *first = &this->items[1100];
-        i32 ordinal = 0;
-        i32 playerId;
-
-        // Emit one visibly separated copy per active slot. Slot order and
-        // symmetric offsets are deterministic and consume no RNG.
-        //
-        // The copies are deliberately left unowned: any player may walk into
-        // any of them. Reserving a copy for one slot made the other copies
-        // uncollectible for everyone else, and the owner was also excluded
-        // from auto-collect, so the extra drops were purely decorative.
-        // Even distribution is handled by GetAutoCollectTarget when
-        // auto-collect is active for more than one player at once.
-        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-        {
-            Item *spawned;
-            if (!IsPlayerSlotActive((u8)playerId))
-            {
-                continue;
-            }
-            GetSeparatedResourceDropPosition(
-                heading, ordinal, activeCount, &position);
-            spawned = SpawnItem(&position, itemType, state);
-            if (ordinal == 0)
-            {
-                first = spawned;
-            }
-            ordinal++;
-        }
-        g_GameErrorContext.Log(
-            "info : multiplayer enemy %s drop count %d separated %.0f px\r\n",
-            itemType == ITEM_LIFE ? "life" : "bomb",
-            activeCount, MULTIPLAYER_RESOURCE_DROP_OFFSET * 2.0f);
-        return first;
+        Item *item = SpawnItem(heading, i < bigCount ? ITEM_POWER_BIG : itemType, 3, recipient);
+        item->targetPosition.x += (i - (needed - 1) * 0.5f) * 8.0f;
     }
-    return SpawnItem(heading, itemType, state);
+    return true;
 }
 
 #pragma var_order(i, itemTimerSecs, itemScore, playerAngle, local_20, itemAcquired, \
@@ -452,11 +143,13 @@ void ItemManager::OnUpdate()
     i32 itemScore;
     f32 itemTimerSecs;
     i32 i;
-    Player *targetPlayer;
-    Player *autoCollectTarget;
 
     item = this->items;
-    D3DXVECTOR3 local_20(0.0f, 0.0f, 16.0f);
+    Player *player = &g_Players[0];
+    Float3 local_20(player->shooterData->itemCollectRadius,
+                    player->shooterData->itemCollectRadius, 16.0f);
+    // (uninitialized in th07)
+    itemScore = 0;
     itemAcquired = 0;
     this->activeItemCount = 0;
     this->listTail = &this->listHead;
@@ -470,14 +163,10 @@ void ItemManager::OnUpdate()
         }
 
         this->activeItemCount++;
-        targetPlayer = GetItemTargetPlayer(item);
-        if (HasFixedItemTarget(item) &&
-            !IsItemTargetActive(targetPlayer))
-        {
-            item->autoCollect = 0;
-            item->state = 0;
-            targetPlayer = GetClosestActivePlayer(&item->currentPosition);
-        }
+        player = ItemCollector(item);
+        item->collector = (i8)player->seat;
+        local_20.x = player->shooterData->itemCollectRadius;
+        local_20.y = player->shooterData->itemCollectRadius;
         if (item->state == 2)
         {
             if (item->timer < 60)
@@ -490,87 +179,53 @@ void ItemManager::OnUpdate()
             }
             else if (item->timer == 60)
             {
-                item->startPosition = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+                item->startPosition = Float3(0.0f, 0.0f, 0.0f);
                 item->state = 0;
             }
         }
-        else if (item->state == 3 || item->state == 4 || item->state == 5)
+        else if (item->state == 3)
         {
             if (item->timer < 20)
             {
-                f32 throwTime = item->timer.AsFloat() / 20.0f;
-                f32 throwEase = 1.0f -
-                    powf(1.0f - throwTime, 1.5f);
-                item->currentPosition =
-                    throwEase * item->targetPosition +
-                    item->startPosition * (1.0f - throwEase);
+                const f32 t = item->timer.AsFloat() / 20.0f;
+                const f32 ease = 1.0f - powf(1.0f - t, 1.5f);
+                item->currentPosition = ease * item->targetPosition +
+                                        (1.0f - ease) * item->startPosition;
                 goto check_collision;
             }
-            else if (item->timer == 20)
-            {
-                item->startPosition = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-                item->state = 1;
-            }
+            item->startPosition = Float3(0.0f, 0.0f, 0.0f);
+            item->state = 1;
         }
         else
         {
-            autoCollectTarget = item->state == 1 ||
-                    (HasFixedItemTarget(item) &&
-                     !IsSharedBorderActive())
-                ? NULL
-                : GetAutoCollectTarget(item);
-            if (autoCollectTarget)
+            if (item->state == 1 || ((128.0 <= (f64)(i32)g_GameManager.Power(player->seat) || g_GameManager.difficulty >= 4) && player->positionCenter.y < player->shooterData->pocY) || player->hasBorder == 1)
             {
-                targetPlayer = autoCollectTarget;
-                item->state = 1;
-                if (IsSharedBorderActive() &&
-                    targetPlayer->initParam == 0 &&
-                    !g_sharedP1AutoCollectLogged)
+                if (player->playerState != 1)
                 {
-                    g_sharedP1AutoCollectLogged = true;
-                    g_GameErrorContext.Log(
-                        "info : shared border auto-collect P1 target verified\r\n");
-                }
-                if (IsSharedBorderActive() &&
-                    targetPlayer->initParam != 0 &&
-                    !g_sharedP2AutoCollectLogged)
-                {
-                    g_sharedP2AutoCollectLogged = true;
-                    g_GameErrorContext.Log(
-                        "info : shared border auto-collect P2 target verified\r\n");
-                }
-                if (item->autoCollect == 0)
-                {
-                    item->autoCollect =
-                        GetAutoCollectMarker(targetPlayer->initParam);
-                    if (targetPlayer->initParam != 0 &&
-                        !g_p2AutoCollectLogged)
-                    {
-                        g_p2AutoCollectLogged = true;
-                        g_GameErrorContext.Log(
-                            "info : P2 top auto-collect target verified\r\n");
-                    }
-                }
-            }
-            if (item->state == 1)
-            {
-                if (targetPlayer->playerState != 1)
-                {
-                    playerAngle =
-                        targetPlayer->AngleToPlayer(&item->currentPosition);
-                    AngleToVector(&item->startPosition, playerAngle,
-                                  targetPlayer->shooterData->itemCollectSpeed);
+                    playerAngle = player->AngleToPlayer(&item->currentPosition);
+                    item->startPosition.FromAngleMagnitude(playerAngle, player->shooterData->itemCollectSpeed);
                     item->state = 1;
+                    if (player->hasBorder == 1)
+                    {
+                        item->autoCollect = 1;
+                    }
                 }
                 else
                 {
+                    item->startPosition.x = 0.0f;
                     item->startPosition.y = -0.5f;
                     item->state = 0;
                 }
             }
             else
             {
-                item->startPosition.x = 0.0f;
+                // Fanned drop copies slow down instead of stopping.
+                item->startPosition.x *= 0.95f;
+                if ((item->currentPosition.x < 16.0f && item->startPosition.x < 0.0f) ||
+                    (item->currentPosition.x > 368.0f && item->startPosition.x > 0.0f))
+                {
+                    item->startPosition.x = 0.0f;
+                }
                 item->startPosition.z = 0.0f;
                 if (item->startPosition.y < -2.2f)
                 {
@@ -594,52 +249,49 @@ void ItemManager::OnUpdate()
             item->startPosition.y = 3.0f;
         }
     check_collision:
-        targetPlayer = GetItemTargetPlayer(item);
-        local_20.x = targetPlayer->shooterData->itemCollectRadius;
-        local_20.y = targetPlayer->shooterData->itemCollectRadius;
-        if (!(item->timer < 20 &&
-              (item->state == 3 || item->state == 4 || item->state == 5)) &&
-            targetPlayer->CalcItemBoxCollision(&item->currentPosition,
-                                               &local_20))
+        if (item->state != 3 && player->CalcItemBoxCollision(&item->currentPosition, &local_20))
         {
+            if (item->transfer)
+                CoopLog("TRANSFER_PICKUP to=%d type=%d", player->seat, item->itemType);
             g_ReplayManager->replayEventFlags |= 0x40;
             switch (item->itemType)
             {
             case ITEM_POWER_SMALL:
-                if (GetPlayerPower(targetPlayer->initParam) >= 128)
+                if ((i32)g_GameManager.Power(player->seat) >= 128)
                 {
-                    g_GameManager.powerItemCountForScore++;
-                    if ((u32)g_GameManager.powerItemCountForScore >= 31)
+                    g_GameManager.PowerItemCount(player->seat)++;
+                    if ((u32)g_GameManager.PowerItemCount(player->seat) >= 31)
                     {
-                        g_GameManager.powerItemCountForScore = 30;
+                        g_GameManager.PowerItemCount(player->seat) = 30;
                     }
-                    itemScore = g_FullPowerScoreBonus[g_GameManager.powerItemCountForScore];
+                    itemScore = g_FullPowerScoreBonus[g_GameManager.PowerItemCount(player->seat)];
                     g_GameManager.AddScore(itemScore);
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, itemScore >= 12800 ? 0xffffff00 : 0xffffffff);
                 }
                 else
                 {
                     j = 0;
-                    while (GetPlayerPower(targetPlayer->initParam) >= g_PowerLevels[j])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[j])
                     {
                         j++;
                     }
                     prevPowerIdx = j;
-                    g_GameManager.powerItemCountForScore = 0;
-                    AddPlayerPower(targetPlayer->initParam, 1);
-                    if (GetPlayerPower(targetPlayer->initParam) >= 128)
+                    g_GameManager.PowerItemCount(player->seat) = 0;
+                    g_GameManager.AddSeatStock(g_GameManager.Power(player->seat), 1);
+                    if ((i32)g_GameManager.Power(player->seat) >= 128)
                     {
-                        SetPlayerPower(targetPlayer->initParam, 128);
+                        g_GameManager.Power(player->seat) = 128.0f;
+                        g_GameManager.RegenerateGameIntegrityCsum();
                         if (!g_EnemyManager.spellcardInfo.isActive)
                         {
                             g_BulletManager.RemoveAllBullets(1);
                         }
-                        g_Gui.ShowFullPowerMode(0, 1);
+                        g_Gui.ShowStatusPopup(0, 1);
                         this->DespawnAllItems(i);
                     }
                     g_GameManager.AddScore(10);
-                    g_Gui.showPower = 2;
-                    while (GetPlayerPower(targetPlayer->initParam) >= g_PowerLevels[j])
+                    g_Gui.powerDisplayUpdateFrames = 2;
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[j])
                     {
                         j++;
                     }
@@ -657,13 +309,9 @@ void ItemManager::OnUpdate()
                 break;
             case ITEM_POINT:
                 itemScore =
-                    item->currentPosition.y < targetPlayer->shooterData->pocY
-                        ? 50000
-                        : 50000 -
-                              (i32)(item->currentPosition.y -
-                                    targetPlayer->shooterData->pocY) *
-                                  100;
-                if (IsGenericAutoCollect(item))
+                    item->IsBelowPoc() ? 50000
+                                       : 50000 - item->OffsetFromPoc() * 100;
+                if (item->autoCollect == 1)
                 {
                     itemScore = 50000;
                 }
@@ -679,16 +327,11 @@ void ItemManager::OnUpdate()
                     itemScore += (g_GameManager.cherry - g_GameManager.globals->cherryStart - 50000) / 5;
                 }
                 itemScore -= itemScore % 10;
-                g_AsciiManager.CreatePopup1(
-                    &item->currentPosition, itemScore,
-                    item->currentPosition.y < targetPlayer->shooterData->pocY ||
-                            IsGenericAutoCollect(item)
-                        ? 0xffffff00
-                        : 0xffffffff);
+                g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < player->shooterData->pocY || item->autoCollect == 1 ? 0xffffff00 : 0xffffffff);
                 g_GameManager.AddScore(itemScore);
                 g_GameManager.globals->pointItemsCollectedThisStage++;
                 g_GameManager.globals->pointItemsCollectedForExtend++;
-                g_Gui.showPoint = 2;
+                g_Gui.pointDisplayUpdateFrames = 2;
                 if (item->currentPosition.y < 128.0f)
                 {
                     g_GameManager.IncreaseSubrank(10);
@@ -731,7 +374,7 @@ void ItemManager::OnUpdate()
 
                         if (g_GameManager.globals->pointItemsCollectedForExtend >= g_GameManager.globals->nextNeededPointItemsForExtend)
                         {
-                            ExtendAllPlayersFromPoints();
+                            CoopExtendFromPoints();
                             g_GameManager.globals->extendsFromPointItems++;
                             continue;
                         }
@@ -740,32 +383,33 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_POWER_BIG:
-                if (GetPlayerPower(targetPlayer->initParam) >= 128)
+                if ((i32)g_GameManager.Power(player->seat) >= 128)
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, itemScore >= 1000 ? 0xffffff00 : 0xffffffff);
                 }
                 else
                 {
                     k = 0;
-                    while (GetPlayerPower(targetPlayer->initParam) >= g_PowerLevels[k])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[k])
                     {
                         k++;
                     }
                     prevPowerLevel2 = k;
-                    AddPlayerPower(targetPlayer->initParam, 8);
-                    if (GetPlayerPower(targetPlayer->initParam) >= 128)
+                    g_GameManager.AddSeatStock(g_GameManager.Power(player->seat), 8);
+                    if ((i32)g_GameManager.Power(player->seat) >= 128)
                     {
-                        SetPlayerPower(targetPlayer->initParam, 128);
+                        g_GameManager.Power(player->seat) = 128.0f;
+                        g_GameManager.RegenerateGameIntegrityCsum();
                         if (!g_EnemyManager.spellcardInfo.isActive)
                         {
                             g_BulletManager.RemoveAllBullets(1);
                         }
-                        g_Gui.ShowFullPowerMode(0, 1);
+                        g_Gui.ShowStatusPopup(0, 1);
                         this->DespawnAllItems(i);
                     }
-                    g_Gui.showPower = 2;
+                    g_Gui.powerDisplayUpdateFrames = 2;
                     g_GameManager.AddScore(10);
-                    while (GetPlayerPower(targetPlayer->initParam) >= g_PowerLevels[k])
+                    while ((i32)g_GameManager.Power(player->seat) >= g_PowerLevels[k])
                     {
                         k++;
                     }
@@ -781,43 +425,34 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_BOMB:
-                if (GetPlayerBombs(targetPlayer->initParam) < 8)
+                if ((i32)g_GameManager.Bombs(player->seat) < 8)
                 {
-                    AddPlayerBombs(targetPlayer->initParam, 1);
-                    g_Gui.showBombs = 2;
+                    g_GameManager.AddSeatStock(g_GameManager.Bombs(player->seat), 1);
+                    g_Gui.bombDisplayUpdateFrames = 2;
                 }
                 g_GameManager.IncreaseSubrank(5);
                 break;
             case ITEM_LIFE:
-            {
-                i32 recipient = targetPlayer->initParam;
-                i32 livesBefore = GetPlayerLives(recipient);
-                ExtendPlayerFromItem(targetPlayer->initParam);
-                if (item->autoCollect == LIFE_TRANSFER_TARGET_P2 ||
-                    item->autoCollect == LIFE_TRANSFER_TARGET_P1 ||
-                    item->autoCollect == LIFE_TRANSFER_TARGET_P3)
-                {
-                    Netplay::ReportLifeTransferTestResult(
-                        recipient, livesBefore, GetPlayerLives(recipient));
-                }
+                g_GameManager.ExtendSeat(player->seat);
                 break;
-            }
             case ITEM_FULL_POWER:
-                if (GetPlayerPower(targetPlayer->initParam) < 128)
+                if ((i32)g_GameManager.Power(player->seat) < 128)
                 {
                     g_BulletManager.RemoveAllBullets(1);
-                    g_Gui.ShowFullPowerMode(0, 1);
+                    g_Gui.ShowStatusPopup(0, 1);
                     g_SoundPlayer.PlaySoundByIdx(SOUND_POWERUP, 0);
                     g_AsciiManager.CreatePopup1(&item->currentPosition, -1, 0xffffc0a0);
+                    g_GameManager.Power(player->seat) = 128.0f;
                     this->DespawnAllItems(i);
                 }
-                SetPlayerPower(targetPlayer->initParam, 128);
+                g_GameManager.Power(player->seat) = 128.0f;
+                g_GameManager.RegenerateGameIntegrityCsum();
                 g_GameManager.AddScore(1000);
                 g_AsciiManager.CreatePopup1(&item->currentPosition, 1000, 0xffffffff);
-                g_Gui.showPower = 2;
+                g_Gui.powerDisplayUpdateFrames = 2;
                 break;
             case ITEM_POINT_BULLET:
-                if (!targetPlayer->isBombing)
+                if (!player->isBombing)
                 {
                     itemScore = g_GameManager.globals->grazeInTotal / 40 * 10 + 300;
                     if (itemScore <= 0)
@@ -831,15 +466,13 @@ void ItemManager::OnUpdate()
                 }
                 g_AsciiManager.CreatePopup2(&item->currentPosition, itemScore, -1);
                 g_GameManager.AddScore(itemScore);
-                if (!targetPlayer->bombInfo.isInUse)
+                if (!player->bombInfo.isInUse)
                 {
-                    g_GameManager.AddCherryPlusForPlayer(
-                        20, targetPlayer->initParam);
+                    g_GameManager.AddCherryPlus(20);
                 }
                 else if ((i & 1) == 0)
                 {
-                    g_GameManager.AddCherryPlusForPlayer(
-                        10, targetPlayer->initParam);
+                    g_GameManager.AddCherryPlus(10);
                 }
                 else
                 {
@@ -847,30 +480,17 @@ void ItemManager::OnUpdate()
                 }
                 break;
             case ITEM_CHERRY_SMALL:
-                g_GameManager.AddCherryPlusForPlayer(
-                    30, targetPlayer->initParam);
+                g_GameManager.AddCherryPlus(30);
                 g_GameManager.AddCherry(70);
                 break;
             case ITEM_CHERRY:
                 if (g_GameManager.IsCherryAtMax())
                 {
-                    itemScore =
-                        item->currentPosition.y <
-                                    targetPlayer->shooterData->pocY ||
-                                item->autoCollect
-                            ? 50000
-                            : 50000 -
-                                  (i32)(item->currentPosition.y -
-                                        targetPlayer->shooterData->pocY) *
-                                      100;
+                    itemScore = item->ShouldAwardMaxScore()
+                                    ? 50000
+                                    : 50000 - item->OffsetFromPoc() * 100;
                     itemScore -= itemScore % 10;
-                    g_AsciiManager.CreatePopup1(
-                        &item->currentPosition, itemScore,
-                        item->currentPosition.y <
-                                    targetPlayer->shooterData->pocY ||
-                                item->autoCollect
-                            ? 0xffffff00
-                            : 0xffffffff);
+                    g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, item->currentPosition.y < player->shooterData->pocY || item->autoCollect ? 0xffffff00 : 0xffffffff);
                     g_GameManager.AddScore(itemScore);
                 }
                 itemScore = 1000;
@@ -879,8 +499,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlusForPlayer(
-                    itemScore, targetPlayer->initParam);
+                g_GameManager.AddCherryPlus(itemScore);
                 break;
             case ITEM_STAR:
                 itemScore = g_GameManager.globals->grazeInTotal / 40 * 10 + 300;
@@ -898,8 +517,7 @@ void ItemManager::OnUpdate()
                 {
                     g_AsciiManager.CreatePopup1(&item->currentPosition, itemScore, 0xffff4040);
                 }
-                g_GameManager.AddCherryPlusForPlayer(
-                    itemScore, targetPlayer->initParam);
+                g_GameManager.AddCherryPlus(itemScore);
                 break;
             }
             item->isInUse = 0;
@@ -939,8 +557,11 @@ void ItemManager::RemoveAllItems()
             continue;
         }
 
-        item->state = 1;
-        item->startPosition = D3DXVECTOR3(0.0f, -0.5f, 0.0f);
+        if (!item->transfer)
+        {
+            item->state = 1;
+            item->startPosition = Float3(0.0f, -0.5f, 0.0f);
+        }
     }
 }
 
@@ -959,7 +580,8 @@ void ItemManager::DespawnAllItems(i32 param_1)
             continue;
         }
 
-        if (item->itemType == 0 || item->itemType == 2)
+        if ((item->itemType == ITEM_POWER_SMALL || item->itemType == ITEM_POWER_BIG) &&
+            !item->transfer && g_GameManager.Power(PowerDropSeat(i)) >= 128.0f)
         {
             if (item->startPosition.y > -0.5f)
             {
@@ -967,7 +589,7 @@ void ItemManager::DespawnAllItems(i32 param_1)
                 item->startPosition.y = -0.5f;
                 item->startPosition.z = 0.0f;
             }
-            g_EffectManager.SpawnParticles(0, &item->currentPosition, 1, 0xffffffff);
+            g_EffectManager.SpawnEffect(0, &item->currentPosition, 1, 0xffffffff);
             item->itemType = 7;
             g_AnmManager->SetAnmIdxAndExecuteScript(&item->sprite, 715);
         }
@@ -989,8 +611,9 @@ void ItemManager::ActivateAllItems()
             continue;
         }
 
-        if (item->state == 1)
+        if (item->state == 1 && !item->transfer)
         {
+            item->targetSeat = -1;
             item->state = 0;
             item->startPosition.x = 0.0f;
             item->startPosition.y = -0.9f;

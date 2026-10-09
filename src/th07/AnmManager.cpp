@@ -1,4 +1,5 @@
 #include "AnmManager.hpp"
+#include "multi/RenderScratch.h"
 
 #include <d3d8.h>
 #include <d3d8types.h>
@@ -7,7 +8,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "AnmVm.hpp"
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "Rng.hpp"
@@ -31,12 +31,26 @@ VertexTex1Xyzrhw g_QuadTemplate[4];
 // GLOBAL: TH07 0x004ba078
 VertexTex1DiffuseXyz g_Quad3DFallback[4];
 
+// GLOBAL: TH07 0x0049512c
+const D3DFORMAT g_TextureFormatD3D8Mapping[6] = {
+    D3DFMT_UNKNOWN,
+    D3DFMT_A8R8G8B8,
+    D3DFMT_A1R5G5B5,
+    D3DFMT_R5G6B5,
+    D3DFMT_R8G8B8,
+    D3DFMT_A4R4G4B4,
+};
+
+// GLOBAL: TH07 0x00495144
+const i32 g_TextureBytesPerPixel[7] = {4, 4, 2, 2, 3, 2, 0};
+
 // FUNCTION: TH07 0x0044d3e0
 AnmManager::AnmManager()
 {
     memset(this, 0, sizeof(AnmManager));
+    this->spriteVertexBuffer = th07::render::SpriteVertexScratch();
 
-    for (i32 i = 0; i < 2816; i++)
+    for (i32 i = 0; i < ARRAY_SIZE_SIGNED(this->sprites); i++)
     {
         this->sprites[i].sourceFileIndex = -1;
     }
@@ -86,18 +100,18 @@ void AnmManager::SetupVertexBuffer()
 {
     RenderVertexInfo *vertexData;
 
-    this->vertexBufferContents[2].position.x = -128.0f;
-    this->vertexBufferContents[0].position.x = -128.0f;
-    this->vertexBufferContents[3].position.x = 128.0f;
-    this->vertexBufferContents[1].position.x = 128.0f;
-    this->vertexBufferContents[1].position.y = -128.0f;
-    this->vertexBufferContents[0].position.y = -128.0f;
-    this->vertexBufferContents[3].position.y = 128.0f;
-    this->vertexBufferContents[2].position.y = 128.0f;
-    this->vertexBufferContents[3].position.z = 0.0f;
-    this->vertexBufferContents[2].position.z = 0.0f;
-    this->vertexBufferContents[1].position.z = 0.0f;
-    this->vertexBufferContents[0].position.z = 0.0f;
+    this->vertexBufferContents[2].pos.x = -128.0f;
+    this->vertexBufferContents[0].pos.x = -128.0f;
+    this->vertexBufferContents[3].pos.x = 128.0f;
+    this->vertexBufferContents[1].pos.x = 128.0f;
+    this->vertexBufferContents[1].pos.y = -128.0f;
+    this->vertexBufferContents[0].pos.y = -128.0f;
+    this->vertexBufferContents[3].pos.y = 128.0f;
+    this->vertexBufferContents[2].pos.y = 128.0f;
+    this->vertexBufferContents[3].pos.z = 0.0f;
+    this->vertexBufferContents[2].pos.z = 0.0f;
+    this->vertexBufferContents[1].pos.z = 0.0f;
+    this->vertexBufferContents[0].pos.z = 0.0f;
     this->vertexBufferContents[2].textureUV.x = 0.0f;
     this->vertexBufferContents[0].textureUV.x = 0.0f;
     this->vertexBufferContents[3].textureUV.x = 1.0f;
@@ -106,14 +120,14 @@ void AnmManager::SetupVertexBuffer()
     this->vertexBufferContents[0].textureUV.y = 0.0f;
     this->vertexBufferContents[3].textureUV.y = 1.0f;
     this->vertexBufferContents[2].textureUV.y = 1.0f;
-    g_Quad3DFallback[0].position =
-        this->vertexBufferContents[0].position;
-    g_Quad3DFallback[1].position =
-        this->vertexBufferContents[1].position;
-    g_Quad3DFallback[2].position =
-        this->vertexBufferContents[2].position;
-    g_Quad3DFallback[3].position =
-        this->vertexBufferContents[3].position;
+    g_Quad3DFallback[0].pos =
+        this->vertexBufferContents[0].pos;
+    g_Quad3DFallback[1].pos =
+        this->vertexBufferContents[1].pos;
+    g_Quad3DFallback[2].pos =
+        this->vertexBufferContents[2].pos;
+    g_Quad3DFallback[3].pos =
+        this->vertexBufferContents[3].pos;
     g_Quad3DFallback[0].textureUV.x =
         this->vertexBufferContents[0].textureUV.x;
     g_Quad3DFallback[0].textureUV.y =
@@ -174,7 +188,7 @@ ZunResult AnmManager::LoadTexture(i32 textureIdx, const char *texturePath,
             g_TextureFormatD3D8Mapping[formatIdx], D3DPOOL_MANAGED, 3, 0xffffffff,
             colorKey, NULL, NULL, this->textures + textureIdx))
     {
-        free(srcData);
+        GameFree(srcData);
         return ZUN_ERROR;
     }
     this->imageDataArray[textureIdx] = srcData;
@@ -297,7 +311,7 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx,
         surfaceDesc.Format != D3DFMT_A1R5G5B5)
     {
         // STRING: TH07 0x00495cb8
-        g_GameErrorContext.Fatal("error : イメージがαを持っていません\r\n");
+        g_GameErrorContext.Fatal("error : �C���[�W�����������Ă��܂���\r\n");
         goto err;
     }
 
@@ -364,11 +378,11 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx,
     textureSrc->UnlockRect(0);
     this->textures[textureIdx]->UnlockRect(0);
     SAFE_RELEASE(textureSrc);
-    free(data);
+    GameFree(data);
     return ZUN_SUCCESS;
 err:
     SAFE_RELEASE(textureSrc);
-    free(data);
+    GameFree(data);
     return ZUN_ERROR;
 }
 
@@ -396,7 +410,7 @@ i32 AnmManager::LoadAnms(i32 anmIdx, const char *path, i32 spriteIdxOffset)
     if (!entry)
     {
         // STRING: TH07 0x00495c7c
-        g_GameErrorContext.Fatal("アニメが読み込めません。データが失われてるか壊れています\r\n");
+        g_GameErrorContext.Fatal("�A�j�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
         return ZUN_ERROR;
     }
     while (true)
@@ -437,13 +451,13 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
     id = 0;
     if (!rawEntry)
     {
-        g_GameErrorContext.Fatal("アニメが読み込めません。データが失われてるか壊れています\r\n");
+        g_GameErrorContext.Fatal("�A�j�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
         return ZUN_ERROR;
     }
-    if (textureIdx >= ANM_FILE_SLOT_COUNT)
+    if (textureIdx >= ARRAY_SIZE_SIGNED(this->anmFiles))
     {
         // STRING: TH07 0x00495c5c
-        g_GameErrorContext.Fatal("テクスチャ格納先が足りません\r\n");
+        g_GameErrorContext.Fatal("�e�N�X�`���i�[�悪����܂���\r\n");
         return ZUN_ERROR;
     }
     ReleaseAnm(textureIdx);
@@ -451,7 +465,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
     if (data->version != 2)
     {
         // STRING: TH07 0x00495c3c
-        g_GameErrorContext.Fatal("アニメのバージョンが違います\r\n");
+        g_GameErrorContext.Fatal("�A�j���̃o�[�W�������Ⴂ�܂�\r\n");
         return ZUN_ERROR;
     }
     data->textureIdx = textureIdx;
@@ -470,7 +484,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
                 ZUN_SUCCESS)
             {
                 // STRING: TH07 0x00495bf8
-                g_GameErrorContext.Fatal("テクスチャ %s が読み込めません。データが失われてるか壊れています\r\n", name);
+                g_GameErrorContext.Fatal("�e�N�X�`�� %s ���ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n", name);
                 return ZUN_ERROR;
             }
         }
@@ -480,7 +494,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
             if (LoadTextureAlphaChannel(data->textureIdx, name, data->format,
                                         data->color_key) != ZUN_SUCCESS)
             {
-                g_GameErrorContext.Fatal("テクスチャ %s が読み込めません。データが失われてるか壊れています\r\n", name);
+                g_GameErrorContext.Fatal("�e�N�X�`�� %s ���ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n", name);
                 return ZUN_ERROR;
             }
         }
@@ -493,7 +507,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
                 data->format) != ZUN_SUCCESS)
         {
             // STRING: TH07 0x00495bb8
-            g_GameErrorContext.Fatal("テクスチャが読み込めません。データが失われてるか壊れています\r\n");
+            g_GameErrorContext.Fatal("�e�N�X�`�����ǂݍ��߂܂���B�f�[�^�������Ă邩���Ă��܂�\r\n");
             return ZUN_ERROR;
         }
     }
@@ -523,20 +537,20 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry,
         {
             id = rawSprite->id;
         }
-        if (rawSprite->id + spriteIdxOffset >= 2816)
+        if (rawSprite->id + spriteIdxOffset >= ARRAY_SIZE_SIGNED(this->sprites))
         {
             // STRING: TH07 0x00495b80
-            g_GameErrorContext.Fatal("スプライトが格納できません。テーブルが不足しています\r\n");
+            g_GameErrorContext.Fatal("�X�v���C�g���i�[�ł��܂���B�e�[�u�����s�����Ă��܂�\r\n");
             return ZUN_ERROR;
         }
         LoadSprite(rawSprite->id + spriteIdxOffset, &loadedSprite);
     }
     for (i = 0; i < data->numScripts; i++, curSprite += 2)
     {
-        if (*curSprite + spriteIdxOffset >= 2816)
+        if (*curSprite + spriteIdxOffset >= ARRAY_SIZE_SIGNED(this->sprites))
         {
             // STRING: TH07 0x00495b4c
-            g_GameErrorContext.Fatal("アニメが格納できません。テーブルが不足しています\r\n");
+            g_GameErrorContext.Fatal("�A�j�����i�[�ł��܂���B�e�[�u�����s�����Ă��܂�\r\n");
             return ZUN_ERROR;
         }
         if (id < *curSprite)
@@ -563,7 +577,7 @@ void AnmManager::ReleaseAnm(i32 anmIdx)
     i32 spriteIdxOffset;
     i32 *spriteIdx;
 
-    if (anmIdx < 0 || (u32)anmIdx >= ANM_FILE_SLOT_COUNT)
+    if (anmIdx < 0 || (u32)anmIdx >= ARRAY_SIZE_SIGNED(this->anmFiles))
     {
         return;
     }
@@ -594,7 +608,7 @@ void AnmManager::ReleaseAnm(i32 anmIdx)
         ReleaseTexture(rawEntry->textureIdx);
         if (rawEntry->ownsMemory)
         {
-            free(rawEntry);
+            GameFree(rawEntry);
         }
         this->anmFiles[anmIdx].raw = NULL;
         this->currentBlendMode = 255;
@@ -676,8 +690,6 @@ ZunResult AnmManager::SetActiveSprite(AnmVm *vm, i32 spriteIdx)
 // FUNCTION: TH07 0x0044ea20
 void AnmManager::SetAndExecuteScript(AnmVm *vm, AnmRawInstr *beginningOfScript)
 {
-    i32 idk;
-
     if (!beginningOfScript)
     {
         memset(vm, 0, sizeof(AnmVm));
@@ -713,7 +725,7 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
         }
     }
     color.color = vm->useColor2 ? vm->color2.color : vm->color.color;
-    if (g_Supervisor.cfg.noVertexBuffers)
+    if (!g_Supervisor.cfg.noVertexBuffers)
     {
         if (this->colorMulEnabled)
         {
@@ -829,22 +841,6 @@ ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
 
     if ((drawFlags & 1) != 0)
     {
-        /*g_QuadVertices[0].pos.x =
-            roundf(g_QuadVertices[0].pos.x) - 0.5f;
-        g_QuadVertices[1].pos.x =
-            roundf(g_QuadVertices[1].pos.x) - 0.5f;
-        g_QuadVertices[0].pos.y =
-            roundf(g_QuadVertices[0].pos.y) - 0.5f;
-        g_QuadVertices[2].pos.y =
-            roundf(g_QuadVertices[2].pos.y) - 0.5f;
-        g_QuadVertices[1].pos.y =
-            g_QuadVertices[0].pos.y;
-        g_QuadVertices[2].pos.x =
-            g_QuadVertices[0].pos.x;
-        g_QuadVertices[3].pos.x =
-            g_QuadVertices[1].pos.x;
-        g_QuadVertices[3].pos.y =
-        g_QuadVertices[2].pos.y;*/
         __asm {
         fld g_QuadVertices[0 * TYPE g_QuadVertices].pos.x
         frndint
@@ -1194,21 +1190,21 @@ ZunResult AnmManager::CalcBillboardTransform(AnmVm *vm)
     f32 sinZ;
     D3DXMATRIX matrix;
     f32 z = vm->rotation.z;
-    D3DXVECTOR3 projectRight;
-    D3DXVECTOR3 projectCenter;
-    D3DXVECTOR3 projectRightOffset;
+    Float3 projectRight;
+    Float3 projectCenter;
+    Float3 projectRightOffset;
     f32 cosZ;
 
     sincosf_macro(sinZ, cosZ, z);
 
-    D3DXVECTOR3 origin(0.0f, 0.0f, 0.0f);
+    Float3 origin(0.0f, 0.0f, 0.0f);
 
     D3DXMatrixIdentity(&matrix);
     matrix.m[3][0] = vm->pos.x;
     matrix.m[3][1] = vm->pos.y;
     matrix.m[3][2] = vm->pos.z;
 
-    D3DXVec3Project(&projectCenter, &origin, &g_Supervisor.viewport,
+    D3DXVec3Project(projectCenter.asD3DX(), origin.asD3DX(), &g_Supervisor.viewport,
                     &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix,
                     &matrix);
 
@@ -1217,13 +1213,13 @@ ZunResult AnmManager::CalcBillboardTransform(AnmVm *vm)
         return ZUN_ERROR;
     }
 
-    D3DXVec3Project(&projectRight, &g_Stage.cam.right, &g_Supervisor.viewport,
+    D3DXVec3Project(projectRight.asD3DX(), g_Stage.cam.right.asD3DX(), &g_Supervisor.viewport,
                     &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix,
                     &matrix);
 
     projectRightOffset = projectRight - projectCenter;
 
-    halfLength = D3DXVec3Length(&projectRightOffset) * 0.5f;
+    halfLength = D3DXVec3Length(projectRightOffset.asD3DX()) * 0.5f;
     halfWidth = halfLength * vm->sprite->widthPx * vm->scale.x;
     halfHeight = halfLength * vm->sprite->heightPx * vm->scale.y;
 
@@ -1343,19 +1339,19 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
     world.m[3][2] = vm->pos.z;
 
     D3DXVec3Project((D3DXVECTOR3 *)&g_QuadVertices[0].pos,
-                    &this->vertexBufferContents[0].position,
+                    this->vertexBufferContents[0].pos.asD3DX(),
                     &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
                     &g_Supervisor.viewMatrix, &world);
     D3DXVec3Project((D3DXVECTOR3 *)&g_QuadVertices[1].pos,
-                    &this->vertexBufferContents[1].position,
+                    this->vertexBufferContents[1].pos.asD3DX(),
                     &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
                     &g_Supervisor.viewMatrix, &world);
     D3DXVec3Project((D3DXVECTOR3 *)&g_QuadVertices[2].pos,
-                    &this->vertexBufferContents[2].position,
+                    this->vertexBufferContents[2].pos.asD3DX(),
                     &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
                     &g_Supervisor.viewMatrix, &world);
     D3DXVec3Project((D3DXVECTOR3 *)&g_QuadVertices[3].pos,
-                    &this->vertexBufferContents[3].position,
+                    this->vertexBufferContents[3].pos.asD3DX(),
                     &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
                     &g_Supervisor.viewMatrix, &world);
 
@@ -1521,25 +1517,25 @@ f32 AnmVm::GetFloatVarValue(f32 arg)
 {
     switch ((i32)arg)
     {
-    case 10000:
+    case ANM_VAR_INT1_1:
         return (f32)this->intVars1[0];
-    case 10001:
+    case ANM_VAR_INT1_2:
         return (f32)this->intVars1[1];
-    case 10002:
+    case ANM_VAR_INT1_3:
         return (f32)this->intVars1[2];
-    case 10003:
+    case ANM_VAR_INT1_4:
         return (f32)this->intVars1[3];
-    case 10004:
+    case ANM_VAR_FLOAT_1:
         return this->floatVars[0];
-    case 10005:
+    case ANM_VAR_FLOAT_2:
         return this->floatVars[1];
-    case 10006:
+    case ANM_VAR_FLOAT_3:
         return this->floatVars[2];
-    case 10007:
+    case ANM_VAR_FLOAT_4:
         return this->floatVars[3];
-    case 10008:
+    case ANM_VAR_INT2_1:
         return (f32)this->intVars2[0];
-    case 10009:
+    case ANM_VAR_INT2_2:
         return (f32)this->intVars2[1];
     default:
         return arg;
@@ -1551,25 +1547,25 @@ i32 AnmVm::GetVarValue(i32 arg)
 {
     switch (arg)
     {
-    case 10000:
+    case ANM_VAR_INT1_1:
         return this->intVars1[0];
-    case 10001:
+    case ANM_VAR_INT1_2:
         return this->intVars1[1];
-    case 10002:
+    case ANM_VAR_INT1_3:
         return this->intVars1[2];
-    case 10003:
+    case ANM_VAR_INT1_4:
         return this->intVars1[3];
-    case 10004:
+    case ANM_VAR_FLOAT_1:
         return this->floatVars[0];
-    case 10005:
+    case ANM_VAR_FLOAT_2:
         return this->floatVars[1];
-    case 10006:
+    case ANM_VAR_FLOAT_3:
         return this->floatVars[2];
-    case 10007:
+    case ANM_VAR_FLOAT_4:
         return this->floatVars[3];
-    case 10008:
+    case ANM_VAR_INT2_1:
         return this->intVars2[0];
-    case 10009:
+    case ANM_VAR_INT2_2:
         return this->intVars2[1];
     default:
         return arg;
@@ -1586,13 +1582,13 @@ f32 *AnmVm::GetFloatVar(f32 *paramId, u16 mask, u32 idx)
 
     switch ((u32)*paramId)
     {
-    case 10004:
+    case ANM_VAR_FLOAT_1:
         return &this->floatVars[0];
-    case 10005:
+    case ANM_VAR_FLOAT_2:
         return &this->floatVars[1];
-    case 10006:
+    case ANM_VAR_FLOAT_3:
         return &this->floatVars[2];
-    case 10007:
+    case ANM_VAR_FLOAT_4:
         return &this->floatVars[3];
     default:
         return paramId;
@@ -1609,17 +1605,17 @@ i32 *AnmVm::GetVar(i32 *paramId, u16 mask, u32 idx)
 
     switch (*paramId)
     {
-    case 10000:
+    case ANM_VAR_INT1_1:
         return &this->intVars1[0];
-    case 10001:
+    case ANM_VAR_INT1_2:
         return &this->intVars1[1];
-    case 10002:
+    case ANM_VAR_INT1_3:
         return &this->intVars1[2];
-    case 10003:
+    case ANM_VAR_INT1_4:
         return &this->intVars1[3];
-    case 10008:
+    case ANM_VAR_INT2_1:
         return &this->intVars2[0];
-    case 10009:
+    case ANM_VAR_INT2_2:
         return &this->intVars2[1];
     default:
         return paramId;
@@ -1733,7 +1729,7 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_INTERP_SCALE:
             vm->interpStartTimes[4] = 0;
             vm->interpEndTimes[4] = GET_INT_VALUE(2);
-            vm->interpModes[4] = 0;
+            vm->easeModes[4] = 0;
             vm->scaleInterpInitial = vm->scale;
             vm->scaleInterpFinal.x = GET_FLOAT_VALUE(0);
             vm->scaleInterpFinal.y = GET_FLOAT_VALUE(1);
@@ -1743,7 +1739,7 @@ WHY_NOT_JUST_CONTINUE:
             vm->colorInterpFinalColor.bytes.a = instr->args[0].b[0];
             vm->interpStartTimes[2] = 0;
             vm->interpEndTimes[2] = GET_INT_VALUE(1);
-            vm->interpModes[2] = 0;
+            vm->easeModes[2] = 0;
             break;
         case ANM_SET_BLEND:
             vm->blendMode = instr->args[0].i;
@@ -1752,22 +1748,22 @@ WHY_NOT_JUST_CONTINUE:
             if (!vm->useOffset)
             {
                 vm->pos =
-                    D3DXVECTOR3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
+                    Float3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
             }
             else
             {
                 vm->offset =
-                    D3DXVECTOR3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
+                    Float3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
             }
             break;
         case ANM_POS_TIME_ACCEL:
-            vm->interpModes[0] = 6;
+            vm->easeModes[0] = 6;
             goto interp_pos;
         case ANM_POS_TIME_DECEL:
-            vm->interpModes[0] = 4;
+            vm->easeModes[0] = 4;
             goto interp_pos;
         case ANM_POS_TIME_LINEAR:
-            vm->interpModes[0] = 0;
+            vm->easeModes[0] = 0;
         interp_pos:
             if (!vm->useOffset)
             {
@@ -1778,7 +1774,7 @@ WHY_NOT_JUST_CONTINUE:
                 vm->posInterpInitial = vm->offset;
             }
             vm->posInterpFinal =
-                D3DXVECTOR3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
+                Float3(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1), GET_FLOAT_VALUE(2));
             vm->interpEndTimes[0] = GET_INT_VALUE(3);
             vm->interpStartTimes[0] = 0;
             break;
@@ -1890,7 +1886,7 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_INTERP_POS:
             vm->interpStartTimes[0] = 0;
             vm->interpEndTimes[0] = GET_INT_VALUE(0);
-            vm->interpModes[0] = instr->args[1].b[0];
+            vm->easeModes[0] = instr->args[1].b[0];
             if (!vm->useOffset)
             {
                 vm->posInterpInitial = vm->pos;
@@ -1906,7 +1902,7 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_INTERP_COLOR:
             vm->interpStartTimes[1] = 0;
             vm->interpEndTimes[1] = GET_INT_VALUE(0);
-            vm->interpModes[1] = instr->args[1].b[0];
+            vm->easeModes[1] = instr->args[1].b[0];
             vm->colorInterpInitialColor.bytes.r = vm->color.bytes.r;
             vm->colorInterpInitialColor.bytes.g = vm->color.bytes.g;
             vm->colorInterpInitialColor.bytes.b = vm->color.bytes.b;
@@ -1917,14 +1913,14 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_INTERP_ALPHA:
             vm->interpStartTimes[2] = 0;
             vm->interpEndTimes[2] = GET_INT_VALUE(0);
-            vm->interpModes[2] = instr->args[1].b[0];
+            vm->easeModes[2] = instr->args[1].b[0];
             vm->colorInterpInitialColor.bytes.a = vm->color.bytes.a;
             vm->colorInterpFinalColor.bytes.a = instr->args[2].b[0];
             break;
         case ANM_INTERP_ROTATE:
             vm->interpStartTimes[3] = 0;
             vm->interpEndTimes[3] = GET_INT_VALUE(0);
-            vm->interpModes[3] = instr->args[1].b[0];
+            vm->easeModes[3] = instr->args[1].b[0];
             vm->rotateInterpInitial = vm->rotation;
             vm->rotateInterpFinal.x = GET_FLOAT_VALUE(2);
             vm->rotateInterpFinal.y = GET_FLOAT_VALUE(3);
@@ -1934,7 +1930,7 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_INTERP_SCALE_2:
             vm->interpStartTimes[4] = 0;
             vm->interpEndTimes[4] = GET_INT_VALUE(0);
-            vm->interpModes[4] = instr->args[1].b[0];
+            vm->easeModes[4] = instr->args[1].b[0];
             vm->scaleInterpInitial = vm->scale;
             vm->scaleInterpFinal.x = GET_FLOAT_VALUE(2);
             vm->scaleInterpFinal.y = GET_FLOAT_VALUE(3);
@@ -2027,7 +2023,7 @@ WHY_NOT_JUST_CONTINUE:
         case ANM_ATAN:
             *GET_FLOAT_PTR(0) = atanf(GET_FLOAT_VALUE(1));
             break;
-        case ANM_ADD_NORMALIZE_ANGLE:
+        case ANM_NORMALIZE_ANGLE:
             *GET_FLOAT_PTR(0) = utils::AddNormalizeAngle(GET_FLOAT_VALUE(0), 0.0f);
             break;
         case ANM_JUMP_IF_EQ:
@@ -2135,7 +2131,7 @@ stop:
             g_Supervisor.effectiveFramerateMultiplier * vm->angleVel.z);
         vm->updateRotation = 1;
     }
-    for (i = 0; i < 5; i++)
+    for (i = 0; i < ARRAY_SIZE_SIGNED(vm->interpStartTimes); i++)
     {
         if (vm->interpEndTimes[i] > 0)
         {
@@ -2150,29 +2146,29 @@ stop:
                 t = vm->interpStartTimes[i].AsFloat() /
                     vm->interpEndTimes[i].AsFloat();
             }
-            switch (vm->interpModes[i])
+            switch (vm->easeModes[i])
             {
-            case 1:
+            case ANM_EASE_IN_QUAD:
                 t = t * t;
                 break;
-            case 2:
+            case ANM_EASE_IN_CUBIC:
                 t = t * t * t;
                 break;
-            case 3:
+            case ANM_EASE_IN_QUART:
                 t = t * t;
                 t = t * t;
                 break;
-            case 4:
+            case ANM_EASE_OUT_QUAD:
                 t = 1.0f - t;
                 t = t * t;
                 t = 1.0f - t;
                 break;
-            case 5:
+            case ANM_EASE_OUT_CUBIC:
                 t = 1.0f - t;
                 t = t * t * t;
                 t = 1.0f - t;
                 break;
-            case 6:
+            case ANM_EASE_OUT_QUART:
                 t = 1.0f - t;
                 t = t * t;
                 t = t * t;
@@ -2404,7 +2400,7 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
     if (!data)
     {
         // STRING: TH07 0x00495b30
-        g_GameErrorContext.Fatal("%sが読み込めないです。\r\n", path);
+        g_GameErrorContext.Fatal("%s���ǂݍ��߂Ȃ��ł��B\r\n", path);
         return ZUN_ERROR;
     }
     if (g_Supervisor.d3dDevice->CreateImageSurface(
@@ -2458,12 +2454,12 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
     }
 
     SAFE_RELEASE(surface);
-    free(data);
+    GameFree(data);
     return ZUN_SUCCESS;
 
 err:
     SAFE_RELEASE(surface);
-    free(data);
+    GameFree(data);
     return ZUN_ERROR;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
+#include "GameManager.hpp"
 #include "ZunResult.hpp"
 
 typedef i32 (*EffectCallback)(struct Effect *);
@@ -8,13 +9,13 @@ typedef i32 (*EffectCallback)(struct Effect *);
 struct Effect
 {
     AnmVm vm;
-    D3DXVECTOR3 pos1;
-    D3DXVECTOR3 custom;
-    D3DXVECTOR3 velocity;
-    D3DXVECTOR3 acceleration;
-    D3DXVECTOR3 basePosition;
-    D3DXVECTOR3 emitterPosition;
-    D3DXVECTOR3 direction;
+    Float3 pos1;
+    Float3 custom;
+    Float3 velocity;
+    Float3 acceleration;
+    Float3 basePosition;
+    Float3 emitterPosition;
+    Float3 direction;
     D3DXQUATERNION rotationQuat;
     f32 radius;
     f32 angularVelocity;
@@ -26,7 +27,8 @@ struct Effect
     u8 isFadingOut;
     i8 fadeOutTime;
     i8 is2D;
-    // pad 3
+    i8 ownerSeat;
+    // pad 2
     Effect *next;
 };
 C_ASSERT(sizeof(Effect) == 0x2d8);
@@ -37,6 +39,10 @@ struct EffectTypeInfo
     EffectCallback updateCallback;
     EffectCallback initCallback;
 };
+
+#define MAX_NORMAL_EFFECTS 400
+#define MAX_SPECIAL_EFFECTS (8 + 5 * (MAX_PLAYERS - 1))
+#define MAX_EFFECTS (MAX_NORMAL_EFFECTS + MAX_SPECIAL_EFFECTS)
 
 struct EffectManager
 {
@@ -72,29 +78,28 @@ struct EffectManager
     static i32 InitWeatherSlow(Effect *effect);
     static i32 InitWeatherFalling(Effect *effect);
 
-    static void DoSomethingWithEffects(D3DXVECTOR3 *param_1);
+    static void ShiftEffectsAfterCameraTeleport(Float3 *shift);
     static void ModifyEffect1eAcceleration();
     static i32 UpdateNoOp(Effect *effect);
 
-    Effect *SpawnParticles(i32 effectId, D3DXVECTOR3 *pos, i32 numParticles,
-                           D3DCOLOR color);
-    Effect *SpawnEffect(i32 effectId, D3DXVECTOR3 *pos, i32 param_3, i32 param_4,
+    Effect *SpawnEffect(i32 effectId, Float3 *pos, i32 numParticles,
                         D3DCOLOR color);
-    Effect *SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
-                                 D3DXVECTOR3 *velocity, i32 numParticles,
+    Effect *SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectIdx, i32 param_4,
+                               D3DCOLOR color, i32 ownerSeat = -1);
+    Effect *SpawnPlayerEffect(i32 effectId, Float3 *pos, i32 slot, i32 seat, D3DCOLOR color);
+    Effect *SpawnMovingParticles(i32 effectId, Float3 *pos,
+                                 Float3 *velocity, i32 numParticles,
                                  D3DCOLOR color);
-    i32 UpdateSpecialEffect();
+    i32 DrawLayer1Effects();
 
     i32 nextIndex;
+    i32 unused;
     i32 activeEffects;
-    i32 activeEffectsCount;
     f32 globalColorMultiplierR;
     f32 globalColorMultiplierG;
     f32 globalColorMultiplierB;
     f32 globalColorMultiplierA;
-    // 0..399 are the particle pool, 400..412 are fixed P1/P2/P3 player
-    // effects, and 413 is the allocation-failure sentinel.
-    Effect effects[414];
+    Effect effects[MAX_EFFECTS + 1];
     Effect layer0;
     Effect layer1;
     Effect layer2;
@@ -102,5 +107,5 @@ struct EffectManager
     Effect *layerPtrs[4];
     i32 frameCounter;
 };
-C_ASSERT(sizeof(EffectManager) == 0x4a4e0);
-extern EffectManager g_EffectManager;
+C_ASSERT(sizeof(EffectManager) == 0x496a8 + (MAX_SPECIAL_EFFECTS - 8) * sizeof(Effect));
+extern EffectManager &g_EffectManager;

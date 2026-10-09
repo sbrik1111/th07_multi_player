@@ -6,26 +6,12 @@
 #include <dinput.h>
 
 #include "MidiOutput.hpp"
-#include "Multiplayer.hpp"
 #include "inttypes.hpp"
 
-extern u16 g_CurFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
-extern u16 g_CurFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
-extern u16 g_LastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
-extern u16 g_LastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
-
-#define g_CurFrameRawInput (g_CurFrameRawInputs[0])
-#define g_CurFrameGameInput (g_CurFrameGameInputs[0])
-#define g_LastFrameRawInput (g_LastFrameRawInputs[0])
-#define g_LastFrameGameInput (g_LastFrameGameInputs[0])
-#define g_CurFrameRawInputP2 (g_CurFrameRawInputs[1])
-#define g_CurFrameGameInputP2 (g_CurFrameGameInputs[1])
-#define g_LastFrameRawInputP2 (g_LastFrameRawInputs[1])
-#define g_LastFrameGameInputP2 (g_LastFrameGameInputs[1])
-#define g_CurFrameRawInputP3 (g_CurFrameRawInputs[2])
-#define g_CurFrameGameInputP3 (g_CurFrameGameInputs[2])
-#define g_LastFrameRawInputP3 (g_LastFrameRawInputs[2])
-#define g_LastFrameGameInputP3 (g_LastFrameGameInputs[2])
+extern u16 g_CurFrameRawInput;
+extern u16 g_CurFrameGameInput;
+extern u16 g_LastFrameRawInput;
+extern u16 g_LastFrameGameInput;
 extern u16 g_IsEighthFrameOfHeldInput;
 extern u16 g_NumOfFramesInputsWereHeld;
 
@@ -57,7 +43,8 @@ typedef enum Difficulty
     DIFF_HARD = 2,
     DIFF_LUNATIC = 3,
     DIFF_EXTRA = 4,
-    DIFF_PHANTASM = 5
+    DIFF_PHANTASM = 5,
+    DIFF_COUNT = 6,
 } Difficulty;
 
 typedef enum EffectQuality
@@ -137,7 +124,7 @@ struct Supervisor
     ZunResult PlayLoadedAudio(i32 idx);
     void SetRenderState(D3DRENDERSTATETYPE stateType, DWORD param_2);
     ZunResult SetupDInput();
-    i32 SnapshotScreen(const char *param_1);
+    i32 SnapshotScreen(const char *filename);
     ZunResult StopAudio();
     void TickTimer(i32 *frames, f32 *subFrames);
     void UpdateStartupTime();
@@ -190,7 +177,18 @@ struct Supervisor
     f32 fpsAccumulator;
     i16 curFps;
     i16 unused_18a;
-    u32 flags;
+    union {
+        u32 flags;
+        struct
+        {
+            u32 usingTnLHal : 1;
+            u32 hasLockableBackbuffer : 1;
+            u32 supports32BitTex : 1;
+            u32 timingBad : 1;
+            u32 deviceNotReset : 1;
+            u32 forceIntegerTimer : 1;
+        };
+    };
     DWORD lastTotalPlayTimeUpdate;
     DWORD currentTime;
     D3DCAPS8 d3dCaps;

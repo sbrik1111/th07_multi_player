@@ -1,7 +1,20 @@
 #pragma once
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
 #include "ZunResult.hpp"
+
+#define TRANSITION_QUAD_ROWS 14
+#define TRANSITION_QUAD_COLS 12
+
+typedef enum GuiDisplayArg
+{
+    GUI_DISPLAY_HIDDEN = 0,
+    GUI_DISPLAY_SHOWN = 1,
+    GUI_DISPLAY_FULL_POWER = 1,
+    GUI_DISPLAY_BORDER = 2,
+    GUI_DISPLAY_CHERRY_MAX = 3,
+    GUI_DISPLAY_BORDER_BONUS = 4,
+} GuiDisplayArg;
 
 // values from https://pytouhou.linkmauve.fr/doc/06/msg.xml
 typedef enum MsgOpcode
@@ -70,15 +83,15 @@ struct MsgRawInstr
 
 struct MsgRawHeader
 {
-    i32 numEntries;
-    MsgRawInstr *entries;
+    i32 numInstrs;
+    MsgRawInstr *instrs[1];
 };
 
-struct GuiImplChildB
+struct GuiFormattedText
 {
-    D3DXVECTOR3 pos;
+    Float3 pos;
     i32 fmtArg;
-    i32 isShown;
+    i32 displayArg;
     ZunTimer timer;
 };
 
@@ -123,27 +136,28 @@ struct GuiImpl
     AnmVm enemySpellcardName;
     AnmVm bombSpellcardNameBg;
     AnmVm enemySpellcardNameBg;
-    AnmVm stageClearTextVm;
-    AnmVm stageClearBonusTextVm;
+    AnmVm stageClearBg;
+    AnmVm loadingSprite;
     AnmVm stageTransitionSnapshotVm;
     AnmVm captureBonusVm;
     AnmVm spellcardBonusIndicator;
-    AnmVm transitionQuads[168];
+    AnmVm transitionQuads[TRANSITION_QUAD_ROWS * TRANSITION_QUAD_COLS];
     i32 activeTransitionQuads;
     GuiMsgVm msg;
     // pad 3
     i32 finishedStage;
     i32 stageClearBonus;
     i32 transitionToScoreScreen;
-    GuiImplChildB bonusScore;
-    GuiImplChildB fullPowerMode;
-    GuiImplChildB spellCardBonus;
+    GuiFormattedText bonusScore;
+    GuiFormattedText statusPopup;
+    GuiFormattedText spellCardBonus;
     i32 clearPower;
     i32 clearPointItems;
     i32 clearCherryMax;
     i32 clearGraze;
+    i32 bombPortraitSeat;
 };
-C_ASSERT(sizeof(GuiImpl) == 0x20a30);
+C_ASSERT(sizeof(GuiImpl) == 0x20a34);
 
 struct Gui
 {
@@ -157,22 +171,22 @@ struct Gui
 
     ZunResult ActualAddedCallback();
     void ClearActiveSprites();
-    static void CopyTemplateSpriteToSprite(i32 spriteIdx);
+    static void CopyEnemyNameTexture(i32 spriteIdx);
     void DrawGameScene();
     void DrawStageElements();
     void FreeMsgFile();
     i32 HasCurrentMsgIdx();
     i32 IsDialogueSkippable();
     i32 IsStageFinished();
-    ZunResult LoadMsg(const char *param_1);
-    void MsgRead(i32 param_1);
+    ZunResult LoadMsg(const char *filename);
+    void MsgRead(i32 msgIdx);
     i32 MsgWait();
 
     void EndEnemySpellcard();
-    void EndPlayerSpellcard();
-    void ShowBombNamePortrait(i32 sprite, const char *name);
+    void EndPlayerSpellcard(i32 seat);
+    void ShowBombNamePortrait(i32 sprite, const char *name, i32 seat);
     void ShowBonusScore(i32 score);
-    void ShowFullPowerMode(i32 fmtArg, i32 isShown);
+    void ShowStatusPopup(i32 fmtArg, i32 popupType);
     void ShowSpellcard(i32 spellcardSprite, const char *spellcardName);
     void ShowSpellcardBonus(i32 fmtArg);
     void UpdateGui();
@@ -203,14 +217,14 @@ struct Gui
         u32 flags;
         struct
         {
-            u32 showLives : 2;
-            u32 showBombs : 2;
-            u32 showPower : 2;
-            u32 showGraze : 2;
-            u32 showPoint : 2;
+            u32 lifeDisplayUpdateFrames : 2;
+            u32 bombDisplayUpdateFrames : 2;
+            u32 powerDisplayUpdateFrames : 2;
+            u32 grazeDisplayUpdateFrames : 2;
+            u32 pointDisplayUpdateFrames : 2;
         };
     };
-    struct GuiImpl *impl;
+    GuiImpl *impl;
     f32 bombNameBarLength;
     f32 spellcardBarLength;
     u32 bossHealthBarAlpha;

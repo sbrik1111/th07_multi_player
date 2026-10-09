@@ -104,7 +104,7 @@ u8 *Pbg4Archive::ReadDecompressEntry(const char *filename, u8 *buf)
         goto err;
     }
 
-    if (!this->fileAbstraction->Seek(entry->dataOffset, g_SeekModes[0]))
+    if (!this->fileAbstraction->Seek(entry->dataOffset, g_SeekModes[FILE_BEGIN]))
     {
         goto err;
     }
@@ -221,7 +221,7 @@ bool Pbg4Archive::OpenArchive(const char *path)
         goto err;
     }
 
-    this->fileAbstraction->Seek(headerSize, g_SeekModes[0]);
+    this->fileAbstraction->Seek(headerSize, g_SeekModes[FILE_BEGIN]);
     compressedData = (u8 *)GlobalAlloc(0, fileSize);
     if (!compressedData)
     {
@@ -279,7 +279,7 @@ err:
 
 #pragma var_order(entryData, i, entries)
 // FUNCTION: TH07 0x0045fde0
-Pbg4Entry *Pbg4Archive::AllocEntries(void *param_1, i32 count, u32 dataOffset)
+Pbg4Entry *Pbg4Archive::AllocEntries(void *data, i32 count, u32 dataOffset)
 {
     Pbg4Entry *entries = NULL;
     i32 i;
@@ -292,7 +292,7 @@ Pbg4Entry *Pbg4Archive::AllocEntries(void *param_1, i32 count, u32 dataOffset)
         goto err;
     }
 
-    entryData = (u8 *)param_1;
+    entryData = (u8 *)data;
     for (i = 0; i < count; i++)
     {
         entries[i].filename = CopyFileName((char *)entryData);

@@ -14,6 +14,10 @@
 #include <dsound.h>
 #include <mmsystem.h>
 #include <windows.h>
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
+#include "multi/RollbackHeap.h"
+#define SOUND_RUNTIME_SCOPE() th07::rollback::heap::RuntimeScope soundRuntimeScope
 
 //-----------------------------------------------------------------------------
 // Name: CSoundManager::CSoundManager()
@@ -22,6 +26,7 @@
 // FUNCTION: TH07 0x0045c6f0 FOLDED
 CSoundManager::CSoundManager()
 {
+    SOUND_RUNTIME_SCOPE();
     pDS = NULL;
 }
 
@@ -32,6 +37,7 @@ CSoundManager::CSoundManager()
 // FUNCTION: TH07 0x0045c710
 CSoundManager::~CSoundManager()
 {
+    SOUND_RUNTIME_SCOPE();
     SAFE_RELEASE(pDS);
 }
 
@@ -45,6 +51,7 @@ HRESULT CSoundManager::Initialize(HWND hWnd, DWORD dwCoopLevel,
                                   DWORD dwPrimaryChannels, DWORD dwPrimaryFreq,
                                   DWORD dwPrimaryBitRate)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD idk;
     HRESULT hr;
 
@@ -74,6 +81,7 @@ HRESULT CSoundManager::SetPrimaryBufferFormat(DWORD dwPrimaryChannels,
                                               DWORD dwPrimaryFreq,
                                               DWORD dwPrimaryBitRate)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
 
     LPDIRECTSOUNDBUFFER pDSBPrimary = NULL;
@@ -125,6 +133,7 @@ HRESULT CSoundManager::CreateStreaming(CStreamingSound **ppStreamingSound,
                                        DWORD dwNotifyCount, DWORD dwNotifySize,
                                        HANDLE hNotifyEvent, ThBgmFormat *pzwf)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
 
     if (!this->pDS)
@@ -210,6 +219,7 @@ HRESULT CSoundManager::CreateStreamingFromMemory(
     ThBgmFormat *pzwf, DWORD dwCreationFlags, GUID guid3DAlgorithm,
     DWORD dwNotifyCount, DWORD dwNotifySize, HANDLE hNotifyEvent)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
 
     // STRING: TH07 0x0049548c
@@ -294,6 +304,7 @@ HRESULT CSoundManager::CreateStreamingFromMemory(
 CSound::CSound(LPDIRECTSOUNDBUFFER *apDSBuffer, DWORD dwDSBufferSize,
                DWORD dwNumBuffers, CWaveFile *pWaveFile)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD i;
 
     this->m_apDSBuffer = new LPDIRECTSOUNDBUFFER[dwNumBuffers];
@@ -321,6 +332,7 @@ CSound::CSound(LPDIRECTSOUNDBUFFER *apDSBuffer, DWORD dwDSBufferSize,
 // FUNCTION: TH07 0x0045d060
 HRESULT CStreamingSound::InitSoundBuffers()
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD i;
 
     this->m_bIsPlaying = 0;
@@ -381,6 +393,7 @@ HRESULT CStreamingSound::InitSoundBuffers()
 // FUNCTION: TH07 0x0045d2c0
 CSound::~CSound()
 {
+    SOUND_RUNTIME_SCOPE();
     for (DWORD i = 0; i < this->m_dwNumBuffers; i++)
     {
         SAFE_RELEASE(this->m_apDSBuffer[i]);
@@ -397,6 +410,7 @@ CSound::~CSound()
 HRESULT CSound::FillBufferWithSound(LPDIRECTSOUNDBUFFER pDSB,
                                     BOOL bRepeatWavIfBufferLarger)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
     VOID *pDSLockedBuffer = NULL;
     DWORD dwDSLockedBufferSize = 0;
@@ -476,6 +490,7 @@ HRESULT CSound::FillBufferWithSound(LPDIRECTSOUNDBUFFER pDSB,
 // FUNCTION: TH07 0x0045d5b0
 HRESULT CSound::RestoreBuffer(LPDIRECTSOUNDBUFFER pDSB, BOOL *pbWasRestored)
 {
+    SOUND_RUNTIME_SCOPE();
     if (!pDSB)
     {
         return CO_E_NOTINITIALIZED;
@@ -523,6 +538,7 @@ HRESULT CSound::RestoreBuffer(LPDIRECTSOUNDBUFFER pDSB, BOOL *pbWasRestored)
 // FUNCTION: TH07 0x0045d660
 LPDIRECTSOUNDBUFFER CSound::GetFreeBuffer()
 {
+    SOUND_RUNTIME_SCOPE();
     BOOL idk = 0;
     if (!this->m_apDSBuffer)
     {
@@ -560,6 +576,7 @@ LPDIRECTSOUNDBUFFER CSound::GetFreeBuffer()
 // FUNCTION: TH07 0x0045d720
 LPDIRECTSOUNDBUFFER CSound::GetBuffer(DWORD dwIndex)
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->m_apDSBuffer)
     {
         return NULL;
@@ -578,6 +595,7 @@ LPDIRECTSOUNDBUFFER CSound::GetBuffer(DWORD dwIndex)
 // FUNCTION: TH07 0x0045d760
 HRESULT CSound::Play(DWORD dwPriority, DWORD dwFlags)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
 
     if (!this->m_apDSBuffer)
@@ -623,6 +641,7 @@ HRESULT CSound::Play(DWORD dwPriority, DWORD dwFlags)
 // FUNCTION: TH07 0x0045d860
 u32 CSound::Stop()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->m_apDSBuffer)
     {
         return CO_E_NOTINITIALIZED;
@@ -646,6 +665,7 @@ u32 CSound::Stop()
 // FUNCTION: TH07 0x0045d910
 HRESULT CSound::Pause()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->m_apDSBuffer)
     {
         return CO_E_NOTINITIALIZED;
@@ -664,6 +684,7 @@ HRESULT CSound::Pause()
 // FUNCTION: TH07 0x0045d960
 HRESULT CSound::Unpause()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->m_apDSBuffer)
     {
         return CO_E_NOTINITIALIZED;
@@ -681,6 +702,7 @@ HRESULT CSound::Unpause()
 // FUNCTION: TH07 0x0045d9b0
 HRESULT CSound::Reset()
 {
+    SOUND_RUNTIME_SCOPE();
     if (!this->m_apDSBuffer)
     {
         return CO_E_NOTINITIALIZED;
@@ -704,6 +726,7 @@ CStreamingSound::CStreamingSound(LPDIRECTSOUNDBUFFER pDSBuffer,
                                  DWORD dwNotifySize)
     : CSound(&pDSBuffer, dwDSBufferSize, 1, pWaveFile)
 {
+    SOUND_RUNTIME_SCOPE();
     this->m_dwLastPlayPos = 0;
     this->m_dwPlayProgress = 0;
     this->m_dwNotifySize = dwNotifySize;
@@ -718,6 +741,7 @@ CStreamingSound::CStreamingSound(LPDIRECTSOUNDBUFFER pDSBuffer,
 // FUNCTION: TH07 0x0045dab0
 CStreamingSound::~CStreamingSound()
 {
+    SOUND_RUNTIME_SCOPE();
 }
 
 //-----------------------------------------------------------------------------
@@ -727,6 +751,7 @@ CStreamingSound::~CStreamingSound()
 // FUNCTION: TH07 0x0045dad0
 HRESULT CStreamingSound::UpdateFadeOut()
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->m_dwIsFadingOut)
     {
         if (--this->m_iCurFadeoutProgress <= 0)
@@ -752,6 +777,7 @@ HRESULT CStreamingSound::UpdateFadeOut()
 // FUNCTION: TH07 0x0045db60
 HRESULT CStreamingSound::HandleWaveStreamNotification(i32 bLoopedPlay)
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
     DWORD dwPlayDelta;
     VOID *pDSLockedBuffer;
@@ -920,6 +946,7 @@ HRESULT CStreamingSound::HandleWaveStreamNotification(i32 bLoopedPlay)
 // FUNCTION: TH07 0x0045df50
 HRESULT CStreamingSound::Reset()
 {
+    SOUND_RUNTIME_SCOPE();
     HRESULT hr;
 
     if (!this->m_apDSBuffer[0] || !this->m_pWaveFile)
@@ -957,6 +984,7 @@ HRESULT CStreamingSound::Reset()
 // FUNCTION: TH07 0x0045e020
 CWaveFile::CWaveFile()
 {
+    SOUND_RUNTIME_SCOPE();
     this->m_pzwf = NULL;
     this->h_mmio = NULL;
     this->m_dwSize = 0;
@@ -970,6 +998,7 @@ CWaveFile::CWaveFile()
 // FUNCTION: TH07 0x0045e060
 CWaveFile::~CWaveFile()
 {
+    SOUND_RUNTIME_SCOPE();
     Close();
 }
 
@@ -980,6 +1009,7 @@ CWaveFile::~CWaveFile()
 // FUNCTION: TH07 0x0045e080
 HRESULT CWaveFile::Open(LPCSTR strFileName, ThBgmFormat *pzwf, DWORD dwFlags)
 {
+    SOUND_RUNTIME_SCOPE();
     this->m_dwFlags = dwFlags;
     this->m_bIsReadingFromMemory = FALSE;
 
@@ -1015,6 +1045,7 @@ HRESULT CWaveFile::Open(LPCSTR strFileName, ThBgmFormat *pzwf, DWORD dwFlags)
 // FUNCTION: TH07 0x0045e130
 HRESULT CWaveFile::Reopen(ThBgmFormat *pzwf)
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->m_bIsReadingFromMemory)
     {
         return E_FAIL;
@@ -1039,6 +1070,7 @@ HRESULT CWaveFile::Reopen(ThBgmFormat *pzwf)
 HRESULT CWaveFile::OpenFromMemory(u8 *pbData, ULONG ulDataSize,
                                   ThBgmFormat *pzwf, DWORD dwFlags)
 {
+    SOUND_RUNTIME_SCOPE();
     this->m_pzwf = pzwf;
     this->m_ulDataSize = ulDataSize;
     this->m_pbData = pbData;
@@ -1060,6 +1092,7 @@ HRESULT CWaveFile::OpenFromMemory(u8 *pbData, ULONG ulDataSize,
 // FUNCTION: TH07 0x0045e1f0
 DWORD CWaveFile::GetSize()
 {
+    SOUND_RUNTIME_SCOPE();
     return this->m_dwSize;
 }
 
@@ -1070,6 +1103,7 @@ DWORD CWaveFile::GetSize()
 // FUNCTION: TH07 0x0045e210
 HRESULT CWaveFile::ResetFile(bool bLoop)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD unk;
 
     if (this->m_bIsReadingFromMemory)
@@ -1119,6 +1153,7 @@ HRESULT CWaveFile::ResetFile(bool bLoop)
 // FUNCTION: TH07 0x0045e360
 HRESULT CWaveFile::Read(u8 *pBuffer, DWORD dwSizeToRead, DWORD *pdwSizeRead)
 {
+    SOUND_RUNTIME_SCOPE();
     DWORD bytesRead;
     DWORD sizeToRead;
 
@@ -1183,6 +1218,7 @@ HRESULT CWaveFile::Read(u8 *pBuffer, DWORD dwSizeToRead, DWORD *pdwSizeRead)
 // FUNCTION: TH07 0x0045e4b0
 HRESULT CWaveFile::Close()
 {
+    SOUND_RUNTIME_SCOPE();
     if (this->m_dwFlags == WAVEFILE_READ)
     {
         CloseHandle(this->m_hWaveFile);
@@ -1194,4 +1230,5 @@ HRESULT CWaveFile::Close()
 // FUNCTION: TH07 0x0045e4f0
 void DebugPrint(const char *fmt, ...)
 {
+    SOUND_RUNTIME_SCOPE();
 } // why is this here

@@ -49,7 +49,7 @@ u32 Ending::OnUpdate(Ending *arg)
         {
             return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
         }
-        for (i = 0; i < 15; i++)
+        for (i = 0; i < MAX_ENDING_SPRITES; i++)
         {
             g_AnmManager->ExecuteScript(&arg->sprites[i]);
         }
@@ -71,7 +71,7 @@ u32 Ending::OnDraw(Ending *arg)
 {
     g_AnmManager->DrawEndingRect(0, 0, 0, (i32)arg->backgroundPos.x,
                                  (i32)arg->backgroundPos.y, 640, 480);
-    for (i32 i = 0; i < 15; i++)
+    for (i32 i = 0; i < MAX_ENDING_SPRITES; i++)
     {
         g_AnmManager->Draw(&arg->sprites[i]);
     }
@@ -107,7 +107,7 @@ void Ending::FadingEffect()
     rect.bottom = 480.0f;
     switch (this->fadeType)
     {
-    case 1:
+    case ENDING_FADE_OUT_BLACK:
         if (this->timeFading >= this->fadeFrames)
         {
             this->fadeType = 0;
@@ -119,7 +119,7 @@ void Ending::FadingEffect()
         this->endingFadeRectColor.color = color * 0x1000000;
         this->timeFading++;
         break;
-    case 2:
+    case ENDING_FADE_IN_BLACK:
         if (this->timeFading >= this->fadeFrames)
         {
             this->endingFadeRectColor.color = 0xff000000;
@@ -131,7 +131,7 @@ void Ending::FadingEffect()
             color << 24;
         this->timeFading++;
         break;
-    case 3:
+    case ENDING_FADE_OUT_WHITE:
         if (this->timeFading >= this->fadeFrames)
         {
             this->fadeType = 0;
@@ -143,7 +143,7 @@ void Ending::FadingEffect()
         this->endingFadeRectColor.color = color * 0x1000000 | 0xffffff;
         this->timeFading++;
         break;
-    case 4:
+    case ENDING_FADE_IN_WHITE:
         if (this->timeFading >= this->fadeFrames)
         {
             this->endingFadeRectColor.color = 0xffffffff;
@@ -154,7 +154,7 @@ void Ending::FadingEffect()
         this->endingFadeRectColor.color = color << 24 | 0xffffff;
         this->timeFading++;
         break;
-    case 0:
+    case ENDING_FADE_NONE:
         this->endingFadeRectColor.color = 0;
         break;
     }
@@ -164,7 +164,7 @@ void Ending::FadingEffect()
     }
 }
 
-#pragma var_order(lineDisplayed, local_54, local_58, i, anmScriptIdx, vmIdx,   \
+#pragma var_order(lineDisplayed, buf, local_58, i, anmScriptIdx, vmIdx,   \
                   anmSpriteIdx, scrollBGDistance, scrollBGDuration, execOuter, \
                   execInner, j, musicFadeFrames)
 // FUNCTION: TH07 0x0041d700
@@ -181,12 +181,12 @@ ZunResult Ending::ParseEndFile()
     i32 anmScriptIdx;
     i32 i;
     i32 local_58;
-    char local_54[68];
+    char buf[68];
     i32 lineDisplayed;
 
     lineDisplayed = 0;
     local_58 = 0;
-    memset(local_54, 0, sizeof(local_54));
+    memset(buf, 0, sizeof(buf));
     if (this->timer3 > 0)
     {
         this->timer3--;
@@ -205,7 +205,7 @@ ZunResult Ending::ParseEndFile()
         }
         if (this->timer3 <= 0)
         {
-            for (i = 0; i < 15; i++)
+            for (i = 0; i < MAX_ENDING_SPRITES; i++)
             {
                 this->sprites[i].pendingInterrupt = 2;
             }
@@ -275,7 +275,7 @@ ZunResult Ending::ParseEndFile()
                 }
                 local_58 = 0;
                 lineDisplayed = 0;
-                for (execOuter = 0; execOuter < 6; execOuter++)
+                for (execOuter = 0; execOuter < ARRAY_SIZE_SIGNED(g_GameManager.clrd); execOuter++)
                 {
                     for (execInner = 0; execInner < 4; execInner++)
                     {
@@ -290,7 +290,7 @@ ZunResult Ending::ParseEndFile()
                     }
                 }
             case 'R':
-                for (j = 0; j < 16; j++)
+                for (j = 0; j < ARRAY_SIZE_SIGNED(this->sprites); j++)
                 {
                     this->sprites[j].anmFileIdx = 0;
                 }
@@ -388,7 +388,7 @@ ZunResult Ending::ParseEndFile()
             {
                 AnmManager::DrawVmTextFmt(g_AnmManager,
                                           &this->sprites[this->timesFileParsed],
-                                          this->textColor.color, 0xffffffff, local_54);
+                                          this->textColor.color, 0xffffffff, buf);
                 this->sprites[this->timesFileParsed].SetInterrupt(1);
             }
             while (*this->endFileDataPtr == '\n' || *this->endFileDataPtr == '\0' ||
@@ -409,8 +409,8 @@ ZunResult Ending::ParseEndFile()
             this->timesFileParsed++;
             goto stop;
         default:
-            local_54[local_58] = *this->endFileDataPtr;
-            local_54[local_58 + 1] = this->endFileDataPtr[1];
+            buf[local_58] = *this->endFileDataPtr;
+            buf[local_58 + 1] = this->endFileDataPtr[1];
             local_58 += 2;
             this->endFileDataPtr = this->endFileDataPtr + 2;
             break;
@@ -448,7 +448,7 @@ ZunResult Ending::LoadEnding(const char *endFilePath)
     this->timer1 = 0;
     if (endFileDat)
     {
-        free(endFileDat);
+        GameFree(endFileDat);
     }
     return ZUN_SUCCESS;
 }
@@ -462,7 +462,7 @@ ZunResult Ending::AddedCallback(Ending *arg)
     u32 unusedShotType;
     const char *endingPath;
 
-    unusedShotType = g_GameManager.shotTypeAndCharacter;
+    unusedShotType = g_GameManager.ShotTypeAndCharacter(0);
     g_GameManager.finished = 1;
     g_Supervisor.isInEnding = 1;
     g_AnmManager->LoadAnms(ANM_FILE_STAFF, "data/staff01.anm", ANM_OFFSET_STAFF);
@@ -470,7 +470,7 @@ ZunResult Ending::AddedCallback(Ending *arg)
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetBlendMode(255);
     g_AnmManager->SetVertexShader(255);
-    shotType = g_GameManager.shotTypeAndCharacter;
+    shotType = g_GameManager.ShotTypeAndCharacter(0);
     arg->hasSeenEnding = 0;
     if (g_GameManager.globals->numRetries == 0)
     {
@@ -490,19 +490,19 @@ ZunResult Ending::AddedCallback(Ending *arg)
     }
     g_GameManager.clrd[shotType]
         .difficultyClearedWithoutRetries[g_GameManager.difficulty] = 99;
-    for (i = 0; i < 15; i++)
+    for (i = 0; i < MAX_ENDING_SPRITES; i++)
     {
         g_AnmManager->ExecuteAnmIdx(&arg->sprites[i], i + 1807);
         arg->sprites[i].pos =
-            D3DXVECTOR3(64.0f, (f32)i * 16.0f + 392.0f, 0.0f);
+            Float3(64.0f, (f32)i * 16.0f + 392.0f, 0.0f);
     }
     if (g_GameManager.globals->numRetries != 0)
     {
-        endingPath = g_BadEndingPaths[g_GameManager.character];
+        endingPath = g_BadEndingPaths[g_GameManager.Character(0)];
     }
     else
     {
-        endingPath = g_NormalEndingPaths[g_GameManager.shotTypeAndCharacter];
+        endingPath = g_NormalEndingPaths[g_GameManager.ShotTypeAndCharacter(0)];
     }
 
     if (arg->LoadEnding(endingPath))

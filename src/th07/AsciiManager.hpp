@@ -2,15 +2,13 @@
 
 #include <d3d8.h>
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
 #include "ZunResult.hpp"
 #include "ZunTimer.hpp"
 #include "inttypes.hpp"
 
 struct PauseMenu
 {
-    PauseMenu();
-
     void OnDraw();
     i32 OnUpdate();
 
@@ -21,16 +19,16 @@ struct PauseMenu
 };
 C_ASSERT(sizeof(PauseMenu) == 0x194c);
 
+#define RETRY_MENU_SPRITES 5
+
 struct RetryMenu
 {
-    RetryMenu();
-
     i32 OnUpdate();
     void OnDraw();
 
     i32 curState;
     i32 numFrames;
-    AnmVm menuSprites[6];
+    AnmVm menuSprites[RETRY_MENU_SPRITES + 1];
     AnmVm menuBackground;
 };
 C_ASSERT(sizeof(RetryMenu) == 0x101c);
@@ -38,7 +36,7 @@ C_ASSERT(sizeof(RetryMenu) == 0x101c);
 struct AsciiManagerPopup
 {
     u8 digits[8];
-    Float3 position;
+    Float3 pos;
     D3DCOLOR color;
     ZunTimer timer;
     u8 inUse;
@@ -50,7 +48,7 @@ C_ASSERT(sizeof(AsciiManagerPopup) == 0x28);
 struct AsciiManagerString
 {
     char text[64];
-    Float3 position;
+    Float3 pos;
     D3DCOLOR color;
     Float2 scale;
     i32 isSelected;
@@ -59,8 +57,6 @@ struct AsciiManagerString
 
 struct AsciiManager
 {
-    AsciiManager();
-
     static ZunResult RegisterChain();
     static void CutChain();
 
@@ -70,16 +66,26 @@ struct AsciiManager
     static u32 OnDrawMenus(AsciiManager *arg);
     static u32 OnDrawPopups(AsciiManager *arg);
 
-    static void AddFormatText(AsciiManager *manager, D3DXVECTOR3 *position,
+    static void AddFormatText(AsciiManager *manager, Float3 *pos,
                               const char *fmt, ...);
-    void AddString(D3DXVECTOR3 *position, const char *text);
-    void CreatePopup1(D3DXVECTOR3 *position, i32 value, D3DCOLOR color);
-    void CreatePopup2(D3DXVECTOR3 *position, i32 value, D3DCOLOR color);
+    void AddString(Float3 *pos, const char *text);
+    void CreatePopup1(Float3 *pos, i32 value, D3DCOLOR color);
+    void CreatePopup2(Float3 *pos, i32 value, D3DCOLOR color);
     void DrawPopups();
     void DrawStrings();
     void InitializeVms();
     void InitializeOtherVms();
-    void UpdateScripts();
+
+    void UpdateScripts()
+    {
+        g_AnmManager->ExecuteScript(&this->cherryGauge);
+        g_AnmManager->ExecuteScript(&this->cherryDigit);
+        g_AnmManager->ExecuteScript(&this->bossMarkers[0]);
+        g_AnmManager->ExecuteScript(&this->bossMarkers[1]);
+        g_AnmManager->ExecuteScript(&this->bossMarkers[2]);
+        g_AnmManager->ExecuteScript(&this->bossMarkers[3]);
+        g_AnmManager->ExecuteScript(&this->cherryBorderActive);
+    }
 
     void SetColor(D3DCOLOR color)
     {
@@ -102,7 +108,7 @@ struct AsciiManager
         return &this->bossMarkers[idx];
     }
 
-    void SetBossMarkerPos(i32 idx, D3DXVECTOR3 *pos)
+    void SetBossMarkerPos(i32 idx, Float3 *pos)
     {
         this->bossMarkers[idx].pos = *pos;
     }

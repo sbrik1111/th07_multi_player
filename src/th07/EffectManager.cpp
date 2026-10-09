@@ -1,7 +1,8 @@
 #include "EffectManager.hpp"
+#include <new>
+#include "Coop.hpp"
 
 #include "AnmManager.hpp"
-#include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -64,7 +65,7 @@ EffectTypeInfo g_EffectMapping[34] = {
 };
 
 // GLOBAL: TH07 0x012fe250
-EffectManager g_EffectManager;
+EffectManager &g_EffectManager = *new (GameStaticBlock(sizeof(EffectManager))) EffectManager();
 
 // GLOBAL: TH07 0x013478f8
 ChainElem g_EffectManagerCalcChain;
@@ -134,13 +135,13 @@ i32 EffectManager::Init2dEffect(Effect *effect)
 i32 EffectManager::UpdateOrbitEffect(Effect *effect)
 {
     f32 fadeOutRatio;
-    D3DXVECTOR3 local_64;
+    Float3 local_64;
     f32 cosAngle;
     D3DXMATRIX local_50;
     f32 sinAngle;
-    D3DXVECTOR3 local_10;
+    Float3 local_10;
 
-    D3DXVec3Normalize(&local_64, &effect->direction);
+    D3DXVec3Normalize(local_64.asD3DX(), effect->direction.asD3DX());
     sinAngle = sinf(effect->angularVelocity);
     cosAngle = cosf(effect->angularVelocity);
 
@@ -155,17 +156,17 @@ i32 EffectManager::UpdateOrbitEffect(Effect *effect)
     local_10.y = local_64.z * 0.0f - local_64.x * 1.0f;
     local_10.z = local_64.x * 0.0f - local_64.y * 0.0f;
 
-    if (D3DXVec3LengthSq(&local_10) < 0.00001f)
+    if (D3DXVec3LengthSq(local_10.asD3DX()) < 0.00001f)
     {
-        local_64 = D3DXVECTOR3(1.0f, 0.0f, 0.0f);
+        local_64 = Float3(1.0f, 0.0f, 0.0f);
     }
     else
     {
-        D3DXVec3Normalize(&local_10, &local_10);
+        D3DXVec3Normalize(local_10.asD3DX(), local_10.asD3DX());
     }
 
     local_10 *= effect->radius;
-    D3DXVec3TransformCoord(&local_10, &local_10, &local_50);
+    D3DXVec3TransformCoord(local_10.asD3DX(), local_10.asD3DX(), &local_50);
     local_10.z *= 6.0f;
 
     effect->pos1 = local_10 + effect->emitterPosition;
@@ -212,33 +213,12 @@ i32 EffectManager::UpdateGather60Frames(Effect *effect)
 // FUNCTION: TH07 0x0041abe0
 i32 EffectManager::UpdateAttachToPlayer(Effect *effect)
 {
-    static bool focusLogged[TH07_MULTI_MAX_PLAYERS] = {false, false, false};
-    i32 playerId;
     if ((i32)!effect->vm.currentInstruction)
     {
         return false;
     }
 
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-    {
-        Player *player = &g_Players[playerId];
-        if (!IsPlayerSlotActive((u8)playerId) ||
-            (player->effect != effect && player->focusEffect != effect &&
-             player->borderEffect != effect))
-        {
-            continue;
-        }
-        effect->pos1 = player->positionCenter;
-        if (player->focusEffect == effect && !focusLogged[playerId])
-        {
-            focusLogged[playerId] = true;
-            g_GameErrorContext.Log(
-                "info : P%d focus effect verified slot %d\r\n",
-                playerId + 1, (int)(effect - g_EffectManager.effects));
-        }
-        return true;
-    }
-    effect->pos1 = g_Player.positionCenter;
+    effect->pos1 = g_Players[effect->ownerSeat].positionCenter;
     return true;
 }
 
@@ -260,17 +240,17 @@ i32 EffectManager::UpdateBurst30Frames(Effect *effect)
 
 #pragma var_order(effect, i)
 // FUNCTION: TH07 0x0041adf0
-void EffectManager::DoSomethingWithEffects(D3DXVECTOR3 *param_1)
+void EffectManager::ShiftEffectsAfterCameraTeleport(Float3 *shift)
 {
     i32 i;
     Effect *effect;
 
     effect = g_EffectManager.effects;
-    for (i = 0; i < 400; i++, effect++)
+    for (i = 0; i < MAX_NORMAL_EFFECTS; i++, effect++)
     {
         if (effect->effectId == 20 || effect->effectId == 31)
         {
-            effect->basePosition += *param_1;
+            effect->basePosition += *shift;
         }
     }
 }
@@ -283,7 +263,7 @@ void EffectManager::ModifyEffect1eAcceleration()
     Effect *effect;
 
     effect = g_EffectManager.effects;
-    for (i = 0; i < 400; i++, effect++)
+    for (i = 0; i < MAX_NORMAL_EFFECTS; i++, effect++)
     {
         if (effect->effectId == 30)
         {
@@ -296,15 +276,15 @@ void EffectManager::ModifyEffect1eAcceleration()
 // FUNCTION: TH07 0x0041aef0
 i32 EffectManager::UpdateWeatherPhysics(Effect *effect)
 {
-    D3DXVECTOR3 local_10;
+    Float3 local_10;
 
     effect->velocity += effect->acceleration;
     effect->basePosition += effect->velocity;
     effect->pos1 = effect->basePosition;
 
     local_10 = effect->pos1 - g_Stage.cam.pos;
-    D3DXVec3Normalize(&local_10, &local_10);
-    f32 dot = D3DXVec3Dot(&g_Stage.cam.lookAtDir, &local_10);
+    D3DXVec3Normalize(local_10.asD3DX(), local_10.asD3DX());
+    f32 dot = D3DXVec3Dot(g_Stage.cam.lookAtDir.asD3DX(), local_10.asD3DX());
     if (dot < 0.94f)
     {
         return 0;
@@ -327,7 +307,7 @@ i32 EffectManager::UpdateWeatherPhysics(Effect *effect)
 i32 EffectManager::InitWeatherForward(Effect *effect)
 {
     i32 chance;
-    D3DXVECTOR3 camLookAtInv;
+    Float3 camLookAtInv;
 
     camLookAtInv = -g_Stage.cam.lookAt;
 
@@ -474,21 +454,21 @@ i32 EffectManager::InitWeatherFalling(Effect *effect)
 // FUNCTION: TH07 0x0041bec0
 i32 EffectManager::InitRandomDirWithSpeed(Effect *effect)
 {
-    f32 local_8;
+    f32 angle;
 
     // double intentionally used here, strangely
     if (effect->custom.x > -990.0)
     {
-        local_8 = utils::AddNormalizeAngle(effect->custom.x, 0.0f);
+        angle = utils::AddNormalizeAngle(effect->custom.x, 0.0f);
     }
     else
     {
-        local_8 = g_Rng.GetRandomFloatInRange(ZUN_2PI) - ZUN_PI;
+        angle = g_Rng.GetRandomFloatInRange(ZUN_2PI) - ZUN_PI;
     }
     effect->emitterPosition = effect->pos1;
     effect->emitterPosition.z = 0.0f;
-    effect->direction.x = cosf(local_8);
-    effect->direction.y = sinf(local_8);
+    effect->direction.x = cosf(angle);
+    effect->direction.y = sinf(angle);
     effect->direction.z = 0.0f;
     effect->direction *= g_Rng.GetRandomFloatInRange(1.5f) + 1.0f;
     return 0;
@@ -525,17 +505,17 @@ i32 EffectManager::UpdateNoOp(Effect *effect)
 
 #pragma var_order(effect, i)
 // FUNCTION: TH07 0x0041c1c0
-Effect *EffectManager::SpawnParticles(i32 effectId, D3DXVECTOR3 *pos,
-                                      i32 numParticles, D3DCOLOR color)
+Effect *EffectManager::SpawnEffect(i32 effectId, Float3 *pos,
+                                   i32 numParticles, D3DCOLOR color)
 {
     i32 i;
     Effect *effect;
 
     effect = &this->effects[this->nextIndex];
-    for (i = 0; i < 400; i++)
+    for (i = 0; i < MAX_NORMAL_EFFECTS; i++)
     {
         this->nextIndex++;
-        if (this->nextIndex >= 400)
+        if (this->nextIndex >= MAX_NORMAL_EFFECTS)
         {
             this->nextIndex = 0;
         }
@@ -553,6 +533,7 @@ Effect *EffectManager::SpawnParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
 
         effect->is2D = 0;
+        effect->ownerSeat = (i8)g_CoopActiveSeat;
         effect->inUseFlag = 1;
         effect->effectId = (u8)effectId;
         effect->pos1 = *pos;
@@ -563,7 +544,7 @@ Effect *EffectManager::SpawnParticles(i32 effectId, D3DXVECTOR3 *pos,
         effect->timer = 0;
         effect->isFadingOut = 0;
         effect->fadeOutTime = 0;
-        effect->custom = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+        effect->custom = Float3(0.0f, 0.0f, 0.0f);
         if (g_EffectMapping[effectId].initCallback &&
             g_EffectMapping[effectId].initCallback(effect))
         {
@@ -584,13 +565,13 @@ Effect *EffectManager::SpawnParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
     }
 
-    return i >= 400 ? &this->effects[413] : effect;
+    return i >= MAX_NORMAL_EFFECTS ? &this->effects[MAX_EFFECTS] : effect;
 }
 
 #pragma var_order(effect, i)
 // FUNCTION: TH07 0x0041c400
-Effect *EffectManager::SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
-                                            D3DXVECTOR3 *velocity,
+Effect *EffectManager::SpawnMovingParticles(i32 effectId, Float3 *pos,
+                                            Float3 *velocity,
                                             i32 numParticles, D3DCOLOR color)
 {
     i32 i;
@@ -598,10 +579,10 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
 
     effect = &this->effects[this->nextIndex];
 
-    for (i = 0; i < 400; i++)
+    for (i = 0; i < MAX_NORMAL_EFFECTS; i++)
     {
         this->nextIndex++;
-        if (this->nextIndex >= 400)
+        if (this->nextIndex >= MAX_NORMAL_EFFECTS)
         {
             this->nextIndex = 0;
         }
@@ -619,6 +600,7 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
 
         effect->is2D = 0;
+        effect->ownerSeat = (i8)g_CoopActiveSeat;
         effect->inUseFlag = 1;
         effect->effectId = effectId;
         effect->pos1 = *pos;
@@ -649,17 +631,18 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, D3DXVECTOR3 *pos,
         }
     }
 
-    return i >= 400 ? &this->effects[413] : effect;
+    return i >= MAX_NORMAL_EFFECTS ? &this->effects[MAX_EFFECTS] : effect;
 }
 
 // FUNCTION: TH07 0x0041c610
-Effect *EffectManager::SpawnEffect(i32 effectId, D3DXVECTOR3 *pos, i32 param_3,
-                                   i32 param_4, D3DCOLOR color)
+Effect *EffectManager::SpawnSpecialEffect(i32 effectId, Float3 *pos, i32 effectIdx,
+                                          i32 param_4, D3DCOLOR color, i32 ownerSeat)
 {
     Effect *effect;
 
-    effect = &this->effects[param_3 + 400];
+    effect = &this->effects[effectIdx + MAX_NORMAL_EFFECTS];
     effect->is2D = 0;
+    effect->ownerSeat = (i8)(ownerSeat >= 0 ? ownerSeat : g_CoopActiveSeat);
     effect->inUseFlag = 1;
     effect->effectId = effectId;
     effect->pos1 = *pos;
@@ -670,7 +653,7 @@ Effect *EffectManager::SpawnEffect(i32 effectId, D3DXVECTOR3 *pos, i32 param_3,
     effect->timer = 0;
     effect->isFadingOut = 0;
     effect->fadeOutTime = 0;
-    effect->custom = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+    effect->custom = Float3(0.0f, 0.0f, 0.0f);
     if (g_EffectMapping[effectId].initCallback)
     {
         if (g_EffectMapping[effectId].initCallback(effect))
@@ -681,6 +664,13 @@ Effect *EffectManager::SpawnEffect(i32 effectId, D3DXVECTOR3 *pos, i32 param_3,
     return effect;
 }
 
+// Each seat has its own fixed slots.
+Effect *EffectManager::SpawnPlayerEffect(i32 effectId, Float3 *pos, i32 slot, i32 seat, D3DCOLOR color)
+{
+    const i32 index = slot + (seat ? 8 + (seat - 1) * 5 : 0);
+    return SpawnSpecialEffect(effectId, pos, index, 1, color, seat);
+}
+
 #pragma var_order(effect, i)
 // FUNCTION: TH07 0x0041c790
 u32 EffectManager::OnUpdate(EffectManager *arg)
@@ -689,7 +679,7 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     Effect *effect;
 
     effect = arg->effects;
-    arg->activeEffectsCount = 0;
+    arg->activeEffects = 0;
     arg->layerPtrs[0] = &arg->layer0;
     arg->layerPtrs[1] = &arg->layer1;
     arg->layerPtrs[2] = &arg->layer2;
@@ -698,16 +688,14 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     arg->layer1.next = NULL;
     arg->layer2.next = NULL;
     arg->layer3.next = NULL;
-    // Process the particle pool plus all 13 fixed P1/P2/P3 player slots.
-    // effects[413] remains an allocation-failure sentinel.
-    for (i = 0; i < 413; i++, effect++)
+    for (i = 0; i < MAX_EFFECTS; i++, effect++)
     {
         if (!effect->inUseFlag)
         {
             continue;
         }
 
-        arg->activeEffectsCount++;
+        arg->activeEffects++;
         if (effect->callback && effect->callback(effect) != 1)
         {
             effect->inUseFlag = 0;
@@ -758,66 +746,47 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
     }
 }
 
-static void ApplyPlayerFocusOverlapAlpha(Effect *effect)
+// Proximity scales the rendered color, not the animation's alpha.
+static void DrawScreenEffect(Effect *effect)
 {
-    i32 playerId;
-    // Check every slot: GetPlayerOverlapAlpha keeps the local player's ring
-    // opaque and fades only remote rings for this PC's perspective.
-    for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
+    D3DCOLOR color = effect->vm.color.color;
+    D3DCOLOR color2 = effect->vm.color2.color;
+    if (effect->effectId == 24 && effect->ownerSeat >= 0 && effect->ownerSeat < PlayerCount())
     {
-        if (IsPlayerSlotActive((u8)playerId) &&
-            effect == g_Players[playerId].focusEffect)
-        {
-            u8 alpha = GetPlayerOverlapAlpha(&g_Players[playerId]);
-            if (alpha < (u8)(effect->vm.color.color >> 24))
-            {
-                effect->vm.color.color =
-                    (effect->vm.color.color & 0x00ffffff) |
-                    ((u32)alpha << 24);
-            }
-            return;
-        }
+        u32 fade = CoopPlayerAlpha(&g_Players[effect->ownerSeat]);
+        effect->vm.color.bytes.a = (u8)(effect->vm.color.bytes.a * fade / 255);
+        effect->vm.color2.bytes.a = (u8)(effect->vm.color2.bytes.a * fade / 255);
     }
+    effect->vm.pos = effect->pos1;
+    effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+    effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    g_AnmManager->Draw(&effect->vm);
+    effect->vm.color.color = color;
+    effect->vm.color2.color = color2;
 }
 
 // FUNCTION: TH07 0x0041ca10
 u32 EffectManager::OnDraw(EffectManager *arg)
 {
     Effect *effect;
-    u32 originalColor;
 
     effect = arg->layer0.next;
     while (effect)
     {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        originalColor = effect->vm.color.color;
-        ApplyPlayerFocusOverlapAlpha(effect);
-        g_AnmManager->Draw(&effect->vm);
-        effect->vm.color.color = originalColor;
+        DrawScreenEffect(effect);
         effect = effect->next;
     }
     effect = arg->layer2.next;
     while (effect)
     {
         effect->vm.pos = effect->pos1;
-        originalColor = effect->vm.color.color;
-        ApplyPlayerFocusOverlapAlpha(effect);
         g_AnmManager->DrawBillboard(&effect->vm);
-        effect->vm.color.color = originalColor;
         effect = effect->next;
     }
     effect = arg->layer3.next;
     while (effect)
     {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        originalColor = effect->vm.color.color;
-        ApplyPlayerFocusOverlapAlpha(effect);
-        g_AnmManager->Draw(&effect->vm);
-        effect->vm.color.color = originalColor;
+        DrawScreenEffect(effect);
         effect = effect->next;
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -825,7 +794,7 @@ u32 EffectManager::OnDraw(EffectManager *arg)
 
 #pragma var_order(effect, a, counter, b, g, r, temp)
 // FUNCTION: TH07 0x0041cb80
-i32 EffectManager::UpdateSpecialEffect()
+i32 EffectManager::DrawLayer1Effects()
 {
     int temp;
     f32 r;

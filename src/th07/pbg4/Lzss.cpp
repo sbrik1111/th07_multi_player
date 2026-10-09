@@ -7,10 +7,10 @@
 #define LZSS_DICTPOS_MOD(pos, amount) ((pos + amount) & LZSS_DICTSIZE_MASK)
 
 // GLOBAL: TH07 0x0049fe30
-Lzss::LzssNode g_LzssTree[0x2000 + 1];
+Lzss::LzssNode g_LzssTree[LZSS_DICTSIZE + 1];
 
 // GLOBAL: TH07 0x004b7e40
-u8 g_LzssDictionary[8196];
+u8 g_LzssDictionary[LZSS_DICTSIZE];
 
 #define ENC_NEXT_BIT()          \
     inBitMask >>= 1;            \
@@ -274,8 +274,8 @@ LPBYTE Lzss::Decompress(u8 *src, i32 srcLen, u8 *dst, u32 decompressedSize)
 // FUNCTION: TH07 0x0045f270
 void Lzss::InitializeTree(i32 root)
 {
-    g_LzssTree[0x2000].rightChild = root;
-    g_LzssTree[root].parent = 0x2000;
+    g_LzssTree[LZSS_DICTSIZE].rightChild = root;
+    g_LzssTree[root].parent = LZSS_DICTSIZE;
     g_LzssTree[root].rightChild = 0;
     g_LzssTree[root].leftChild = 0;
 }
@@ -285,7 +285,7 @@ void Lzss::InitializeDictionary()
 {
     i32 i;
 
-    for (i = 0; i < 0x2000; i++)
+    for (i = 0; i < LZSS_DICTSIZE; i++)
     {
         g_LzssDictionary[i] = 0;
     }
@@ -310,7 +310,7 @@ i32 Lzss::InsertNode(i32 node, i32 *matchPosition)
         return 0;
     }
 
-    i32 testNode = g_LzssTree[0x2000].rightChild;
+    i32 testNode = g_LzssTree[LZSS_DICTSIZE].rightChild;
     i32 matchLength = 0;
     for (;;)
     {

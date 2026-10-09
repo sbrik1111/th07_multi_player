@@ -140,7 +140,7 @@ address|name|type|size
 0135e218|g_ControllerData|global|128
 0135e298|g_PerformanceCounter|global|8
 0135e2a0|g_LastTime|global|4
-0135e2a8|g_MusicRoom|global|23556
+0135e2a8|s_MusicRoom|global|23556
 01363fc4|CodePage_01363fc4|global|4
 0136510c|uNumber_0136510c|global|4
 01365228|lpMem_01365228|global|4

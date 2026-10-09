@@ -2,8 +2,9 @@
 
 #include "inttypes.hpp"
 
+// this is like completely worthless
 // GLOBAL: TH07 0x00495120
-const u32 g_SeekModes[3] = {0, 1, 2};
+const u32 g_SeekModes[3] = {FILE_BEGIN, FILE_CURRENT, FILE_END};
 
 // would it really not have been simpler to just type the letter where its used
 // GLOBAL: TH07 0x0049ea70
@@ -29,48 +30,48 @@ Pbg4File::~Pbg4File()
     Close();
 }
 
-#pragma var_order(local_8, local_c, local_114, local_118)
+#pragma var_order(curModeChar, seekToEnd, pathBuf, actionOnExistingFile)
 // FUNCTION: TH07 0x0045e620
 bool Pbg4File::Open(const char *path, const char *mode)
 {
-    DWORD local_118;
-    char local_114[264];
-    i32 local_c;
-    const char *local_8;
+    DWORD actionOnExistingFile;
+    char pathBuf[264];
+    i32 seekToEnd;
+    const char *curModeChar;
 
-    local_c = 0;
+    seekToEnd = 0;
     this->Close();
-    for (local_8 = mode; *local_8 != '\0'; ++local_8)
+    for (curModeChar = mode; *curModeChar != '\0'; ++curModeChar)
     {
-        if (*local_8 == 'r')
+        if (*curModeChar == 'r')
         {
             this->access = GENERIC_READ;
-            local_118 = 3;
+            actionOnExistingFile = OPEN_EXISTING;
             break;
         }
-        if (*local_8 == 'w')
+        if (*curModeChar == 'w')
         {
             DeleteFileA(path);
             this->access = GENERIC_WRITE;
-            local_118 = 2;
+            actionOnExistingFile = CREATE_ALWAYS;
             break;
         }
-        if (*local_8 == 'a')
+        if (*curModeChar == 'a')
         {
-            local_c = 1;
+            seekToEnd = 1;
             this->access = GENERIC_WRITE;
-            local_118 = 4;
+            actionOnExistingFile = OPEN_ALWAYS;
             break;
         }
     }
-    if (*local_8 == '\0')
+    if (*curModeChar == '\0')
     {
         return false;
     }
     else
     {
-        GetFullPath(local_114, path);
-        this->handle = CreateFileA(local_114, this->access, 1, NULL, local_118,
+        GetFullPath(pathBuf, path);
+        this->handle = CreateFileA(pathBuf, this->access, 1, NULL, actionOnExistingFile,
                                    FILE_FLAG_SEQUENTIAL_SCAN | FILE_ATTRIBUTE_NORMAL, NULL);
         if (this->handle == INVALID_HANDLE_VALUE)
         {
@@ -78,9 +79,9 @@ bool Pbg4File::Open(const char *path, const char *mode)
         }
         else
         {
-            if (local_c != 0)
+            if (seekToEnd)
             {
-                SetFilePointer(this->handle, 0, NULL, 2);
+                SetFilePointer(this->handle, 0, NULL, FILE_END);
             }
             return true;
         }
@@ -101,31 +102,31 @@ void Pbg4File::Close()
 // FUNCTION: TH07 0x0045e7b0
 DWORD Pbg4File::Read(void *data, u32 len)
 {
-    DWORD local_8;
+    DWORD bytesRead;
 
-    local_8 = 0;
+    bytesRead = 0;
     if (this->access != GENERIC_READ)
     {
         return 0;
     }
 
-    ReadFile(this->handle, data, len, &local_8, NULL);
-    return local_8;
+    ReadFile(this->handle, data, len, &bytesRead, NULL);
+    return bytesRead;
 }
 
 // FUNCTION: TH07 0x0045e800
 bool Pbg4File::Write(void *data, u32 len)
 {
-    DWORD local_8;
+    DWORD bytesWritten;
 
-    local_8 = 0;
+    bytesWritten = 0;
     if (this->access != GENERIC_WRITE)
     {
         return false;
     }
 
-    WriteFile(this->handle, data, len, &local_8, NULL);
-    return len == local_8 ? true : false;
+    WriteFile(this->handle, data, len, &bytesWritten, NULL);
+    return len == bytesWritten ? true : false;
 }
 
 // FUNCTION: TH07 0x0045e850
@@ -137,7 +138,7 @@ DWORD Pbg4File::Tell()
     }
     else
     {
-        return SetFilePointer(this->handle, 0, NULL, 1);
+        return SetFilePointer(this->handle, 0, NULL, FILE_CURRENT);
     }
 }
 
@@ -166,49 +167,49 @@ bool Pbg4File::Seek(u32 offset, DWORD seekFrom)
     return true;
 }
 
-#pragma var_order(hMem, DVar2, DVar3)
+#pragma var_order(buf, fsize, oldPos)
 // FUNCTION: TH07 0x0045e8f0
 HGLOBAL Pbg4File::ReadRemaining(u32 max)
 {
-    HGLOBAL hMem;
-    DWORD DVar2;
-    DWORD DVar3;
+    HGLOBAL buf;
+    DWORD fsize;
+    DWORD oldPos;
 
     if (this->access != GENERIC_READ)
     {
         return NULL;
     }
 
-    DVar2 = this->GetSize();
-    if (DVar2 > max)
+    fsize = this->GetSize();
+    if (fsize > max)
     {
         return NULL;
     }
 
-    hMem = GlobalAlloc(GMEM_ZEROINIT, DVar2);
-    if (!hMem)
+    buf = GlobalAlloc(GMEM_ZEROINIT, fsize);
+    if (!buf)
     {
         return NULL;
     }
 
-    DVar3 = this->Tell();
-    if (!this->Seek(DVar3, g_SeekModes[0]))
+    oldPos = this->Tell();
+    if (!this->Seek(oldPos, g_SeekModes[FILE_BEGIN]))
     {
         return NULL;
     }
 
-    if (this->Read(hMem, DVar2) == 0)
+    if (this->Read(buf, fsize) == 0)
     {
-        if (hMem)
+        if (buf)
         {
-            GlobalFree(hMem);
-            hMem = NULL;
+            GlobalFree(buf);
+            buf = NULL;
         }
         return NULL;
     }
 
-    this->Seek(DVar3, g_SeekModes[0]);
-    return hMem;
+    this->Seek(oldPos, g_SeekModes[FILE_BEGIN]);
+    return buf;
 }
 
 // FUNCTION: TH07 0x0045e9d0

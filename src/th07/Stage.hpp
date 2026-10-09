@@ -1,12 +1,21 @@
 #pragma once
 
 #include "AnmManager.hpp"
-#include "AnmVm.hpp"
 #include "ScreenEffect.hpp"
 #include "ZunResult.hpp"
 #include "ZunTimer.hpp"
-#include "d3dx8.h"
 #include "utils.hpp"
+
+typedef enum StageEaseMode
+{
+    STAGE_EASE_OUT_QUAD = 1,
+    STAGE_EASE_OUT_CUBIC = 2,
+    STAGE_EASE_OUT_QUART = 3,
+    STAGE_EASE_IN_QUAD = 4,
+    STAGE_EASE_IN_CUBIC = 5,
+    STAGE_EASE_IN_QUART = 6,
+    STAGE_EASE_CUBIC_INTERP = 7, // this is not actually an easing mode
+} StageEaseMode;
 
 struct StageAnms
 {
@@ -33,7 +42,7 @@ struct StdRawQuadBasic
     i16 byteSize;
     i16 anmScript;
     i16 vmIndex;
-    D3DXVECTOR3 pos;
+    Float3 pos;
     Float2 size;
 };
 
@@ -42,8 +51,8 @@ struct StdRawObject
     u16 id;
     i8 zLevel;
     i8 flags;
-    D3DXVECTOR3 pos;
-    D3DXVECTOR3 size;
+    Float3 pos;
+    Float3 size;
     StdRawQuadBasic firstQuad;
 };
 
@@ -51,16 +60,16 @@ struct StdRawInstance
 {
     i16 id;
     i16 field1_0x2;
-    D3DXVECTOR3 pos;
+    Float3 pos;
 };
 
 struct StdRawInstrArgs
 {
     AnyArg args[3];
 
-    D3DXVECTOR3 *AsVec()
+    Float3 *AsVec()
     {
-        return (D3DXVECTOR3 *)args;
+        return (Float3 *)args;
     }
 };
 
@@ -80,11 +89,11 @@ struct StageCameraSky
 
 struct StageCamera
 {
-    D3DXVECTOR3 pos;
-    D3DXVECTOR3 lookAt;
-    D3DXVECTOR3 up;
-    D3DXVECTOR3 lookAtDir;
-    D3DXVECTOR3 right;
+    Float3 pos;
+    Float3 lookAt;
+    Float3 up;
+    Float3 lookAtDir;
+    Float3 right;
     f32 fov;
 };
 
@@ -117,9 +126,9 @@ struct Stage
     ZunResult UpdateObjects();
     void SetupCameraStageBackground();
     static void UpdateScriptAndCamera(Stage *stage, i32 param_2,
-                                      D3DXVECTOR3 *param_3, D3DXVECTOR3 *param_4,
-                                      D3DXVECTOR3 *param_5, D3DXVECTOR3 *param_6,
-                                      D3DXVECTOR3 *param_7);
+                                      Float3 *param_3, Float3 *param_4,
+                                      Float3 *param_5, Float3 *param_6,
+                                      Float3 *param_7);
 
     AnmVm *quadVms;
     AnmVm vm1;
@@ -134,7 +143,7 @@ struct Stage
     i32 instructionIndex;
     i32 stageFrameCounter;
     u32 stage;
-    D3DXVECTOR3 position;
+    Float3 pos;
     D3DCOLOR color;
     StageFog skyFog;
     StageFog fogEnd;
@@ -158,10 +167,10 @@ struct Stage
     StageCamera cam;
     i32 timersMax[4];
     ZunTimer timers[4];
-    i32 interpModes[4];
-    D3DXVECTOR3 positionStart;
+    i32 easeModes[4];
+    Float3 positionStart;
     i32 positionInterpEndTime;
-    D3DXVECTOR3 positionInterpInitial;
+    Float3 positionInterpInitial;
     i32 positionInterpStartTime;
     u8 cameraTeleported;
     // pad 3

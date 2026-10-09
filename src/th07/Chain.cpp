@@ -127,6 +127,29 @@ ZunResult Chain::AddToDrawChain(ChainElem *elem, i32 priority)
     }
 }
 
+// Runtime state: not rolled back.
+#pragma data_seg(push)
+#pragma bss_seg(push)
+#pragma data_seg()
+#pragma bss_seg()
+void (*g_ChainCalcProfile)(void *function, long long ticks);
+#pragma bss_seg(pop)
+#pragma data_seg(pop)
+
+static u32 RunCalcCallback(ChainElem *current)
+{
+    if (g_ChainCalcProfile == NULL)
+    {
+        return current->callback(current->arg);
+    }
+    LARGE_INTEGER begin, end;
+    QueryPerformanceCounter(&begin);
+    u32 result = current->callback(current->arg);
+    QueryPerformanceCounter(&end);
+    g_ChainCalcProfile((void *)current->callback, end.QuadPart - begin.QuadPart);
+    return result;
+}
+
 // FUNCTION: TH07 0x0042fd60
 i32 Chain::RunCalcChain()
 {
@@ -142,7 +165,7 @@ restart_from_first_job:
         if (current->callback)
         {
         execute_again:
-            switch (current->callback(current->arg))
+            switch (RunCalcCallback(current))
             {
             case CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB:
                 next = current;

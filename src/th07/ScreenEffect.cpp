@@ -66,10 +66,10 @@ void ScreenEffect::DrawSquare(ZunRect *rect, D3DCOLOR color)
 
     VertexDiffuseXyzrhw vertices[4];
 
-    vertices[0].pos = D3DXVECTOR3(rect->left, rect->top, 0.0f);
-    vertices[1].pos = D3DXVECTOR3(rect->right, rect->top, 0.0f);
-    vertices[2].pos = D3DXVECTOR3(rect->left, rect->bottom, 0.0f);
-    vertices[3].pos = D3DXVECTOR3(rect->right, rect->bottom, 0.0f);
+    vertices[0].pos = Float3(rect->left, rect->top, 0.0f);
+    vertices[1].pos = Float3(rect->right, rect->top, 0.0f);
+    vertices[2].pos = Float3(rect->left, rect->bottom, 0.0f);
+    vertices[3].pos = Float3(rect->right, rect->bottom, 0.0f);
     vertices[0].w = vertices[1].w = vertices[2].w = vertices[3].w = 1.0f;
     vertices[0].diffuse.color =
         vertices[1].diffuse.color =
@@ -114,10 +114,10 @@ void ScreenEffect::DrawColoredQuad(ZunRect *rect, D3DCOLOR param_2,
 
     VertexDiffuseXyzrhw vertices[4];
 
-    vertices[0].pos = D3DXVECTOR3(rect->left, rect->top, 0.0f);
-    vertices[1].pos = D3DXVECTOR3(rect->right, rect->top, 0.0f);
-    vertices[2].pos = D3DXVECTOR3(rect->left, rect->bottom, 0.0f);
-    vertices[3].pos = D3DXVECTOR3(rect->right, rect->bottom, 0.0f);
+    vertices[0].pos = Float3(rect->left, rect->top, 0.0f);
+    vertices[1].pos = Float3(rect->right, rect->top, 0.0f);
+    vertices[2].pos = Float3(rect->left, rect->bottom, 0.0f);
+    vertices[3].pos = Float3(rect->right, rect->bottom, 0.0f);
     vertices[0].w = vertices[1].w = vertices[2].w = vertices[3].w = 1.0f;
     vertices[0].diffuse.color = param_2;
     vertices[1].diffuse.color = param_3;
@@ -310,13 +310,13 @@ ZunResult BombEffects::DeletedCallback(BombEffects *arg)
     return ZUN_SUCCESS;
 }
 
-#pragma var_order(local_8, local_c, bombEffects)
+#pragma var_order(calcChain, drawChain, bombEffects)
 // FUNCTION: TH07 0x0044b310
 BombEffects *BombEffects::RegisterChain(i32 type, i32 duration, u32 arg1,
                                         u32 arg2, u32 arg3)
 {
-    ChainElem *local_8 = NULL;
-    ChainElem *local_c = NULL;
+    ChainElem *calcChain = NULL;
+    ChainElem *drawChain = NULL;
 
     BombEffects *bombEffects = new BombEffects;
     if (!bombEffects)
@@ -328,43 +328,43 @@ BombEffects *BombEffects::RegisterChain(i32 type, i32 duration, u32 arg1,
     switch (type)
     {
     case 0:
-        local_8 = g_Chain.CreateElem((ChainCallback)OnUpdateFadeOut);
-        local_c = g_Chain.CreateElem((ChainCallback)OnDrawFullScreenColor);
+        calcChain = g_Chain.CreateElem((ChainCallback)OnUpdateFadeOut);
+        drawChain = g_Chain.CreateElem((ChainCallback)OnDrawFullScreenColor);
         break;
     case 1:
-        local_8 = g_Chain.CreateElem((ChainCallback)OnUpdateScreenShake);
+        calcChain = g_Chain.CreateElem((ChainCallback)OnUpdateScreenShake);
         break;
     case 2:
-        local_8 = g_Chain.CreateElem((ChainCallback)OnUpdateFadeIn);
-        local_c = g_Chain.CreateElem((ChainCallback)OnDrawPlayAreaColor);
+        calcChain = g_Chain.CreateElem((ChainCallback)OnUpdateFadeIn);
+        drawChain = g_Chain.CreateElem((ChainCallback)OnDrawPlayAreaColor);
         break;
     case 4:
-        local_8 = g_Chain.CreateElem((ChainCallback)OnUpdateFadeIn);
-        local_c = g_Chain.CreateElem((ChainCallback)OnDrawFullScreenColor);
+        calcChain = g_Chain.CreateElem((ChainCallback)OnUpdateFadeIn);
+        drawChain = g_Chain.CreateElem((ChainCallback)OnDrawFullScreenColor);
         break;
     case 3:
-        local_8 = g_Chain.CreateElem((ChainCallback)OnUpdatePulse);
-        local_c = g_Chain.CreateElem((ChainCallback)OnDrawPlayAreaPulseColor);
+        calcChain = g_Chain.CreateElem((ChainCallback)OnUpdatePulse);
+        drawChain = g_Chain.CreateElem((ChainCallback)OnDrawPlayAreaPulseColor);
     }
-    local_8->addedCallback = (ChainLifecycleCallback)AddedCallback;
-    local_8->deletedCallback = (ChainLifecycleCallback)DeletedCallback;
-    local_8->arg = bombEffects;
+    calcChain->addedCallback = (ChainLifecycleCallback)AddedCallback;
+    calcChain->deletedCallback = (ChainLifecycleCallback)DeletedCallback;
+    calcChain->arg = bombEffects;
     bombEffects->type = type;
     bombEffects->duration = duration;
     bombEffects->args[0] = arg1;
     bombEffects->args[1] = arg2;
     bombEffects->args[2] = arg3;
-    if (g_Chain.AddToCalcChain(local_8, 15))
+    if (g_Chain.AddToCalcChain(calcChain, 15))
     {
         return NULL;
     }
 
-    if (local_c)
+    if (drawChain)
     {
-        local_c->arg = bombEffects;
-        g_Chain.AddToDrawChain(local_c, 17);
+        drawChain->arg = bombEffects;
+        g_Chain.AddToDrawChain(drawChain, 17);
     }
-    bombEffects->calcChain = local_8;
-    bombEffects->drawChain = local_c;
+    bombEffects->calcChain = calcChain;
+    bombEffects->drawChain = drawChain;
     return bombEffects;
 }

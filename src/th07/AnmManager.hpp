@@ -1,7 +1,6 @@
 #pragma once
 
-#include "AnmVm.hpp"
-
+#include <windows.h>
 #include <assert.h>
 #include <windef.h>
 
@@ -9,11 +8,123 @@
 #include "ZunColor.hpp"
 #include "ZunMath.hpp"
 #include "ZunResult.hpp"
+#include "ZunTimer.hpp"
 #include "dxutil.hpp"
+#include "utils.hpp"
+
+typedef enum AnmVarId
+{
+    ANM_VAR_INT1_1 = 10000,
+    ANM_VAR_INT1_2 = 10001,
+    ANM_VAR_INT1_3 = 10002,
+    ANM_VAR_INT1_4 = 10003,
+    ANM_VAR_FLOAT_1 = 10004,
+    ANM_VAR_FLOAT_2 = 10005,
+    ANM_VAR_FLOAT_3 = 10006,
+    ANM_VAR_FLOAT_4 = 10007,
+    ANM_VAR_INT2_1 = 10008,
+    ANM_VAR_INT2_2 = 10009,
+} AnmVarId;
+
+typedef enum AnmOpcode
+{
+    ANM_EXIT_HIDE = -1,
+    ANM_EXIT_HIDE2 = 1,
+    ANM_EXIT = 2,
+    ANM_SET_ACTIVE_SPRITE = 3,
+    ANM_JUMP = 4,
+    ANM_DEC_JUMP = 5,
+    ANM_SET_TRANSLATION = 6,
+    ANM_SET_SCALE = 7,
+    ANM_SET_ALPHA = 8,
+    ANM_SET_COLOR = 9,
+    ANM_FLIP_X = 10,
+    ANM_FLIP_Y = 11,
+    ANM_SET_ROTATION = 12,
+    ANM_SET_ANGLE_VEL = 13,
+    ANM_SET_SCALE_SPEED = 14,
+    ANM_FADE = 15,
+    ANM_SET_BLEND = 16,
+    ANM_POS_TIME_LINEAR = 17,
+    ANM_POS_TIME_DECEL = 18,
+    ANM_POS_TIME_ACCEL = 19,
+    ANM_STOP = 20,
+    ANM_INTERRUPT_LABEL = 21,
+    ANM_22 = 22,
+    ANM_STOP_HIDE = 23,
+    ANM_SET_USE_OFFSET = 24,
+    ANM_SET_AUTO_ROTATE = 25,
+    ANM_SET_SCROLL_POS_X = 26,
+    ANM_SET_SCROLL_POS_Y = 27,
+    ANM_SET_VISIBILITY = 28,
+    ANM_INTERP_SCALE = 29,
+    ANM_SET_ZWRITE_DISABLE = 30,
+    ANM_SET_CAMERA_MODE = 31,
+    ANM_INTERP_POS = 32,
+    ANM_INTERP_COLOR = 33,
+    ANM_INTERP_ALPHA = 34,
+    ANM_INTERP_ROTATE = 35,
+    ANM_INTERP_SCALE_2 = 36,
+    ANM_MOV = 37,
+    ANM_MOV_FLOAT = 38,
+    ANM_ADD = 39,
+    ANM_ADD_FLOAT = 40,
+    ANM_SUB = 41,
+    ANM_SUB_FLOAT = 42,
+    ANM_MUL = 43,
+    ANM_MUL_FLOAT = 44,
+    ANM_DIV = 45,
+    ANM_DIV_FLOAT = 46,
+    ANM_MOD = 47,
+    ANM_MOD_FLOAT = 48,
+    ANM_ADD_2 = 49,
+    ANM_ADD_FLOAT_2 = 50,
+    ANM_SUB_2 = 51,
+    ANM_SUB_FLOAT_2 = 52,
+    ANM_MUL_2 = 53,
+    ANM_MUL_FLOAT_2 = 54,
+    ANM_DIV_2 = 55,
+    ANM_DIV_FLOAT_2 = 56,
+    ANM_MOD_2 = 57,
+    ANM_MOD_FLOAT_2 = 58,
+    ANM_RAND = 59,
+    ANM_RAND_FLOAT = 60,
+    ANM_SIN = 61,
+    ANM_COS = 62,
+    ANM_TAN = 63,
+    ANM_ACOS = 64,
+    ANM_ATAN = 65,
+    ANM_NORMALIZE_ANGLE = 66,
+    ANM_JUMP_IF_EQ = 67,
+    ANM_JUMP_IF_EQ_FLOAT = 68,
+    ANM_JUMP_IF_NEQ = 69,
+    ANM_JUMP_IF_NEQ_FLOAT = 70,
+    ANM_JUMP_IF_LT = 71,
+    ANM_JUMP_IF_LT_FLOAT = 72,
+    ANM_JUMP_IF_LEQ = 73,
+    ANM_JUMP_IF_LEQ_FLOAT = 74,
+    ANM_JUMP_IF_GT = 75,
+    ANM_JUMP_IF_GT_FLOAT = 76,
+    ANM_JUMP_IF_GEQ = 77,
+    ANM_JUMP_IF_GEQ_FLOAT = 78,
+    ANM_WAIT = 79,
+    ANM_SET_SCROLLVEL_X = 80,
+    ANM_SET_SCROLLVEL_Y = 81
+} AnmOpcode;
+
+typedef enum AnmEaseMode
+{
+    ANM_EASE_IN_QUAD = 1,
+    ANM_EASE_IN_CUBIC = 2,
+    ANM_EASE_IN_QUART = 3,
+    ANM_EASE_OUT_QUAD = 4,
+    ANM_EASE_OUT_CUBIC = 5,
+    ANM_EASE_OUT_QUART = 6,
+} AnmEaseMode;
 
 struct VertexDiffuseXyzrhw
 {
-    D3DXVECTOR3 pos;
+    Float3 pos;
     f32 w;
     ZunColor diffuse;
 };
@@ -21,7 +132,7 @@ C_ASSERT(sizeof(VertexDiffuseXyzrhw) == 0x14);
 
 struct VertexTex1DiffuseXyz
 {
-    D3DXVECTOR3 position;
+    Float3 pos;
     ZunColor diffuse;
     Float2 textureUV;
 };
@@ -30,7 +141,7 @@ extern VertexTex1DiffuseXyz g_Quad3DFallback[4];
 
 struct VertexTex1Xyzrhw
 {
-    D3DXVECTOR3 pos;
+    Float3 pos;
     f32 w;
     Float2 textureUV;
 };
@@ -39,8 +150,6 @@ extern VertexTex1Xyzrhw g_QuadTemplate[4];
 
 struct VertexTex1DiffuseXyzrhw
 {
-    VertexTex1DiffuseXyzrhw() {}
-
     Float3 pos;
     f32 w;
     ZunColor color;
@@ -51,7 +160,7 @@ extern VertexTex1DiffuseXyzrhw g_QuadVertices[4];
 
 struct RenderVertexInfo
 {
-    D3DXVECTOR3 position;
+    Float3 pos;
     Float2 textureUV;
 };
 C_ASSERT(sizeof(RenderVertexInfo) == 0x14);
@@ -76,6 +185,16 @@ struct ZunImageInfoEmbedded
     i16 height;
     i32 unused_c;
     u8 data[];
+};
+
+#pragma warning(disable : 4200)
+struct AnmRawInstr
+{
+    i16 opcode;
+    u16 size;
+    i16 time;
+    u16 flags;
+    AnyArg args[];
 };
 
 struct AnmRawScript
@@ -115,19 +234,148 @@ struct AnmRawEntry
     AnmRawScript scripts[10];
 };
 
-// Slots available for loaded ANM files. LoadAnms consumes consecutive
-// entries for a file's child chain, so ids must be spaced clear of the
-// previous file's children. Raised past the original 50 to make room for
-// a third player's face block; LoadAnm and ReleaseAnm bound-check against
-// this rather than a literal.
-#define ANM_FILE_SLOT_COUNT 56
-
 struct AnmEntry
 {
     AnmRawEntry *raw;
     i32 spriteIndexOffset;
     i32 childCount;
 };
+
+struct AnmLoadedSprite
+{
+    i32 sourceFileIndex;
+    Float2 startPixelInclusive;
+    Float2 endPixelInclusive;
+    f32 textureHeight;
+    f32 textureWidth;
+    Float2 uvStart;
+    Float2 uvEnd;
+    f32 heightPx;
+    f32 widthPx;
+    f32 cols;
+    f32 rows;
+    i32 spriteId;
+};
+
+struct AnmVmBase
+{
+    void Initialize()
+    {
+        memset(this, 0, sizeof(AnmVmBase));
+        this->scale.x = 1.0f;
+        this->scale.y = 1.0f;
+        this->color.color = 0xffffffff;
+        D3DXMatrixIdentity(&this->matrix);
+        *(u16 *)&this->flags = 7;
+        this->currentTimeInScript.Initialize();
+    }
+
+    Float3 rotation;
+    Float3 angleVel;
+    Float2 scale;
+    Float2 scaleGrowth;
+    Float2 uvScrollPos;
+    ZunTimer currentTimeInScript;
+    ZunTimer waitTimer;
+    ZunTimer interpStartTimes[5]; /* pos = 0, color, alpha, rotate, scale
+                                            in that order */
+    ZunTimer interpEndTimes[5];
+    u8 easeModes[5];
+    // pad 3
+    i32 intVars1[4];
+    f32 floatVars[4];
+    i32 intVars2[2];
+    Float2 uvScrollVel;
+    D3DXMATRIX matrix;
+    D3DXMATRIX worldTransformMatrix;
+    D3DXMATRIX uvMatrix;
+    ZunColor color;
+    ZunColor color2;
+    union {
+        u32 flags;
+        struct
+        {
+            u32 visible : 1;
+            u32 active : 1;
+            u32 updateRotation : 1;
+            u32 updateScale : 1;
+            u32 blendMode : 1;
+            u32 flag6 : 1;
+            u32 flag7 : 1;
+            u32 useOffset : 1;
+            u32 flip : 2;
+            u32 anchor : 2;
+            u32 zWriteDisable : 1;
+            u32 isStopped : 1;
+            u32 cameraMode : 1;
+            u32 skipTransform : 1;
+            u32 useColor2 : 1;
+        };
+    };
+    i16 autoRotate;
+    i16 pendingInterrupt;
+};
+C_ASSERT(sizeof(AnmVmBase) == 0x1c8);
+
+struct AnmVm : AnmVmBase
+{
+    AnmVm()
+    {
+        memset(this, 0, sizeof(AnmVm));
+        this->activeSpriteIdx = -1;
+    }
+
+    void SetInvisible()
+    {
+        this->visible = 0;
+    }
+
+    void SetInterrupt(i16 interrupt)
+    {
+        this->pendingInterrupt = interrupt;
+    }
+
+    void SetRotationZ(f32 z)
+    {
+        this->rotation.z = z;
+    }
+
+    static void AssignVm(AnmVm *out, AnmVm *vm)
+    {
+        if (out->anmFileIdx != vm->anmFileIdx || vm->currentInstruction)
+        {
+            *out = *vm;
+        }
+    }
+
+    i32 *GetVar(i32 *paramId, u16 mask, u32 idx);
+    f32 *GetFloatVar(f32 *paramId, u16 mask, u32 idx);
+    f32 GetFloatVarValue(f32 arg);
+    i32 GetVarValue(i32 arg);
+
+    Float3 pos;
+    i16 activeSpriteIdx;
+    i16 baseSpriteIdx;
+    i16 anmFileIdx;
+    // pad 2
+    AnmRawInstr *beginningOfScript;
+    AnmRawInstr *currentInstruction;
+    AnmLoadedSprite *sprite;
+    Float3 posInterpInitial;
+    Float3 posInterpFinal;
+    Float3 rotateInterpInitial;
+    Float3 rotateInterpFinal;
+    Float2 scaleInterpInitial;
+    Float2 scaleInterpFinal;
+    ZunColor colorInterpInitialColor;
+    ZunColor colorInterpFinalColor;
+    Float3 offset;
+    i32 timeOfLastSpriteSet;
+    u8 fontWidth;
+    u8 fontHeight;
+    u8 unused_242[10];
+};
+C_ASSERT(sizeof(AnmVm) == 0x24c);
 
 struct AnmManager
 {
@@ -203,8 +451,8 @@ struct AnmManager
     void ExecuteAnmIdx(AnmVm *vm, i32 anmFileIdx)
     {
         vm->anmFileIdx = anmFileIdx;
-        vm->pos = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-        vm->offset = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+        vm->pos = Float3(0.0f, 0.0f, 0.0f);
+        vm->offset = Float3(0.0f, 0.0f, 0.0f);
         vm->fontHeight = 15;
         vm->fontWidth = 15;
         SetAndExecuteScript(vm, this->scripts[anmFileIdx]);
@@ -368,37 +616,35 @@ struct AnmManager
     u32 flushesThisFrame;
     Float2 offset;
     D3DXMATRIX matrix;
-    struct AnmLoadedSprite sprites[2816];
-    struct AnmVm vm;
-    struct IDirect3DTexture8 *textures[264];
+    // Seats 1-3: player sprites/scripts at 0xa00, bomb portraits at 0xd00.
+    AnmLoadedSprite sprites[0xe00];
+    AnmVm vm;
+    IDirect3DTexture8 *textures[264];
     void *imageDataArray[256];
     char *textureNames[264];
     i32 loadedSpriteCount;
-    struct AnmRawInstr *scripts[2816];
-    i32 spriteIndices[2816];
-    // LoadAnms consumes consecutive entries for a file's child chain, so a
-    // new file id has to start clear of the previous one's children. The
-    // original 50 left no gap wide enough for a third face, and squeezing
-    // one in at 41 landed inside FACE2's chain and corrupted it.
-    struct AnmEntry anmFiles[ANM_FILE_SLOT_COUNT];
-    struct IDirect3DSurface8 *surfaces[32];
-    struct IDirect3DSurface8 *surfacesBis[32];
-    struct ZunImageInfo surfaceSourceInfo[32];
+    AnmRawInstr *scripts[0xe00];
+    i32 spriteIndices[0xe00];
+    AnmEntry anmFiles[62]; // 50-52: players; 53-61: per-seat faces
+    IDirect3DSurface8 *surfaces[32];
+    IDirect3DSurface8 *surfacesBis[32];
+    ZunImageInfo surfaceSourceInfo[32];
     ZunColor currentTextureFactor;
-    struct IDirect3DTexture8 *currentTexture;
+    IDirect3DTexture8 *currentTexture;
     u8 currentBlendMode;
     u8 currentColorOp;
     u8 currentVertexShader;
     u8 currentZWriteDisable;
     u8 currentCameraMode;
     // pad 3
-    struct AnmLoadedSprite *currentSprite;
-    struct IDirect3DVertexBuffer8 *vertexBuffer;
-    struct RenderVertexInfo vertexBufferContents[4];
+    AnmLoadedSprite *currentSprite;
+    IDirect3DVertexBuffer8 *vertexBuffer;
+    RenderVertexInfo vertexBufferContents[4];
     u32 spritesToDraw;
-    struct VertexTex1DiffuseXyzrhw spriteVertexBuffer[49152];
-    struct VertexTex1DiffuseXyzrhw *vertexBufferCurPtr;
-    struct VertexTex1DiffuseXyzrhw *vertexBufferStartPtr;
+    // Outside the rollback arena.
+    VertexTex1DiffuseXyzrhw *spriteVertexBuffer;
+    VertexTex1DiffuseXyzrhw *vertexBufferCurPtr;
+    VertexTex1DiffuseXyzrhw *vertexBufferStartPtr;
     i32 screenshotTextureId;
     i32 screenshotSrcLeft;
     i32 screenshotSrcTop;
@@ -409,8 +655,4 @@ struct AnmManager
     i32 screenshotDstWidth;
     i32 screenshotDstHeight;
 };
-// Grown past the original layout by the wider sprite table and the extra
-// anmFiles entries a third player's face needs. This build is already
-// non-matching; the assert exists to catch unintended layout drift.
-C_ASSERT(sizeof(AnmManager) == 0x182da8);
 extern AnmManager *g_AnmManager;

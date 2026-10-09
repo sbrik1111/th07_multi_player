@@ -27,9 +27,20 @@ struct ZunTimer
         g_Supervisor.TickTimer(&this->current, &this->subFrame);
     }
 
+    i32 NextTick()
+    {
+        this->Tick();
+        return this->current;
+    }
+
     i32 GetCurrent()
     {
         return this->current;
+    }
+
+    i32 GetCurrentMod3()
+    {
+        return this->current % 3;
     }
 
     f32 AsFloat()
@@ -111,5 +122,4 @@ struct ZunTimer
 
     void Decrement(i32 value);
     void Increment(i32 value);
-    i32 NextTick();
 };

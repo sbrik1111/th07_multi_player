@@ -1,4 +1,11 @@
 #include "Supervisor.hpp"
+#include "multi/ReplaySession.h"
+#include "FrameInput.hpp"
+#include "multi/RollbackHeap.h"
+#include "multi/Session.h"
+#include "Coop.hpp"
+#include "GameWindow.hpp"
+#include "multi/Launcher.h"
 
 #include <dinput.h>
 #include <stdio.h>
@@ -14,7 +21,6 @@
 #include "MainMenu.hpp"
 #include "MidiOutput.hpp"
 #include "MusicRoom.hpp"
-#include "Netplay.hpp"
 #include "ResultScreen.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -26,12 +32,17 @@
 // GLOBAL: TH07 0x0049ee40
 ControllerMapping g_ControllerMapping = {0, 1, 2, 4, -1, -1, -1, -1, 3};
 
-// P1 occupies slot zero; multiplayer sidecar lanes occupy slots one and two.
-// Each lane remains a 16-bit TH07 input word.
-u16 g_CurFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
-u16 g_CurFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
-u16 g_LastFrameRawInputs[TH07_MULTI_MAX_PLAYERS];
-u16 g_LastFrameGameInputs[TH07_MULTI_MAX_PLAYERS];
+// GLOBAL: TH07 0x004b9e4c
+u16 g_CurFrameRawInput;
+
+// GLOBAL: TH07 0x004b9e50
+u16 g_CurFrameGameInput;
+
+// GLOBAL: TH07 0x004b9e54
+u16 g_LastFrameRawInput;
+
+// GLOBAL: TH07 0x004b9e58
+u16 g_LastFrameGameInput;
 
 // GLOBAL: TH07 0x004b9e5c
 u16 g_IsEighthFrameOfHeldInput;
@@ -42,20 +53,8 @@ u16 g_NumOfFramesInputsWereHeld;
 // GLOBAL: TH07 0x00575950
 Supervisor g_Supervisor;
 
-// GLOBAL: TH07 0x0135dfec
-u32 g_FpsUpdateCounter;
-
-// GLOBAL: TH07 0x0135dff0
-char g_ReplayFpsBuffer[256];
-
 // GLOBAL: TH07 0x0135e0f0
 char g_FpsCounterBuffer[256];
-
-// GLOBAL: TH07 0x0135e1f0
-u32 g_NumFramesSinceLastTime;
-
-// GLOBAL: TH07 0x0135e298
-LARGE_INTEGER g_PerformanceCounter;
 
 // FUNCTION: TH07 0x00437903
 void Supervisor::DebugPrint2(const char *fmt, ...)
@@ -121,7 +120,7 @@ void Supervisor::CheckTiming()
                 this->timingSpikeAccumulator = 0;
             }
             // STRING: TH07 0x00497244
-            Supervisor::DebugPrint2("alq CHECK___ %f / %f = %f\r\n", timeDiff, perfDiff,
+            Supervisor::DebugPrint2("alq É`ÉFÉbÉN %f / %f = %f\r\n", timeDiff, perfDiff,
                                     timeDiff / perfDiff);
         }
         else if (this->timingErrorCount != 0)
@@ -133,11 +132,11 @@ void Supervisor::CheckTiming()
 
     if (this->maxTimingError >= 40 || this->timingBadCount >= 16)
     {
-        this->flags |= 8;
+        this->timingBad = 1;
     }
     else
     {
-        this->flags &= 0xfffffff7;
+        this->timingBad = 0;
     }
 }
 
@@ -150,40 +149,6 @@ void AnmManager::ReleaseVertexBuffer()
 // FUNCTION: TH07 0x00437c70
 u32 Supervisor::OnUpdate(Supervisor *arg)
 {
-    u16 localInputs[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
-    u16 synchronizedInputs[TH07_MULTI_MAX_PLAYERS] = {0, 0, 0};
-    int playerId;
-
-    if (Netplay::ShouldCaptureLocalInput())
-    {
-        localInputs[0] = Controller::GetInput();
-        if (Netplay::GetMode() == Netplay::MODE_LOCAL)
-        {
-            localInputs[1] = Controller::GetInput2();
-        }
-    }
-    if (g_GameManager.notInMenu && !g_GameManager.replay)
-    {
-        int localLaneCount = Netplay::GetMode() == Netplay::MODE_LOCAL
-            ? Netplay::GetPlayerCount() : 1;
-        for (playerId = 0; playerId < localLaneCount; playerId++)
-        {
-            if (Netplay::IsAutoShootEnabled())
-            {
-                localInputs[playerId] |= TH_BUTTON_SHOOT;
-            }
-            if (Netplay::IsAutoSkipEnabled())
-            {
-                localInputs[playerId] |= TH_BUTTON_SKIP;
-            }
-        }
-    }
-    if (!Netplay::SynchronizeInputs(localInputs, g_Rng.seed,
-                                    synchronizedInputs))
-    {
-        return CHAIN_CALLBACK_RESULT_BREAK;
-    }
-
     g_AnmManager->SetVertexShader(255);
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetTexture(NULL);
@@ -196,17 +161,15 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     g_AnmManager->offset.y = 0.0f;
     g_AnmManager->offset.x = 0.0f;
     g_Supervisor.fogEnabled = 255;
-    if (g_SoundPlayer.backgroundMusic)
+    if (g_SoundPlayer.backgroundMusic && !g_SoundSilenced)
     {
+        th07::rollback::heap::RuntimeScope runtime;
         g_SoundPlayer.backgroundMusic->UpdateFadeOut();
     }
     if (!g_GameManager.slowModeSlowActive)
     {
-        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-        {
-            g_LastFrameRawInputs[playerId] = g_CurFrameRawInputs[playerId];
-            g_CurFrameRawInputs[playerId] = synchronizedInputs[playerId];
-        }
+        g_LastFrameRawInput = g_CurFrameRawInput;
+        g_CurFrameRawInput = g_FrameInputs->menu;
         g_IsEighthFrameOfHeldInput = 0;
         if (g_LastFrameRawInput == g_CurFrameRawInput)
         {
@@ -230,10 +193,11 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     else
     {
-        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-        {
-            g_CurFrameRawInputs[playerId] |= synchronizedInputs[playerId];
-        }
+        g_CurFrameRawInput |= g_FrameInputs->menu;
+    }
+    if (arg->curState == 6)
+    {
+        arg->curState = 1;
     }
     if (arg->wantedState != arg->curState)
     {
@@ -245,6 +209,7 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
         {
         case 0:
         CASE_0:
+            th07::replay::ReturnedToMenu();
             arg->curState = 1;
             g_Supervisor.d3dDevice->ResourceManagerDiscardBytes(0);
             if (MainMenu::RegisterChain(0) != ZUN_SUCCESS)
@@ -422,12 +387,8 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
             }
             break;
         }
-        for (playerId = 0; playerId < TH07_MULTI_MAX_PLAYERS; playerId++)
-        {
-            g_CurFrameRawInputs[playerId] = 0;
-            g_LastFrameRawInputs[playerId] = 0;
-        }
-        g_IsEighthFrameOfHeldInput = 0;
+        g_CurFrameRawInput = g_LastFrameRawInput =
+            g_IsEighthFrameOfHeldInput = 0;
     }
     arg->wantedState = arg->curState;
     arg->calcCount = arg->calcCount + 1;
@@ -467,23 +428,23 @@ i32 __stdcall Supervisor::EnumGameControllersCb(LPCDIDEVICEINSTANCEA param_1,
     return 0;
 }
 
-#pragma var_order(local_1c, idk)
+#pragma var_order(dipr, idk)
 // FUNCTION: TH07 0x0043836e
-i32 __stdcall Supervisor::ControllerCallback(LPCDIDEVICEOBJECTINSTANCE param_1,
-                                             void *param_2)
+i32 __stdcall Supervisor::ControllerCallback(LPCDIDEVICEOBJECTINSTANCE lpddoi,
+                                             LPVOID pvRef)
 {
-    DIPROPRANGE local_1c;
-    void *idk = param_2;
+    DIPROPRANGE dipr;
+    void *idk = pvRef;
 
-    if (param_1->dwType & DIDFT_AXIS)
+    if (lpddoi->dwType & DIDFT_AXIS)
     {
-        local_1c.diph.dwSize = sizeof(DIPROPRANGE);
-        local_1c.diph.dwHeaderSize = 16;
-        local_1c.diph.dwHow = 2;
-        local_1c.diph.dwObj = param_1->dwType;
-        local_1c.lMin = -1000;
-        local_1c.lMax = 1000;
-        if (g_Supervisor.controller->SetProperty(DIPROP_RANGE, &local_1c.diph) <
+        dipr.diph.dwSize = sizeof(DIPROPRANGE);
+        dipr.diph.dwHeaderSize = 16;
+        dipr.diph.dwHow = 2;
+        dipr.diph.dwObj = lpddoi->dwType;
+        dipr.lMin = -1000;
+        dipr.lMax = 1000;
+        if (g_Supervisor.controller->SetProperty(DIPROP_RANGE, &dipr.diph) <
             0)
         {
             return 0;
@@ -506,7 +467,7 @@ ZunResult Supervisor::SetupDInput()
     {
         this->directInput = NULL;
         // STRING: TH07 0x00497208
-        g_GameErrorContext.Log("DirectInput „Åå‰ΩøÁî®„Åß„Åç„Åæ„Åõ„Çì\r\n");
+        g_GameErrorContext.Log("DirectInput Ç™égópÇ≈Ç´Ç‹ÇπÇÒ\r\n");
         return ZUN_ERROR;
     }
     else
@@ -515,7 +476,7 @@ ZunResult Supervisor::SetupDInput()
                                                    &this->keyboard, NULL)))
         {
             SAFE_RELEASE(this->directInput);
-            g_GameErrorContext.Log("DirectInput „Åå‰ΩøÁî®„Åß„Åç„Åæ„Åõ„Çì\r\n");
+            g_GameErrorContext.Log("DirectInput Ç™égópÇ≈Ç´Ç‹ÇπÇÒ\r\n");
             return ZUN_ERROR;
         }
         else
@@ -525,7 +486,7 @@ ZunResult Supervisor::SetupDInput()
                 SAFE_RELEASE(this->keyboard);
                 SAFE_RELEASE(this->directInput);
                 // STRING: TH07 0x004971d8
-                g_GameErrorContext.Log("DirectInput SetDataFormat „Åå‰ΩøÁî®„Åß„Åç„Åæ„Åõ„Çì\r\n");
+                g_GameErrorContext.Log("DirectInput SetDataFormat Ç™égópÇ≈Ç´Ç‹ÇπÇÒ\r\n");
                 return ZUN_ERROR;
             }
             else
@@ -537,14 +498,14 @@ ZunResult Supervisor::SetupDInput()
                     SAFE_RELEASE(this->keyboard);
                     SAFE_RELEASE(this->directInput);
                     // STRING: TH07 0x004971a4
-                    g_GameErrorContext.Log("DirectInput SetCooperativeLevel „Åå‰ΩøÁî®„Åß„Åç„Åæ„Åõ„Çì\r\n");
+                    g_GameErrorContext.Log("DirectInput SetCooperativeLevel Ç™égópÇ≈Ç´Ç‹ÇπÇÒ\r\n");
                     return ZUN_ERROR;
                 }
                 else
                 {
                     this->keyboard->Acquire();
                     // STRING: TH07 0x0049717c
-                    g_GameErrorContext.Log("DirectInput „ÅØÊ≠£Â∏∏„Å´ÂàùÊúüÂåñ„Åï„Çå„Åæ„Åó„Åü\r\n");
+                    g_GameErrorContext.Log("DirectInput ÇÕê≥èÌÇ…èâä˙âªÇ≥ÇÍÇ‹ÇµÇΩ\r\n");
                     this->directInput->EnumDevices(4, EnumGameControllersCb, NULL, 1);
                     if (this->controller)
                     {
@@ -554,7 +515,7 @@ ZunResult Supervisor::SetupDInput()
                         this->controller->GetCapabilities(&g_Supervisor.controllerCaps);
                         this->controller->EnumObjects(ControllerCallback, NULL, 0);
                         // STRING: TH07 0x0049715c
-                        g_GameErrorContext.Log("ÊúâÂäπ„Å™„Éë„ÉÉ„Éâ„ÇíÁô∫Ë¶ã„Åó„Åæ„Åó„Åü\r\n");
+                        g_GameErrorContext.Log("óLå¯Ç»ÉpÉbÉhÇî≠å©ÇµÇ‹ÇµÇΩ\r\n");
                     }
                     return ZUN_SUCCESS;
                 }
@@ -578,14 +539,14 @@ ZunResult Supervisor::LoadGameData()
         if (!g_Supervisor.version)
         {
             // STRING: TH07 0x00497118
-            g_GameErrorContext.Fatal("error : „Éá„Éº„Çø„ÅÆ„Éê„Éº„Ç∏„Éß„É≥„ÅåÈÅï„ÅÑ„Åæ„Åô\r\n");
+            g_GameErrorContext.Fatal("error : ÉfÅ[É^ÇÃÉoÅ[ÉWÉáÉìÇ™à·Ç¢Ç‹Ç∑\r\n");
             return ZUN_ERROR;
         }
     }
     else
     {
         // STRING: TH07 0x004970f0
-        g_GameErrorContext.Fatal("error : „Éá„Éº„Çø„Éï„Ç°„Ç§„É´„ÅåÂ≠òÂú®„Åó„Åæ„Åõ„Çì\r\n");
+        g_GameErrorContext.Fatal("error : ÉfÅ[É^ÉtÉ@ÉCÉãÇ™ë∂ç›ÇµÇ‹ÇπÇÒ\r\n");
         return ZUN_ERROR;
     }
     return ZUN_SUCCESS;
@@ -670,14 +631,14 @@ i32 Supervisor::CheckVSync()
 
         if (fpsSum > 160.0f)
         {
-            g_GameErrorContext.Log("ÂûÇÁõ¥ÂêåÊúü„ÅåÂèñ„Çå„Å¶„Å™„ÅÑ„Åã„ÄÅ„É™„Éï„É¨„ÉÉ„Ç∑„É•„É¨„Éº„Éà„ÅåÈ´ò„Åô„Åé„Åæ„Åô\r\n");
-            g_GameErrorContext.Log("Âº∑Âà∂ÔºñÔºê„Éï„É¨„Éº„É†„É¢„Éº„Éâ„ÅßÂãï‰Ωú„Åó„Åæ„Åô\r\n");
+            g_GameErrorContext.Log("êÇíºìØä˙Ç™éÊÇÍÇƒÇ»Ç¢Ç©ÅAÉäÉtÉåÉbÉVÉÖÉåÅ[ÉgÇ™çÇÇ∑Ç¨Ç‹Ç∑\r\n");
+            g_GameErrorContext.Log("ã≠êßÇUÇOÉtÉåÅ[ÉÄÉÇÅ[ÉhÇ≈ìÆçÏÇµÇ‹Ç∑\r\n");
             g_Supervisor.vsyncEnabled = 1;
         }
         else if (fpsSum >= 65.0f)
         {
-            g_GameErrorContext.Log("ÂûÇÁõ¥ÂêåÊúü„ÅåÂèñ„Çå„Å¶„Å™„ÅÑ„Åã„ÄÅ„É™„Éï„É¨„ÉÉ„Ç∑„É•„É¨„Éº„Éà„ÅåÈ´ò„Åô„Åé„Åæ„Åô„ÄÇ\r\n");
-            g_GameErrorContext.Log("Âº∑Âà∂ÔºñÔºê„Éï„É¨„Éº„É†„É¢„Éº„Éâ„ÅßÂãï‰Ωú„Åó„Åæ„Åô\r\n");
+            g_GameErrorContext.Log("êÇíºìØä˙Ç™éÊÇÍÇƒÇ»Ç¢Ç©ÅAÉäÉtÉåÉbÉVÉÖÉåÅ[ÉgÇ™çÇÇ∑Ç¨Ç‹Ç∑ÅB\r\n");
+            g_GameErrorContext.Log("ã≠êßÇUÇOÉtÉåÅ[ÉÄÉÇÅ[ÉhÇ≈ìÆçÏÇµÇ‹Ç∑\r\n");
             g_Supervisor.vsyncEnabled = 1;
             return -2;
         }
@@ -690,7 +651,6 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
 {
     ScoreDat *scoreDat;
     i32 i;
-    u16 initialRngSeed;
 
     QueryPerformanceFrequency(&arg->perfFrequency);
     g_Supervisor.d3dDevice->BeginScene();
@@ -715,7 +675,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     // STRING: TH07 0x00497038
     g_AnmManager->LoadSurface(0, "data/title/th07logo.jpg");
     g_Supervisor.isInEnding = 1;
-    if (!g_Supervisor.vsyncEnabled)
+    if (!g_Supervisor.vsyncEnabled && !th07::launcher::LowLatencyEnabled())
     {
         if (CheckVSync())
         {
@@ -742,14 +702,11 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     arg->isInEnding = 0;
     arg->renderSkipFrames = 0;
     arg->lastTotalPlayTimeUpdate = timeGetTime();
-    initialRngSeed = (u16)arg->lastTotalPlayTimeUpdate;
-    initialRngSeed = Netplay::GetInitialRngSeed(initialRngSeed);
-    g_Rng.seedBackup = initialRngSeed;
-    g_Rng.generationCount = 0;
-    g_Rng.SetSeed(initialRngSeed);
+    g_Rng.SetSeed((u16)(g_GameManager.sessionSeed ^ (g_GameManager.sessionSeed >> 16)));
     arg->SetupDInput();
     if (!arg->midiOutput)
     {
+        th07::rollback::heap::RuntimeScope runtime;
         arg->midiOutput = new MidiOutput;
     }
     if (arg->midiOutput)
@@ -767,7 +724,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     if (AsciiManager::RegisterChain() != ZUN_SUCCESS)
     {
         // STRING: TH07 0x00496ff0
-        g_GameErrorContext.Log("error : ÊñáÂ≠ó„ÅÆÂàùÊúüÂåñ„Å´Â§±Êïó„Åó„Åæ„Åó„Åü\r\n");
+        g_GameErrorContext.Log("error : ï∂éöÇÃèâä˙âªÇ…é∏îsÇµÇ‹ÇµÇΩ\r\n");
         return ZUN_ERROR;
     }
 
@@ -777,7 +734,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     if (g_SoundPlayer.LoadFmt("bgm/thbgm.fmt"))
     {
         // STRING: TH07 0x00496fb8
-        g_GameErrorContext.Log("error : BGM „ÅÆÂàùÊúüÂåñ„Å´Â§±Êïó„Åó„Åæ„Åó„Åü\r\n");
+        g_GameErrorContext.Log("error : BGM ÇÃèâä˙âªÇ…é∏îsÇµÇ‹ÇµÇΩ\r\n");
         return ZUN_ERROR;
     }
 
@@ -882,133 +839,27 @@ ZunResult Supervisor::RegisterChain()
     return ZUN_SUCCESS;
 }
 
-#pragma var_order(fps, elapsedTimeInSecs, curTime, targetFps, local_1c, local_28, local_34)
 // FUNCTION: TH07 0x004390a5
 void Supervisor::DrawFpsCounter(i32 param_1)
 {
-    D3DXVECTOR3 local_30;
-    D3DXVECTOR3 local_24;
-    LARGE_INTEGER local_18;
-    f32 targetFps;
-    DWORD curTime;
-    f32 elapsedTimeInSecs;
-    f32 fps;
-
-    if (!g_GameManager.slowModeSlowActive)
+    if (g_Supervisor.wantedState == 1)
     {
-        g_NumFramesSinceLastTime =
-            g_NumFramesSinceLastTime + 1 + (u32)g_Supervisor.cfg.frameskipConfig;
-
-        if (g_Supervisor.perfFrequency.LowPart == 0)
-        {
-            static DWORD g_LastTime = timeGetTime();
-
-            curTime = timeGetTime();
-            if (curTime < g_LastTime)
-            {
-                g_LastTime = curTime;
-                g_NumFramesSinceLastTime = 0;
-            }
-            if (curTime - g_LastTime >= 500)
-            {
-                elapsedTimeInSecs = (f32)(curTime - g_LastTime) / 1000.0f;
-                g_LastTime = curTime;
-
-            MERGE:
-                fps = (f32)g_NumFramesSinceLastTime / elapsedTimeInSecs;
-                g_NumFramesSinceLastTime = 0;
-                // STRING: TH07 0x00496fa0
-                sprintf(g_FpsCounterBuffer, "%.02ffps", (f64)fps);
-                if (g_GameManager.notInMenu && param_1 != 0)
-                {
-                    targetFps = 60.0f;
-                    g_Supervisor.fpsAccumulator = g_Supervisor.fpsAccumulator + targetFps;
-                    if (targetFps * 0.9f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps;
-                    }
-                    else if (targetFps * 0.7f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.8f;
-                    }
-                    else if (targetFps * 0.5f < fps)
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.6f;
-                    }
-                    else
-                    {
-                        g_Supervisor.framerateMultiplier =
-                            g_Supervisor.framerateMultiplier + targetFps * 0.5f;
-                    }
-
-                    if (!g_GameManager.replay)
-                    {
-                        g_Supervisor.curFps = fps + 0.5f;
-                    }
-                    else
-                    {
-                        // STRING: TH07 0x00496f9c
-                        sprintf(g_ReplayFpsBuffer, "%2d", (i32)g_Supervisor.curFps);
-                    }
-                }
-            }
-            goto LAB_00439350;
-        }
-
-        if (g_PerformanceCounter.LowPart == 0)
-        {
-            QueryPerformanceCounter(&g_PerformanceCounter);
-        }
-        QueryPerformanceCounter(&local_18);
-        if (local_18.LowPart < g_PerformanceCounter.LowPart)
-        {
-            g_PerformanceCounter.LowPart = local_18.LowPart;
-            g_PerformanceCounter.HighPart = local_18.HighPart;
-            g_NumFramesSinceLastTime = 0;
-        }
-        if (local_18.LowPart >= g_PerformanceCounter.LowPart +
-                                    (g_Supervisor.perfFrequency.LowPart >> 1))
-        {
-            elapsedTimeInSecs =
-                (f32)(local_18.LowPart - g_PerformanceCounter.LowPart) /
-                (f32)g_Supervisor.perfFrequency.LowPart;
-            g_PerformanceCounter.LowPart = local_18.LowPart;
-            g_PerformanceCounter.HighPart = local_18.HighPart;
-            g_FpsUpdateCounter++;
-            if (g_FpsUpdateCounter % 8 == 0)
-            {
-                g_Supervisor.CheckTiming();
-            }
-            goto MERGE;
-        }
+        MpDrawTitleSession();
+        return;
     }
-
-LAB_00439350:
     if (!g_Supervisor.isInEnding && param_1 != 0)
     {
-        local_24.x = 512.0f;
-        local_24.y = 464.0f;
-        local_24.z = 0.0f;
-        g_AsciiManager.AddString(&local_24, g_FpsCounterBuffer);
-        if (g_GameManager.replay &&
-            g_GameManager.notInMenu)
+        Float3 fpsCounterPos;
+        sprintf(g_FpsCounterBuffer, "%.02ffps", (f64)MpDisplayedFps());
+        fpsCounterPos.x = 512.0f;
+        fpsCounterPos.y = 464.0f;
+        fpsCounterPos.z = 0.0f;
+        g_AsciiManager.AddString(&fpsCounterPos, g_FpsCounterBuffer);
+        MpDrawPlaySession();
+        if (g_Supervisor.wantedState == 2)
         {
-            local_30.x = 384.0f;
-            local_30.y = 448.0f;
-            local_30.z = 0.0f;
-            if (g_Supervisor.isFpsBad)
-            {
-                g_AsciiManager.color = 0xffff4040;
-            }
-            else
-            {
-                g_AsciiManager.color = 0xffffffd0;
-            }
-            g_AsciiManager.AddString(&local_30, g_ReplayFpsBuffer);
-            g_AsciiManager.color = 0xffffffff;
+            CoopDrawTransferPrompts();
+            CoopDrawStageNames();
         }
     }
 }
@@ -1016,7 +867,7 @@ LAB_00439350:
 // FUNCTION: TH07 0x00439401
 void ZunTimer::Increment(i32 value)
 {
-    if ((g_Supervisor.flags >> 5 & 1) != 0)
+    if (g_Supervisor.forceIntegerTimer)
     {
         this->current++;
         this->subFrame = 0.0f;
@@ -1049,7 +900,7 @@ void ZunTimer::Increment(i32 value)
 // FUNCTION: TH07 0x004394c7
 void ZunTimer::Decrement(i32 value)
 {
-    if ((g_Supervisor.flags >> 5 & 1) != 0)
+    if (g_Supervisor.forceIntegerTimer)
     {
         this->current--;
         this->subFrame = 0.0f;
@@ -1098,96 +949,96 @@ void Supervisor::TickTimer(i32 *frames, f32 *subframes)
 }
 
 // ZUN name: snapShotScreen
-#pragma var_order(local_14, local_18, local_1c, backBuffer, local_24,        \
-                  local_28, local_2c, y, x, bytesPerRow, local_40, local_44, \
-                  hFile)
+#pragma var_order(bmfh, local_18, local_1c, backBuffer, stride,                    \
+                  srcPixel, dstPixel, y, x, bytesPerRow, lockedRect, bytesWritten, \
+                  bitmapFile)
 // FUNCTION: TH07 0x004395fb
-i32 Supervisor::SnapshotScreen(const char *param_1)
+i32 Supervisor::SnapshotScreen(const char *filename)
 {
-    HANDLE hFile;
-    DWORD local_44;
-    D3DLOCKED_RECT local_40;
+    HANDLE bitmapFile;
+    DWORD bytesWritten;
+    D3DLOCKED_RECT lockedRect;
     i32 bytesPerRow;
     i32 x;
     i32 y;
-    u8 *local_2c;
-    u8 *local_28;
-    i32 local_24;
+    u8 *dstPixel;
+    u8 *srcPixel;
+    i32 stride;
     IDirect3DSurface8 *backBuffer;
-    BITMAPINFO *local_1c;
-    void *local_18;
-    BITMAPFILEHEADER local_14;
+    BITMAPINFO *bitmapInfo;
+    void *bitmapData;
+    BITMAPFILEHEADER bmfh;
 
-    local_1c = NULL;
-    local_18 = NULL;
+    bitmapInfo = NULL;
+    bitmapData = NULL;
     backBuffer = NULL;
     this->d3dDevice->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
-    memset(&local_14, 0, sizeof(BITMAPFILEHEADER));
+    memset(&bmfh, 0, sizeof(BITMAPFILEHEADER));
 
     // STRING: TH07 0x00496f98
-    local_14.bfType = *(WORD *)&"BM";
-    local_14.bfSize = local_14.bfOffBits = 54;
+    bmfh.bfType = *(WORD *)&"BM";
+    bmfh.bfSize = bmfh.bfOffBits = 54;
     switch (this->presentParameters.BackBufferFormat)
     {
     case D3DFMT_R5G6B5:
         // STRING: TH07 0x00496f80
-        g_GameErrorContext.Log("16bit „ÅØÂèñ„ÇäËæº„ÇÅ„Å™„ÅÑ\r\n");
+        g_GameErrorContext.Log("16bit ÇÕéÊÇËçûÇﬂÇ»Ç¢\r\n");
         break;
     case D3DFMT_X8R8G8B8:
-        local_1c = (BITMAPINFO *)ZunMemory::Alloc2(sizeof(BITMAPINFO));
-        if (!local_1c)
+        bitmapInfo = (BITMAPINFO *)ZunMemory::Alloc2(sizeof(BITMAPINFO));
+        if (!bitmapInfo)
         {
             // STRING: TH07 0x00496f60
-            g_GameErrorContext.Log("snapShotScreen : Á¢∫‰øù„Åó„Åè„Çä\r\n");
+            g_GameErrorContext.Log("snapShotScreen : ämï€ÇµÇ≠ÇË\r\n");
             break;
         }
 
-        memset(local_1c, 0, sizeof(BITMAPINFO));
-        local_24 = 1920;
-        local_18 = malloc(local_24 * 480);
-        if (!local_18)
+        memset(bitmapInfo, 0, sizeof(BITMAPINFO));
+        stride = 1920;
+        bitmapData = GameAlloc(stride * 480);
+        if (!bitmapData)
         {
-            g_GameErrorContext.Log("snapShotScreen : Á¢∫‰øù„Åó„Åè„Çä\r\n");
+            g_GameErrorContext.Log("snapShotScreen : ämï€ÇµÇ≠ÇË\r\n");
             break;
         }
 
-        local_14.bfSize += local_24 * 480;
-        local_1c->bmiHeader.biBitCount = 24;
-        local_1c->bmiHeader.biSize = 40;
-        local_1c->bmiHeader.biWidth = 640;
-        local_1c->bmiHeader.biHeight = 480;
-        local_1c->bmiHeader.biPlanes = 1;
-        local_1c->bmiHeader.biCompression = 0;
-        backBuffer->LockRect(&local_40, NULL, 0);
+        bmfh.bfSize += stride * 480;
+        bitmapInfo->bmiHeader.biBitCount = 24;
+        bitmapInfo->bmiHeader.biSize = 40;
+        bitmapInfo->bmiHeader.biWidth = 640;
+        bitmapInfo->bmiHeader.biHeight = 480;
+        bitmapInfo->bmiHeader.biPlanes = 1;
+        bitmapInfo->bmiHeader.biCompression = 0;
+        backBuffer->LockRect(&lockedRect, NULL, 0);
         bytesPerRow = 0;
         for (y = 479; -1 < y; y--, bytesPerRow++)
         {
-            local_2c = (u8 *)((u8 *)local_18 + local_24 * bytesPerRow);
-            local_28 = (u8 *)((u8 *)local_40.pBits + local_40.Pitch * y);
+            dstPixel = (u8 *)((u8 *)bitmapData + stride * bytesPerRow);
+            srcPixel = (u8 *)((u8 *)lockedRect.pBits + lockedRect.Pitch * y);
             for (x = 0; x < 640; x++)
             {
-                *local_2c = *local_28;
-                local_28++;
-                local_2c++;
-                *local_2c = *local_28;
-                local_28++;
-                local_2c++;
-                *local_2c = *local_28;
-                local_28 += 2;
-                local_2c++;
+                *dstPixel = *srcPixel;
+                srcPixel++;
+                dstPixel++;
+                *dstPixel = *srcPixel;
+                srcPixel++;
+                dstPixel++;
+                *dstPixel = *srcPixel;
+                srcPixel += 2;
+                dstPixel++;
             }
         }
         backBuffer->UnlockRect();
-        hFile = CreateFileA(param_1, GENERIC_WRITE, 0, NULL, 2, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile == INVALID_HANDLE_VALUE)
+        bitmapFile = CreateFileA(filename, GENERIC_WRITE, 0, NULL, 2, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (bitmapFile == INVALID_HANDLE_VALUE)
         {
             break;
         }
 
-        WriteFile(hFile, &local_14, 14, &local_44, NULL);
-        WriteFile(hFile, local_1c, 40, &local_44, NULL);
-        WriteFile(hFile, local_18, local_24 * 480, &local_44, NULL);
-        CloseHandle(hFile);
+        WriteFile(bitmapFile, &bmfh, 14, &bytesWritten, NULL);
+        WriteFile(bitmapFile, bitmapInfo, 40, &bytesWritten, NULL);
+        WriteFile(bitmapFile, bitmapData, stride * 480, &bytesWritten, NULL);
+        CloseHandle(bitmapFile);
         break;
     default:
         // STRING: TH07 0x00496f48
@@ -1195,8 +1046,8 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
         return 1;
     }
     SAFE_RELEASE(backBuffer);
-    free(local_1c);
-    free(local_18);
+    GameFree(bitmapInfo);
+    GameFree(bitmapData);
     return 0;
 }
 
@@ -1217,7 +1068,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
     if (!configFile)
     {
         // STRING: TH07 0x00496f14
-        g_GameErrorContext.Log("„Ç≥„É≥„Éï„Ç£„Ç∞„Éá„Éº„Çø„ÅåË¶ã„Å§„Åã„Çâ„Å™„ÅÑ„ÅÆ„ÅßÂàùÊúüÂåñ„Åó„Åæ„Åó„Åü\r\n");
+        g_GameErrorContext.Log("ÉRÉìÉtÉBÉOÉfÅ[É^Ç™å©Ç¬Ç©ÇÁÇ»Ç¢ÇÃÇ≈èâä˙âªÇµÇ‹ÇµÇΩ\r\n");
     init:
         g_Supervisor.cfg.lifeCount = 2;
         g_Supervisor.cfg.bombCount = 3;
@@ -1234,7 +1085,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
                 bgm2Data[2] != 0x700)
             {
                 // STRING: TH07 0x00496ee4
-                g_GameErrorContext.Fatal("BGM „Éá„Éº„Çø„ÅÆ„Éê„Éº„Ç∏„Éß„É≥„ÅåÈÅï„ÅÑ„Åæ„Åô\r\n");
+                g_GameErrorContext.Fatal("BGM ÉfÅ[É^ÇÃÉoÅ[ÉWÉáÉìÇ™à·Ç¢Ç‹Ç∑\r\n");
                 return ZUN_ERROR;
             }
             g_Supervisor.cfg.musicMode = MUSIC_WAV;
@@ -1243,7 +1094,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         {
             g_Supervisor.cfg.musicMode = MUSIC_MIDI;
             // STRING: TH07 0x00496ebc
-            Supervisor::DebugPrint2("wave „Éá„Éº„Çø„ÅåÁÑ°„ÅÑ„ÅÆ„Åß„ÄÅmidi „Å´„Åó„Åæ„Åô\r\n");
+            Supervisor::DebugPrint2("wave ÉfÅ[É^Ç™ñ≥Ç¢ÇÃÇ≈ÅAmidi Ç…ÇµÇ‹Ç∑\r\n");
         }
         g_Supervisor.cfg.playSounds = 1;
         g_Supervisor.cfg.defaultDifficulty = (u8)DIFF_NORMAL;
@@ -1257,7 +1108,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
     else
     {
         g_Supervisor.cfg = *(GameConfiguration *)configFile;
-        free(configFile);
+        GameFree(configFile);
 
         bgm = CreateFileA("./thbgm.dat", GENERIC_READ, 1, NULL, 3, FILE_FLAG_SEQUENTIAL_SCAN | FILE_ATTRIBUTE_NORMAL, NULL);
         if (bgm != INVALID_HANDLE_VALUE)
@@ -1267,7 +1118,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
             if (bgmData[0] != 0x5641575a || bgmData[1] != 1 ||
                 bgmData[2] != 0x700)
             {
-                g_GameErrorContext.Fatal("BGM „Éá„Éº„Çø„ÅÆ„Éê„Éº„Ç∏„Éß„É≥„ÅåÈÅï„ÅÑ„Åæ„Åô\r\n");
+                g_GameErrorContext.Fatal("BGM ÉfÅ[É^ÇÃÉoÅ[ÉWÉáÉìÇ™à·Ç¢Ç‹Ç∑\r\n");
                 return ZUN_ERROR;
             }
         }
@@ -1286,102 +1137,95 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
               g_LastFileSize == sizeof(GameConfiguration)))
         {
             // STRING: TH07 0x00496e88
-            g_GameErrorContext.Log("„Ç≥„É≥„Éï„Ç£„Ç∞„Éá„Éº„Çø„ÅåÁï∞Â∏∏„Åß„Åó„Åü„ÅÆ„ÅßÂÜçÂàùÊúüÂåñ„Åó„Åæ„Åó„Åü\r\n");
+            g_GameErrorContext.Log("ÉRÉìÉtÉBÉOÉfÅ[É^Ç™àŸèÌÇ≈ÇµÇΩÇÃÇ≈çƒèâä˙âªÇµÇ‹ÇµÇΩ\r\n");
             goto init;
         }
         g_ControllerMapping = g_Supervisor.cfg.controllerMapping;
-    }
-    if (Netplay::IsMultiplayer())
-    {
-        g_Supervisor.cfg.frameskipConfig = 0;
-        g_Supervisor.cfg.slowMode = 0;
     }
     g_Supervisor.cfg.loaded = 1;
     if (this->cfg.noVertexBuffers)
     {
         // STRING: TH07 0x00496e64
-        g_GameErrorContext.Log("È†ÇÁÇπ„Éê„ÉÉ„Éï„Ç°„ÅÆ‰ΩøÁî®„ÇíÊäëÂà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("í∏ì_ÉoÉbÉtÉ@ÇÃégópÇó}êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.disableFog)
     {
         // STRING: TH07 0x00496e48
-        g_GameErrorContext.Log("„Éï„Ç©„Ç∞„ÅÆ‰ΩøÁî®„ÇíÊäëÂà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉtÉHÉOÇÃégópÇó}êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.use16BitTextures)
     {
         // STRING: TH07 0x00496e20
-        g_GameErrorContext.Log("16Bit „ÅÆ„ÉÜ„ÇØ„Çπ„ÉÅ„É£„ÅÆ‰ΩøÁî®„ÇíÂº∑Âà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("16Bit ÇÃÉeÉNÉXÉ`ÉÉÇÃégópÇã≠êßÇµÇ‹Ç∑\r\n");
     }
     if (this->IsClearingBackbuffer())
     {
         // STRING: TH07 0x00496dfc
-        g_GameErrorContext.Log("„Éê„ÉÉ„ÇØ„Éê„ÉÉ„Éï„Ç°„ÅÆÊ∂àÂéª„ÇíÂº∑Âà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉoÉbÉNÉoÉbÉtÉ@ÇÃè¡ãéÇã≠êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.disableItemDrawAroundPlayfield)
     {
         // STRING: TH07 0x00496dd0
-        g_GameErrorContext.Log("„Ç≤„Éº„É†Âë®„Çä„ÅÆ„Ç¢„Ç§„ÉÜ„É†„ÅÆÊèèÁîª„ÇíÊäëÂà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉQÅ[ÉÄé¸ÇËÇÃÉAÉCÉeÉÄÇÃï`âÊÇó}êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.disableGouraud)
     {
         // STRING: TH07 0x00496da8
-        g_GameErrorContext.Log("„Ç∞„Éº„É≠„Éº„Ç∑„Çß„Éº„Éá„Ç£„É≥„Ç∞„ÇíÊäëÂà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉOÅ[ÉçÅ[ÉVÉFÅ[ÉfÉBÉìÉOÇó}êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.disableZBuffer)
     {
         // STRING: TH07 0x00496d8c
-        g_GameErrorContext.Log("„Éá„Éó„Çπ„ÉÜ„Çπ„Éà„ÇíÊäëÂà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉfÉvÉXÉeÉXÉgÇó}êßÇµÇ‹Ç∑\r\n");
     }
     this->vsyncEnabled = 0;
     this->cfg.unused = 0;
     if (this->cfg.disableTextureBlend)
     {
         // STRING: TH07 0x00496d6c
-        g_GameErrorContext.Log("„ÉÜ„ÇØ„Çπ„ÉÅ„É£„ÅÆËâ≤ÂêàÊàê„ÇíÊäëÂà∂„Åó„Åæ„Åôn");
+        g_GameErrorContext.Log("ÉeÉNÉXÉ`ÉÉÇÃêFçáê¨Çó}êßÇµÇ‹Ç∑n");
     }
     if (this->cfg.windowed)
     {
         // STRING: TH07 0x00496d4c
-        g_GameErrorContext.Log("„Ç¶„Ç£„É≥„Éâ„Ç¶„É¢„Éº„Éâ„ÅßËµ∑Âãï„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉEÉBÉìÉhÉEÉÇÅ[ÉhÇ≈ãNìÆÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.forceReferenceRender)
     {
         // STRING: TH07 0x00496d24
-        g_GameErrorContext.Log("„É™„Éï„Ç°„É¨„É≥„Çπ„É©„Çπ„Çø„É©„Ç§„Ç∂„ÇíÂº∑Âà∂„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÉäÉtÉ@ÉåÉìÉXÉâÉXÉ^ÉâÉCÉUÇã≠êßÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.disableDinput)
     {
         // STRING: TH07 0x00496cec
-        g_GameErrorContext.Log("„Éë„ÉÉ„Éâ„ÄÅ„Ç≠„Éº„Éú„Éº„Éâ„ÅÆÂÖ•Âäõ„Å´ DirectInput „Çí‰ΩøÁî®„Åó„Åæ„Åõ„Çì\r\n");
+        g_GameErrorContext.Log("ÉpÉbÉhÅAÉLÅ[É{Å[ÉhÇÃì¸óÕÇ… DirectInput ÇégópÇµÇ‹ÇπÇÒ\r\n");
     }
     if (this->cfg.redrawEveryFrame)
     {
         // STRING: TH07 0x00496cd0
-        g_GameErrorContext.Log("ÁîªÈù¢Âë®„Çä„ÇíÊØéÂõûÊèèÁîª„Åó„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("âÊñ é¸ÇËÇñàâÒï`âÊÇµÇ‹Ç∑\r\n");
     }
     if (this->cfg.preloadBgm)
     {
         // STRING: TH07 0x00496cb0
-        g_GameErrorContext.Log("Ôº¢ÔºßÔº≠„Çí„É°„É¢„É™„Å´Ë™≠„ÅøËæº„Åø„Åæ„Åô\r\n");
+        g_GameErrorContext.Log("ÇaÇfÇlÇÉÅÉÇÉäÇ…ì«Ç›çûÇ›Ç‹Ç∑\r\n");
     }
     if (this->cfg.enableVsync)
     {
         // STRING: TH07 0x00496c98
-        g_GameErrorContext.Log("ÂûÇÁõ¥ÂêåÊúü„ÇíÂèñ„Çä„Åæ„Åõ„Çì\r\n");
+        g_GameErrorContext.Log("êÇíºìØä˙ÇéÊÇËÇ‹ÇπÇÒ\r\n");
         g_Supervisor.vsyncEnabled = 1;
     }
-    if (!Netplay::NoSave() &&
-        FileSystem::WriteDataToFile(configFilename, &g_Supervisor.cfg,
+    if (FileSystem::WriteDataToFile(configFilename, &g_Supervisor.cfg,
                                     sizeof(GameConfiguration)))
     {
         // STRING: TH07 0x00496c78
-        g_GameErrorContext.Fatal("„Éï„Ç°„Ç§„É´„ÅåÊõ∏„ÅçÂá∫„Åõ„Åæ„Åõ„Çì %s\r\n", configFilename);
+        g_GameErrorContext.Fatal("ÉtÉ@ÉCÉãÇ™èëÇ´èoÇπÇ‹ÇπÇÒ %s\r\n", configFilename);
         // STRING: TH07 0x00496c20
-        g_GameErrorContext.Fatal("„Éï„Ç©„É´„ÉÄ„ÅåÊõ∏Ëæº„ÅøÁ¶ÅÊ≠¢Â±ûÊÄß„Å´„Å™„Å£„Å¶„ÅÑ„Çã„Åã„ÄÅ„Éá„Ç£„Çπ„ÇØ„Åå„ÅÑ„Å£„Å±„ÅÑ„ÅÑ„Å£„Å±„ÅÑ„Å´„Å™„Å£„Å¶„Åæ„Åõ„Çì„ÅãÔºü\r\n");
+        g_GameErrorContext.Fatal("ÉtÉHÉãÉ_Ç™èëçûÇ›ã÷é~ëÆê´Ç…Ç»Ç¡ÇƒÇ¢ÇÈÇ©ÅAÉfÉBÉXÉNÇ™Ç¢Ç¡ÇœÇ¢Ç¢Ç¡ÇœÇ¢Ç…Ç»Ç¡ÇƒÇ‹ÇπÇÒÇ©ÅH\r\n");
         return ZUN_ERROR;
     }
 
-    Netplay::ApplyAudioPreferences();
     return ZUN_SUCCESS;
 }
 
@@ -1439,12 +1283,12 @@ ZunResult Supervisor::PlayLoadedAudio(i32 idx)
     return ZUN_SUCCESS;
 }
 
-#pragma var_order(local_8, local_10c)
+#pragma var_order(pathExt, pathBuf)
 // FUNCTION: TH07 0x00439f4d
 ZunResult Supervisor::PlayAudio(const char *path)
 {
-    char local_10c[256];
-    char *local_8;
+    char pathBuf[256];
+    char *pathExt;
 
     if (g_Supervisor.cfg.musicMode == MUSIC_MIDI)
     {
@@ -1458,12 +1302,12 @@ ZunResult Supervisor::PlayAudio(const char *path)
         if (g_Supervisor.cfg.musicMode == MUSIC_WAV)
         {
             // ZUN landmine: the result of strrchr is not checked for NULL.
-            strcpy(local_10c, path);
-            local_8 = strrchr(local_10c, '.');
-            local_8[1] = 'w';
-            local_8[2] = 'a';
-            local_8[3] = 'v';
-            g_SoundPlayer.PushCommand(AUDIO_START, -1, local_10c);
+            strcpy(pathBuf, path);
+            pathExt = strrchr(pathBuf, '.');
+            pathExt[1] = 'w';
+            pathExt[2] = 'a';
+            pathExt[3] = 'v';
+            g_SoundPlayer.PushCommand(AUDIO_START, -1, pathBuf);
         }
         else
         {
@@ -1507,7 +1351,7 @@ ZunResult Supervisor::StopAudio()
 // FUNCTION: TH07 0x0043a0d6
 i32 Supervisor::FadeOutMusic(f32 musicFadeFrames)
 {
-    f32 local_8;
+    f32 effectiveFadeFrames;
 
     if (g_Supervisor.cfg.musicMode == MUSIC_MIDI)
     {
@@ -1522,18 +1366,18 @@ i32 Supervisor::FadeOutMusic(f32 musicFadeFrames)
         {
             if (this->effectiveFramerateMultiplier == 0.0f)
             {
-                local_8 = musicFadeFrames;
+                effectiveFadeFrames = musicFadeFrames;
             }
             else if (this->effectiveFramerateMultiplier > 1.0f)
             {
-                local_8 = musicFadeFrames;
+                effectiveFadeFrames = musicFadeFrames;
             }
             else
             {
-                local_8 = musicFadeFrames / this->effectiveFramerateMultiplier;
+                effectiveFadeFrames = musicFadeFrames / this->effectiveFramerateMultiplier;
             }
             // STRING: TH07 0x00496c1e
-            g_SoundPlayer.PushCommand(AUDIO_FADEOUT, local_8, "");
+            g_SoundPlayer.PushCommand(AUDIO_FADEOUT, effectiveFadeFrames, "");
         }
         else
         {

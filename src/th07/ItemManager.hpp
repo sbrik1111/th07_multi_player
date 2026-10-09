@@ -1,12 +1,8 @@
 #pragma once
 
-#include "AnmVm.hpp"
 #include "Player.hpp"
 
 extern u8 g_ItemDropTable[32];
-
-void AngleToVector(D3DXVECTOR3 *out, f32 angle, f32 speed);
-i32 GetLifeTransferSpawnState(u8 targetPlayerId);
 
 typedef enum ItemType
 {
@@ -25,53 +21,48 @@ typedef enum ItemType
 
 struct Item
 {
-    Item();
-
     i32 IsBelowPoc()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY;
+        return this->currentPosition.y < g_Players[this->collector].shooterData->pocY;
     }
 
     i32 OffsetFromPoc()
     {
-        return this->currentPosition.y - g_Player.shooterData->pocY;
+        return this->currentPosition.y - g_Players[this->collector].shooterData->pocY;
     }
 
     i32 ShouldAwardMaxScore()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY ||
+        return this->currentPosition.y < g_Players[this->collector].shooterData->pocY ||
                this->autoCollect;
     }
 
     AnmVm sprite;
-    D3DXVECTOR3 currentPosition;
-    D3DXVECTOR3 startPosition;
-    D3DXVECTOR3 targetPosition;
+    Float3 currentPosition;
+    Float3 startPosition;
+    Float3 targetPosition;
     ZunTimer timer;
     i8 itemType;
     i8 isInUse;
     i8 isOnscreen;
     i8 state;
     i8 autoCollect;
-    // pad 3
+    i8 collector;
+    i8 targetSeat; // -1: unclaimed
+    i8 transfer;
     struct Item *next;
 };
 C_ASSERT(sizeof(Item) == 0x288);
 
 struct ItemManager
 {
-    ItemManager();
-
     void ActivateAllItems();
     void DespawnAllItems(i32 param_1);
     void OnUpdate();
     void OnDraw();
     void RemoveAllItems();
-    Item *SpawnItem(D3DXVECTOR3 *heading, i32 itemType, i32 state);
-    // Enemy/ECL resource drops use this narrow path so multiplayer can double
-    // lives and bombs without also doubling player transfers, debug items, or
-    // bullet-conversion rewards.
-    Item *SpawnEnemyDrop(D3DXVECTOR3 *heading, i32 itemType, i32 state);
+    Item *SpawnItem(Float3 *heading, i32 itemType, i32 state, i32 recipient = -1);
+    bool SpawnTransfer(Float3 *heading, i32 itemType, i32 recipient, i32 amount = 1);
 
     struct Item items[1101];
     i32 nextIndex;
@@ -79,4 +70,4 @@ struct ItemManager
     struct Item listHead;
     struct Item *listTail;
 };
-extern ItemManager g_ItemManager;
+extern ItemManager &g_ItemManager;

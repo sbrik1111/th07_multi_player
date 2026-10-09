@@ -1,4 +1,5 @@
 #include "EnemyEclInstr.hpp"
+#include "Coop.hpp"
 
 #include "BulletManager.hpp"
 #include "EnemyManager.hpp"
@@ -55,7 +56,7 @@ EclInterpFn g_EclInterpFuncs[8] = {
 void EnemyEclInstr::ExInsSetPosToBoss(Enemy *enemy, EclRawInstr *instr)
 {
     i32 bossIdx = instr->args[1].i;
-    enemy->position = g_EnemyManager.bosses[bossIdx]->position;
+    enemy->pos = g_EnemyManager.bosses[bossIdx]->pos;
     enemy->axisSpeed = g_EnemyManager.bosses[bossIdx]->axisSpeed;
     enemy->angle = g_EnemyManager.bosses[bossIdx]->angle;
     enemy->disableMovement = 1;
@@ -72,7 +73,7 @@ void EnemyEclInstr::ExInsAliceCurveBullets(Enemy *enemy, EclRawInstr *instr)
     bullet = g_BulletManager.bullets;
     BombEffects::RegisterChain(1, 30, 12, 0, 0);
     BombEffects::RegisterChain(3, 4, 3, 0x80ffcfcf, 0);
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE || bullet->state == BULLET_DESPAWN)
         {
@@ -149,7 +150,7 @@ void EnemyEclInstr::ExInsTurnBulletsIntoOtherBullets(Enemy *enemy,
     case 3:
         local_e4 = 999.0;
     }
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE ||
             bullet->state == BULLET_DESPAWN)
@@ -160,13 +161,13 @@ void EnemyEclInstr::ExInsTurnBulletsIntoOtherBullets(Enemy *enemy,
         if (bullet->sprites.spriteBullet.sprite &&
             bullet->spriteOffset == 2)
         {
-            distance = sqrtf((enemy->position.x - bullet->pos.x) *
-                                 (enemy->position.x - bullet->pos.x) +
-                             (enemy->position.y - bullet->pos.y) *
-                                 (enemy->position.y - bullet->pos.y));
+            distance = sqrtf((enemy->pos.x - bullet->pos.x) *
+                                 (enemy->pos.x - bullet->pos.x) +
+                             (enemy->pos.y - bullet->pos.y) *
+                                 (enemy->pos.y - bullet->pos.y));
             if (distance < local_e4)
             {
-                bulletProps.position = bullet->pos;
+                bulletProps.pos = bullet->pos;
                 bulletProps.sprite = 0;
                 bulletProps.spriteOffset = 6;
                 bulletProps.angle1 = 0.0f;
@@ -204,7 +205,7 @@ void EnemyEclInstr::ExInsDespawnLargeBulletAndSavePos(Enemy *enemy,
     instr->GetSecondArg();
 
     enemy->currentContext.eclContextArgs.floatVars1[0] = -999.0f;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE ||
             bullet->state == BULLET_DESPAWN)
@@ -216,7 +217,7 @@ void EnemyEclInstr::ExInsDespawnLargeBulletAndSavePos(Enemy *enemy,
         {
             enemy->currentContext.eclContextArgs.floatVars1[0] = bullet->pos.x;
             enemy->currentContext.eclContextArgs.floatVars1[1] = bullet->pos.y;
-            g_EffectManager.SpawnParticles(2, &bullet->pos, 1, 0xffffffff);
+            g_EffectManager.SpawnEffect(2, &bullet->pos, 1, 0xffffffff);
             bullet->Initialize();
             break;
         }
@@ -227,7 +228,7 @@ void EnemyEclInstr::ExInsDespawnLargeBulletAndSavePos(Enemy *enemy,
 void EnemyEclInstr::ExInsCopyMainBossMovement(Enemy *enemy, EclRawInstr *instr)
 {
     Enemy *boss = g_EnemyManager.bosses[0];
-    enemy->moveInterpStartPos = boss->position;
+    enemy->moveInterpStartPos = boss->pos;
     enemy->moveRadius = boss->moveRadius;
     enemy->moveAngularVelocity = boss->moveAngularVelocity;
 
@@ -246,7 +247,7 @@ void EnemyEclInstr::ExInsSplitBulletsOrShootBackwards(Enemy *enemy,
     i32 i;
     EnemyBulletShooter bulletProps;
 
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE ||
             bullet->state == BULLET_DESPAWN)
@@ -259,7 +260,7 @@ void EnemyEclInstr::ExInsSplitBulletsOrShootBackwards(Enemy *enemy,
              (instr->args[1].i == 1 && bullet->spriteOffset == 15) ||
              (instr->args[1].i == 2 && bullet->spriteOffset == 2)))
         {
-            bulletProps.position = bullet->pos;
+            bulletProps.pos = bullet->pos;
             bulletProps.sprite = 6;
             bulletProps.spriteOffset = 15;
             bulletProps.angle1 = utils::AddNormalizeAngle(bullet->angle, ZUN_PI);
@@ -333,13 +334,13 @@ void EnemyEclInstr::ExInsSplitBulletsOrShootBackwards(Enemy *enemy,
 
 #pragma var_order(p, rot, d)
 // FUNCTION: TH07 0x004185d0
-i32 IsPointInRotatedRect(D3DXVECTOR3 *point, D3DXVECTOR3 *center,
-                         D3DXVECTOR3 *size, D3DXVECTOR3 *pivot,
+i32 IsPointInRotatedRect(Float3 *point, Float3 *center,
+                         Float3 *size, Float3 *pivot,
                          f32 sine, f32 cosine)
 {
-    D3DXVECTOR3 d;
-    D3DXVECTOR3 rot;
-    D3DXVECTOR3 p;
+    Float3 d;
+    Float3 rot;
+    Float3 p;
 
     d = *point - *pivot;
 
@@ -366,18 +367,18 @@ i32 IsPointInRotatedRect(D3DXVECTOR3 *point, D3DXVECTOR3 *center,
 void EnemyEclInstr::ExInsReflectBulletsFromLasers(Enemy *enemy,
                                                   EclRawInstr *instr)
 {
-    D3DXVECTOR3 center;
+    Float3 center;
     f32 cosine;
     i32 i;
     Laser *laser;
     Bullet *bullet;
-    D3DXVECTOR3 size;
+    Float3 size;
     f32 dot;
     f32 sine;
     i32 j;
 
     laser = g_BulletManager.lasers;
-    for (i = 0; i < 64; i++, laser++)
+    for (i = 0; i < ARRAY_SIZE_SIGNED(g_BulletManager.lasers); i++, laser++)
     {
         if (!laser->inUse)
         {
@@ -398,7 +399,7 @@ void EnemyEclInstr::ExInsReflectBulletsFromLasers(Enemy *enemy,
             center.y = laser->pos.y;
             sincosf(&sine, &cosine, laser->angle);
             bullet = g_BulletManager.bullets;
-            for (j = 0; j < 1024; j++, bullet++)
+            for (j = 0; j < MAX_BULLETS; j++, bullet++)
             {
                 if (bullet->state == BULLET_INACTIVE || bullet->state == BULLET_DESPAWN)
                 {
@@ -432,9 +433,9 @@ void EnemyEclInstr::ExInsReflectBulletsFromLasers(Enemy *enemy,
                             bullet->angle =
                                 utils::AddNormalizeAngle(laser->angle, -1.5707964f);
                         }
-                        AngleToVector(&bullet->velocity, bullet->angle,
-                                      g_Supervisor.effectiveFramerateMultiplier *
-                                          bullet->speed);
+                        bullet->velocity.FromAngleMagnitude(bullet->angle,
+                                                            g_Supervisor.effectiveFramerateMultiplier *
+                                                                bullet->speed);
                         bullet->state2 = 10;
                         bullet->sprites = g_BulletManager.bulletTypeTemplates[5];
                         g_AnmManager->SetActiveSprite(
@@ -454,27 +455,27 @@ void EnemyEclInstr::ExInsReflectBulletsFromLasers(Enemy *enemy,
 void EnemyEclInstr::ExInsShootBulletsAlongLaser(Enemy *enemy,
                                                 EclRawInstr *instr)
 {
-    D3DXVECTOR3 center;
+    Float3 center;
     f32 cosine;
     i32 i;
     Laser *laser;
     f32 dirX;
     Bullet *bullet;
-    D3DXVECTOR3 size;
+    Float3 size;
     f32 dot;
     f32 sine;
     i32 j;
     f32 dirY;
 
     laser = g_BulletManager.lasers;
-    for (i = 0; i < 64; i++, laser++)
+    for (i = 0; i < ARRAY_SIZE_SIGNED(g_BulletManager.lasers); i++, laser++)
     {
         if (!laser->inUse)
         {
             continue;
         }
 
-        if (i % 3 != enemy->timer.current % 3)
+        if (enemy->timer.GetCurrentMod3() != i % 3)
         {
             continue;
         }
@@ -490,7 +491,7 @@ void EnemyEclInstr::ExInsShootBulletsAlongLaser(Enemy *enemy,
             dirX = -sine;
             dirY = cosine;
             bullet = g_BulletManager.bullets;
-            for (j = 0; j < 1024; j++, bullet++)
+            for (j = 0; j < MAX_BULLETS; j++, bullet++)
             {
                 if (bullet->state == BULLET_INACTIVE || bullet->state == BULLET_DESPAWN)
                 {
@@ -530,7 +531,7 @@ void EnemyEclInstr::ExInsShootBulletsAlongLaser(Enemy *enemy,
                         bullet->sprites.spriteBullet.activeSpriteIdx +
                             bullet->spriteOffset);
                     bullet->angle = atan2f(bullet->velocity.y, bullet->velocity.x);
-                    AngleToVector(&bullet->velocity, bullet->angle, bullet->speed);
+                    bullet->velocity.FromAngleMagnitude(bullet->angle, bullet->speed);
                     if (g_GameManager.difficulty < 2)
                     {
                         bullet->state2 = -1;
@@ -562,7 +563,7 @@ void EnemyEclInstr::ExInsYoumuSetGameSpeed(Enemy *enemy, EclRawInstr *instr)
     g_Stage.spellcardVms[0].pendingInterrupt = 2;
     g_Stage.spellcardVms[1].pendingInterrupt = 2;
     bullet = g_BulletManager.bullets;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -590,7 +591,7 @@ void EnemyEclInstr::ExInsYoumuRestoreGameSpeed(Enemy *enemy, EclRawInstr *instr)
 
     bullet = g_BulletManager.bullets;
     fps = 1.0f / g_Supervisor.effectiveFramerateMultiplier;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -609,7 +610,7 @@ void EnemyEclInstr::ExInsYoumuRestoreGameSpeed(Enemy *enemy, EclRawInstr *instr)
     g_Supervisor.effectiveFramerateMultiplier = 1.0f / (f32)instr->args[1].i;
     if (g_Supervisor.effectiveFramerateMultiplier < 1.0f)
     {
-        g_Supervisor.flags |= 0x20;
+        g_Supervisor.forceIntegerTimer = 1;
     }
     g_Supervisor.effectiveFramerateMultiplier = 1.0f;
     g_Stage.spellcardVms[0].pendingInterrupt = 1;
@@ -631,7 +632,7 @@ void EnemyEclInstr::ExInsBurstLargeBullets(Enemy *enemy, EclRawInstr *instr)
     numBullets = g_GameManager.difficulty == DIFF_EASY ? 10 : g_GameManager.difficulty == DIFF_NORMAL ? 18
                                                           : g_GameManager.difficulty == DIFF_HARD     ? 22
                                                                                                       : 25;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -640,18 +641,18 @@ void EnemyEclInstr::ExInsBurstLargeBullets(Enemy *enemy, EclRawInstr *instr)
 
         if ((g_GameManager.difficulty < DIFF_HARD &&
              bullet->sprites.spriteBullet.sprite->heightPx > 48.0f &&
-             bullet->pos.y > enemy->position.y - 64.0f &&
-             bullet->pos.y < enemy->position.y + 64.0f) ||
+             bullet->pos.y > enemy->pos.y - 64.0f &&
+             bullet->pos.y < enemy->pos.y + 64.0f) ||
             (g_GameManager.difficulty >= DIFF_HARD &&
              bullet->sprites.spriteBullet.sprite->heightPx > 48.0f &&
-             bullet->pos.y > enemy->position.y - 48.0f &&
-             bullet->pos.y < enemy->position.y + 48.0f))
+             bullet->pos.y > enemy->pos.y - 48.0f &&
+             bullet->pos.y < enemy->pos.y + 48.0f))
         {
             for (j = 0; j < numBullets; j++)
             {
-                bulletProps.position = bullet->pos;
-                bulletProps.position.x += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
-                bulletProps.position.y += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
+                bulletProps.pos = bullet->pos;
+                bulletProps.pos.x += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
+                bulletProps.pos.y += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
 
                 switch (g_Rng.GetRandomU16InRange(3))
                 {
@@ -700,7 +701,7 @@ void EnemyEclInstr::ExInsYoumuCurveBulletsBelow(Enemy *enemy,
     i32 i;
 
     bullet = g_BulletManager.bullets;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -708,10 +709,10 @@ void EnemyEclInstr::ExInsYoumuCurveBulletsBelow(Enemy *enemy,
         }
 
         if (bullet->state2 == 0 &&
-            bullet->pos.y > enemy->position.y &&
+            bullet->pos.y > enemy->pos.y &&
             bullet->pos.y < 352.0f &&
-            bullet->pos.x > enemy->position.x - 16.0f &&
-            bullet->pos.x < enemy->position.x + 16.0f)
+            bullet->pos.x > enemy->pos.x - 16.0f &&
+            bullet->pos.x < enemy->pos.x + 16.0f)
         {
             bullet->AddAngleAccelCommand(0, 0, 160,
                                          i & 1 ? 0.05235988f : -0.05235988f,
@@ -730,7 +731,7 @@ void EnemyEclInstr::ExInsYoumuRedirectBulletsToPlayer(Enemy *enemy,
 
     bullet = g_BulletManager.bullets;
     BombEffects::RegisterChain(3, 16, 1, 0x50cfcfff, 0);
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -740,7 +741,7 @@ void EnemyEclInstr::ExInsYoumuRedirectBulletsToPlayer(Enemy *enemy,
         if (bullet->state2 == 1)
         {
             bullet->AddTargetVelocityCommand(0, 0, 90, 0.026666667f,
-                                             GetClosestActivePlayer(&bullet->pos)->AngleToPlayer(&bullet->pos));
+                                             AimTarget(&bullet->pos)->AngleToPlayer(&bullet->pos));
             bullet->ClearCommand(1);
             bullet->state2 = 2;
         }
@@ -761,7 +762,7 @@ void EnemyEclInstr::ExInsYuyukoTransformButterflyBullets(Enemy *enemy,
     EnemyBulletShooter bulletProps;
     i32 i;
 
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -771,7 +772,7 @@ void EnemyEclInstr::ExInsYuyukoTransformButterflyBullets(Enemy *enemy,
             bullet->sprites.spriteBullet.activeSpriteIdx >= 632 &&
             bullet->sprites.spriteBullet.activeSpriteIdx <= 639)
         {
-            bulletProps.position = bullet->pos;
+            bulletProps.pos = bullet->pos;
             bulletProps.sprite = 0;
             bulletProps.spriteOffset = 6;
             bulletProps.angle1 = utils::AddNormalizeAngle(bullet->angle, ZUN_PI);
@@ -800,7 +801,7 @@ void EnemyEclInstr::ExInsYuyukoButterflySpawnEnemy(Enemy *enemy,
     args = enemy->currentContext.eclContextArgs;
     angleOffset = -ZUN_PI;
     BombEffects::RegisterChain(3, 12, 1, 0x80cfcfff, 0);
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -834,7 +835,7 @@ void EnemyEclInstr::ExInsYuyukoCountButterflyBullets(Enemy *enemy,
 
     bullet = g_BulletManager.bullets;
     enemy->currentContext.eclContextArgs.intVars1[0] = 0;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -860,7 +861,7 @@ void EnemyEclInstr::ExInsBurstLargeBullets2(Enemy *enemy, EclRawInstr *instr)
 
     triggerHeight = g_GameManager.difficulty == DIFF_HARD ? 128.0f : 180.0f;
     BombEffects::RegisterChain(3, 8, 1, 0x50cfcfff, 0);
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -868,14 +869,14 @@ void EnemyEclInstr::ExInsBurstLargeBullets2(Enemy *enemy, EclRawInstr *instr)
         }
 
         if (bullet->sprites.spriteBullet.sprite->heightPx > 48.0f &&
-            enemy->position.y - triggerHeight < bullet->pos.y &&
-            bullet->pos.y < triggerHeight + enemy->position.y)
+            enemy->pos.y - triggerHeight < bullet->pos.y &&
+            bullet->pos.y < triggerHeight + enemy->pos.y)
         {
             for (j = 0; j < 15; j++)
             {
-                bulletProps.position = bullet->pos;
-                bulletProps.position.x += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
-                bulletProps.position.y += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
+                bulletProps.pos = bullet->pos;
+                bulletProps.pos.x += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
+                bulletProps.pos.y += g_Rng.GetRandomFloatInRange(32.0f) - 16.0f;
 
                 switch ((u32)g_Rng.GetRandomU16InRange(3))
                 {
@@ -947,7 +948,7 @@ void EnemyEclInstr::ExInsSpawnBulletsWithDirChange(Enemy *enemy,
     }
 
     timerMod2 = enemy->timer.current % 2;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -957,7 +958,7 @@ void EnemyEclInstr::ExInsSpawnBulletsWithDirChange(Enemy *enemy,
             bullet->pos.y < 320.0f &&
             bullet->sprites.spriteBullet.sprite->heightPx > 60.0f)
         {
-            bulletProps.position = bullet->pos;
+            bulletProps.pos = bullet->pos;
             if (timerMod2 != 0)
             {
                 bulletProps.sprite = 1;
@@ -1016,7 +1017,7 @@ void EnemyEclInstr::ExInsSpawnBulletsWithDirChange2(Enemy *enemy,
     }
 
     timerMod3 = enemy->timer.current % 3;
-    for (i = 0; i < 1024; i++, bullet++)
+    for (i = 0; i < MAX_BULLETS; i++, bullet++)
     {
         if (bullet->state == BULLET_INACTIVE)
         {
@@ -1026,7 +1027,7 @@ void EnemyEclInstr::ExInsSpawnBulletsWithDirChange2(Enemy *enemy,
             bullet->pos.y < 320.0f &&
             bullet->sprites.spriteBullet.sprite->heightPx > 60.0f)
         {
-            bulletProps.position = bullet->pos;
+            bulletProps.pos = bullet->pos;
             if (timerMod3 != 0)
             {
                 bulletProps.sprite = 1;

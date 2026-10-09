@@ -1,4 +1,6 @@
 #include "Controller.hpp"
+#include "FrameInput.hpp"
+#include "multi/Launcher.h"
 
 #include <dinput.h>
 
@@ -6,12 +8,18 @@
 #include "Supervisor.hpp"
 #include "dsutil.hpp"
 #include "inttypes.hpp"
+#include "utils.hpp"
+// Runtime state: not rolled back.
+#include "multi/RuntimeData.h"
 
 // GLOBAL: TH07 0x0049fc88
 static JOYCAPSA g_JoystickCaps;
 
 // GLOBAL: TH07 0x0049fe1c
 static u16 g_AutoFocusTimer;
+
+const FrameInputs *g_FrameInputs;
+static i32 g_KeyboardOnly;
 
 #define KEY_PRESSED(scancode, thButton) \
     ((keyboardState[scancode] & 0x80) != 0 ? thButton : 0)
@@ -31,10 +39,6 @@ u16 Controller::GetJoystickCaps()
         return 1;
     }
     joyGetDevCapsA(0, &g_JoystickCaps, 0x194);
-    g_GameErrorContext.Log(
-        "info : controller detected name '%s' buttons %u axes %u\r\n",
-        g_JoystickCaps.szPname, (unsigned)g_JoystickCaps.wNumButtons,
-        (unsigned)g_JoystickCaps.wNumAxes);
     return 0;
 }
 
@@ -340,13 +344,26 @@ u8 *Controller::GetControllerState()
 // FUNCTION: TH07 0x00430b50
 u16 Controller::GetInput()
 {
-    u8 keyboardState[256];
+    u8 keyboardState[256] = {};
 
     u16 buttons = 0;
+    const bool lowLatency = th07::launcher::LowLatencyEnabled();
+    if (lowLatency && GetForegroundWindow() != g_Supervisor.hwndGameWindow)
+        return 0;
 
-    if (!g_Supervisor.keyboard)
+    if (lowLatency || !g_Supervisor.keyboard)
     {
-        GetKeyboardState(keyboardState);
+        if (lowLatency) {
+            static const unsigned keys[] = {
+                VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT, VK_NUMPAD8, VK_NUMPAD2, VK_NUMPAD4, VK_NUMPAD6,
+                VK_NUMPAD7, VK_NUMPAD9, VK_NUMPAD1, VK_NUMPAD3, VK_HOME, 'D', 'Z', 'X', VK_SHIFT,
+                VK_ESCAPE, VK_CONTROL, 'Q', 'S', 'R', VK_RETURN
+            };
+            for (unsigned key : keys)
+                keyboardState[key] = (GetAsyncKeyState(key) & 0x8000) ? 0x80 : 0;
+        } else {
+            GetKeyboardState(keyboardState);
+        }
 
         buttons |= KEY_PRESSED(VK_UP, TH_BUTTON_UP);
         buttons |= KEY_PRESSED(VK_DOWN, TH_BUTTON_DOWN);
@@ -380,7 +397,12 @@ u16 Controller::GetInput()
         if (hr == DIERR_INPUTLOST)
         {
             g_Supervisor.keyboard->Acquire();
-            return GetControllerInput(buttons);
+            return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
+        }
+        // Acquisition can fail in the background: no keys then.
+        if (FAILED(hr))
+        {
+            return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
         }
         buttons |= KEY_PRESSED(DIK_UP, TH_BUTTON_UP);
         buttons |= KEY_PRESSED(DIK_DOWN, TH_BUTTON_DOWN);
@@ -408,24 +430,49 @@ u16 Controller::GetInput()
         buttons |= KEY_PRESSED(DIK_RETURN, TH_BUTTON_ENTER);
         buttons |= KEY_PRESSED(DIK_R, TH_BUTTON_RESET);
     }
-    return GetControllerInput(buttons);
+    return g_KeyboardOnly ? buttons : GetControllerInput(buttons);
 }
 
-// Local co-op keyboard. Network peers use the normal P1 mapping on each
-// machine, so this mapping is only consumed by --local mode.
-u16 Controller::GetInput2()
+u16 ReadDeviceButtons(i32 keyboardOnly)
 {
-    u16 buttons = 0;
-#define ASYNC_KEY_PRESSED(vk, button) \
-    (((GetAsyncKeyState(vk) & 0x8000) != 0) ? (button) : 0)
-    buttons |= ASYNC_KEY_PRESSED('I', TH_BUTTON_UP);
-    buttons |= ASYNC_KEY_PRESSED('K', TH_BUTTON_DOWN);
-    buttons |= ASYNC_KEY_PRESSED('J', TH_BUTTON_LEFT);
-    buttons |= ASYNC_KEY_PRESSED('L', TH_BUTTON_RIGHT);
-    buttons |= ASYNC_KEY_PRESSED('F', TH_BUTTON_SHOOT);
-    buttons |= ASYNC_KEY_PRESSED('G', TH_BUTTON_BOMB);
-    buttons |= ASYNC_KEY_PRESSED('D', TH_BUTTON_FOCUS);
-#undef ASYNC_KEY_PRESSED
+    g_KeyboardOnly = keyboardOnly;
+    u16 buttons = Controller::GetInput();
+    g_KeyboardOnly = 0;
+    return buttons;
+}
+
+#pragma var_order(caps, info, buttons, distance)
+u16 ReadJoypadButtonsOf(i32 index)
+{
+    JOYCAPSA caps;
+    JOYINFOEX info;
+    u16 buttons;
+    u32 distance;
+
+    memset(&info, 0, sizeof(info));
+    info.dwSize = sizeof(info);
+    info.dwFlags = JOY_RETURNALL;
+    if (joyGetPosEx(index, &info) != JOYERR_NOERROR || joyGetDevCapsA(index, &caps, sizeof(caps)) != JOYERR_NOERROR)
+    {
+        return 0;
+    }
+    buttons = 0;
+    ControllerMapping &m = g_Supervisor.cfg.controllerMapping;
+    Controller::SetButtonFromControllerInputs(&buttons, m.shootButton, TH_BUTTON_SHOOT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.bombButton, TH_BUTTON_BOMB, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.focusButton, TH_BUTTON_FOCUS, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.menuButton, TH_BUTTON_MENU, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.upButton, TH_BUTTON_UP, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.downButton, TH_BUTTON_DOWN, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.leftButton, TH_BUTTON_LEFT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.rightButton, TH_BUTTON_RIGHT, info.dwButtons);
+    Controller::SetButtonFromControllerInputs(&buttons, m.skipButton, TH_BUTTON_SKIP, info.dwButtons);
+    distance = (caps.wXmax - caps.wXmin) / 2 / 2;
+    buttons |= JOYSTICK_MIDPOINT(caps.wXmin, caps.wXmax) + distance < info.dwXpos ? TH_BUTTON_RIGHT : 0;
+    buttons |= info.dwXpos < JOYSTICK_MIDPOINT(caps.wXmin, caps.wXmax) - distance ? TH_BUTTON_LEFT : 0;
+    distance = (caps.wYmax - caps.wYmin) / 2 / 2;
+    buttons |= JOYSTICK_MIDPOINT(caps.wYmin, caps.wYmax) + distance < info.dwYpos ? TH_BUTTON_DOWN : 0;
+    buttons |= info.dwYpos < JOYSTICK_MIDPOINT(caps.wYmin, caps.wYmax) - distance ? TH_BUTTON_UP : 0;
     return buttons;
 }
 
@@ -435,7 +482,7 @@ void Controller::ResetKeyboard()
     u8 key_states[256];
 
     GetKeyboardState(key_states);
-    for (i32 i = 0; i < 256; i++)
+    for (i32 i = 0; i < ARRAY_SIZE_SIGNED(key_states); i++)
     {
         key_states[i] = key_states[i] & 0x7f;
     }

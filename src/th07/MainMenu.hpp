@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
 #include "Chain.hpp"
 #include "ReplayManager.hpp"
 #include "Supervisor.hpp"
@@ -27,7 +27,6 @@ struct MainMenu
 {
     MainMenu()
     {
-        i32 idk[2];
         memset(this, 0, sizeof(MainMenu));
     }
 
@@ -45,6 +44,10 @@ struct MainMenu
     u32 OnUpdateSelectDifficulty();
     u32 OnUpdateSelectCharacter();
     u32 OnUpdateSelectShotType();
+    i32 IsCoopLoadoutSelection() const;
+    u8 &SelectedCharacter();
+    u8 &SelectedShotType();
+    void DrawCoopSelectLabels();
 
     u32 OnUpdateSelectReplay();
     u32 OnUpdateSelectPracticeStage();
@@ -58,7 +61,27 @@ struct MainMenu
     ZunResult Release();
     void SwapMapping(i16 btnPressed, i16 oldMapping, i16 idk);
     ZunResult UpdateMenuDigits(AnmVm *param_1, i16 param_2);
-    void SetGameState(GameState state);
+
+    // FUNCTION: TH07 0x004553fa
+    static void InitializeTimingVars(Supervisor *arg)
+    {
+        arg->timingErrorCount = 0;
+        arg->maxTimingError = 0;
+        arg->checkTiming = 0;
+        arg->timingSpikeAccumulator = 0;
+        arg->timingBadCount = 0;
+    }
+
+    // FUNCTION: TH07 0x00455435
+    void SetGameState(GameState gameState)
+    {
+        this->prevGameState = this->gameState;
+        this->gameState = gameState;
+        this->inputDelayTimer = 0;
+        this->stateTimer = 0;
+        this->menuSubState = 0;
+        this->idleFrames = 0;
+    }
 
     i32 IsSelected(i32 idx)
     {
@@ -106,5 +129,6 @@ struct MainMenu
     ControllerMapping controlMapping;
     // pad 2
     GameConfiguration cfg;
+    i32 coopSelectionSeat;
 };
-C_ASSERT(sizeof(MainMenu) == 0xd158);
+C_ASSERT(sizeof(MainMenu) == 0xd15c);

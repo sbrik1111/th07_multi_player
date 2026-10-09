@@ -25,10 +25,7 @@ struct GameWindow
     static i32 InitD3dInterface();
     static i32 InitD3dRendering();
     static void Present();
-#ifndef TH07_COMPILE_ORIGINAL_RENDER
     RenderResult Render();
-#endif
-    RenderResult OriginalRender();
     static void ResetRenderState();
     static i32 ResolveIt(const char *shortcutPath, char *dstPath, i32 maxPathLen);
     static void SetWindowActive(HWND window);
@@ -50,3 +47,9 @@ struct GameWindow
 };
 C_ASSERT(sizeof(GameWindow) == 0x2c);
 extern GameWindow g_GameWindow;
+
+// 0 quit, -1 restart, else 1.
+i32 RunLogicalFrame(i32 draw);
+void DrawLogicalFrame();
+f32 MpDisplayedFps();
+void TakeFrameCosts(unsigned long long *tickUs, unsigned *ticks, unsigned long long *drawUs, unsigned *draws);

@@ -1,10 +1,10 @@
 #pragma once
 
-#include "AnmVm.hpp"
+#include "AnmManager.hpp"
 #include "Chain.hpp"
 #include "EffectManager.hpp"
 #include "GameManager.hpp"
-#include "Multiplayer.hpp"
+#include "ZunMath.hpp"
 #include "inttypes.hpp"
 
 extern const char *g_ShooterTable[6];
@@ -19,10 +19,7 @@ typedef enum PlayerState
     PLAYER_STATE_DEAD = 2,
     PLAYER_STATE_INVULNERABLE = 3,
     PLAYER_STATE_BORDER = 4,
-    // Multiplayer-only state: this player has no lives left and drifts until
-    // the other player spends a life to bring them back.
-    PLAYER_STATE_SPIRIT = 5,
-    PLAYER_STATE_ELIMINATED = 6
+    PLAYER_STATE_GHOST = 5
 } PlayerState;
 
 typedef enum PlayerDirection
@@ -56,8 +53,8 @@ typedef enum BorderState
 
 struct BombProjectile
 {
-    D3DXVECTOR3 pos;
-    D3DXVECTOR3 size;
+    Float3 pos;
+    Float3 size;
     i32 lifetime;
     union {
         i32 itemType;
@@ -68,8 +65,8 @@ C_ASSERT(sizeof(BombProjectile) == 0x20);
 
 struct BombClearBox
 {
-    Float3 pos;
-    Float3 size;
+    PodFloat3 pos;
+    PodFloat3 size;
     i32 lifetime;
     union {
         i32 itemType;
@@ -85,10 +82,10 @@ struct PlayerBombSubInfo
     f32 accel;
     f32 speed;
     f32 angle;
-    D3DXVECTOR3 bombRegionPositions;
-    D3DXVECTOR3 bombRegionPositionsTrails[32];
-    D3DXVECTOR3 bombRegionVelocities;
-    D3DXVECTOR3 bombRegionAcceleration;
+    Float3 bombRegionPositions;
+    Float3 bombRegionPositionsTrails[32];
+    Float3 bombRegionVelocities;
+    Float3 bombRegionAcceleration;
     AnmVm vms[8];
     Effect *effect;
     ZunTimer timer;
@@ -118,6 +115,7 @@ struct PlayerBombInfo
     BombCallback bombFocusCalc;
     BombCallback drawFocus;
     PlayerBombSubInfo subInfo[128];
+    Float3 startPos;
 };
 
 struct PlayerBullet
@@ -143,9 +141,9 @@ struct PlayerBullet
     }
 
     AnmVm vm;
-    D3DXVECTOR3 pos;
-    D3DXVECTOR3 posHistory[16];
-    D3DXVECTOR3 hitboxSize;
+    Float3 pos;
+    Float3 posHistory[16];
+    Float3 hitboxSize;
     Float2 velocity;
     Float2 offset;
     f32 speed;
@@ -159,7 +157,7 @@ struct PlayerBullet
     i16 trailLength;
     i32 (*updateCallback)(struct Player *, struct PlayerBullet *);
     i32 (*drawCallback)(struct Player *, struct PlayerBullet *);
-    i32 (*hitCallback)(struct Player *, struct PlayerBullet *, D3DXVECTOR3 *);
+    i32 (*hitCallback)(struct Player *, struct PlayerBullet *, Float3 *);
     struct ShtEntry *shtEntry;
 };
 C_ASSERT(sizeof(PlayerBullet) == 0x364);
@@ -178,6 +176,7 @@ struct Player
     static ZunResult AddedCallback(Player *arg);
     static ZunResult DeletedCallback(Player *arg);
     static u32 OnUpdate(Player *arg);
+    static void OnUpdateSeat(Player *arg);
     static u32 OnDrawHighPrio(Player *arg);
     static u32 OnDrawLowPrio(Player *arg);
 
@@ -193,26 +192,30 @@ struct Player
     void DrawBulletExplosions();
 
     void ActivateBorder();
-    f32 AngleToPlayer(D3DXVECTOR3 *pos);
+    f32 AngleToPlayer(Float3 *pos);
     void BreakBorder(u32 unused);
     void BreakBorderNaturally();
+    void ActivateBorderLocal();
+    void BreakBorderLocal(u32 unused);
+    void BreakBorderNaturallyLocal();
+    void ClearBorderLocal();
 
-    i32 CalcItemBoxCollision(D3DXVECTOR3 *center, D3DXVECTOR3 *size);
-    i32 CalcKillboxCollision(D3DXVECTOR3 *center, D3DXVECTOR3 *size);
-    i32 CalcLaserHitbox(D3DXVECTOR3 *center, D3DXVECTOR3 *size,
-                        D3DXVECTOR3 *origin, f32 rotation, i32 canGraze);
-    i32 CheckBombGraze(D3DXVECTOR3 *center, D3DXVECTOR3 *size);
-    i32 CalcDamageToEnemy(D3DXVECTOR3 *param_1, D3DXVECTOR3 *param_2,
+    i32 CalcItemBoxCollision(Float3 *center, Float3 *size);
+    i32 CalcKillboxCollision(Float3 *center, Float3 *size);
+    i32 CalcLaserHitbox(Float3 *center, Float3 *size,
+                        Float3 *origin, f32 rotation, i32 canGraze);
+    i32 CheckBombGraze(Float3 *center, Float3 *size);
+    i32 CalcDamageToEnemy(Float3 *param_1, Float3 *param_2,
                           i32 *param_3);
-    i32 CheckGraze(D3DXVECTOR3 *center, D3DXVECTOR3 *size);
+    i32 CheckGraze(Float3 *center, Float3 *size);
 
     void Die();
     i32 HandlePlayerInputs();
     void Respawn();
-    void ScoreGraze(D3DXVECTOR3 *param_1);
-    BombClearBox *SpawnBombEffect(D3DXVECTOR3 *pos, f32 sizeY, f32 sizeZ,
+    void ScoreGraze(Float3 *param_1);
+    BombClearBox *SpawnBombEffect(Float3 *pos, f32 sizeY, f32 sizeZ,
                                     i32 lifetime, i32 itemType);
-    BombClearBox *SpawnBombProjectile(D3DXVECTOR3 *centerPosition, f32 posZ,
+    BombClearBox *SpawnBombProjectile(Float3 *centerPosition, f32 posZ,
                                         f32 size, i32 itemType);
     static void SpawnBullets(Player *player, u32 timer);
     void StartFireBulletTimer();
@@ -230,7 +233,7 @@ struct Player
         return timer;
     }
 
-    static void SetVecCorners(D3DXVECTOR3 *topLeft, D3DXVECTOR3 *bottomRight, D3DXVECTOR3 *center, D3DXVECTOR3 *size)
+    static void SetVecCorners(Float3 *topLeft, Float3 *bottomRight, Float3 *center, Float3 *size)
     {
         topLeft->x = center->x - size->x * 0.5f;
         topLeft->y = center->y - size->y * 0.5f;
@@ -255,18 +258,18 @@ struct Player
 
     AnmVm playerSprite;
     AnmVm optionsSprite[3];
-    D3DXVECTOR3 positionCenter;
-    D3DXVECTOR3 prevFramePos;
-    D3DXVECTOR3 hitboxTopLeft;
-    D3DXVECTOR3 hitboxBottomRight;
-    D3DXVECTOR3 grazeTopLeft;
-    D3DXVECTOR3 grazeBottomRight;
-    D3DXVECTOR3 grabItemTopLeft;
-    D3DXVECTOR3 grabItemBottomRight;
-    D3DXVECTOR3 hitboxSize;
-    D3DXVECTOR3 grazeSize;
-    D3DXVECTOR3 grabItemSize;
-    D3DXVECTOR3 optionsPosition[2];
+    Float3 positionCenter;
+    Float3 prevFramePos;
+    Float3 hitboxTopLeft;
+    Float3 hitboxBottomRight;
+    Float3 grazeTopLeft;
+    Float3 grazeBottomRight;
+    Float3 grabItemTopLeft;
+    Float3 grabItemBottomRight;
+    Float3 hitboxSize;
+    Float3 grazeSize;
+    Float3 grabItemSize;
+    Float3 optionsPosition[2];
     Float2 velocity;
     i32 unused_9d4;
     Effect *focusEffect;
@@ -291,21 +294,17 @@ struct Player
     PlayerDirection playerDirection;
     f32 previousHorizontalSpeed;
     f32 previousVerticalSpeed;
-    D3DXVECTOR3 positionOfLastEnemyHit;
-    D3DXVECTOR3 sakuyaTargetPosition;
+    Float3 positionOfLastEnemyHit;
+    Float3 sakuyaTargetPosition;
     i32 targetingEnemy;
     PlayerBullet bullets[96];
     PlayerBulletTimer timers[3];
     ZunTimer fireBulletTimer;
     ZunTimer invulnerabilityTimer;
     ZunTimer borderTimer;
-    i32 lifeGiveTimer;
-    // Receiver slot + 1 while charging a multiplayer life transfer. Zero
-    // means no receiver. Keeping it inside Player makes rollback restore the
-    // target-change reset rule deterministically without changing the layout.
-    i32 lifeGiveTargetToken;
+    i32 unused_16a18;
+    i32 unused_16a1c;
     PlayerBombInfo bombInfo;
-    D3DXVECTOR3 bombStartPos;
     f32 optionAngle;
     ChainElem *calcChain;
     ChainElem *drawChain1;
@@ -314,53 +313,44 @@ struct Player
     Effect *borderEffect;
     struct ShtData *shooterData;
     struct ShtData *shooterDataFocus;
+    i32 seat;
+    i32 hitSounds;
+    // lifeGiveTarget: the receiver's seat + 1
+    i32 lifeGiveTimer;
+    i32 lifeGiveTarget;
+    i32 powerGiveTaps;
+    i32 powerGiveWindow;
+
+    u16 GameInput();
+    u16 LastGameInput();
+    i32 IsPressed(u16 key)
+    {
+        return (GameInput() & key) != 0;
+    }
+    i32 WasPressed(u16 key)
+    {
+        return IsPressed(key) && (GameInput() & key) != (LastGameInput() & key);
+    }
+    // Seat 0 uses th07's 0x400 slot, seats 1-3 0xa00..
+    i32 AnmShift()
+    {
+        return PlayerAnmShift(this->seat);
+    }
+    static i32 PlayerAnmShift(i32 seat)
+    {
+        static const i32 shifts[MAX_PLAYERS] = {0, 0x600, 0x700, 0x800};
+        return shifts[seat];
+    }
+    static i32 PlayerAnmFile(i32 seat)
+    {
+        static const i32 files[MAX_PLAYERS] = {ANM_FILE_PLAYER, 50, 51, 52};
+        return files[seat];
+    }
 };
-C_ASSERT(sizeof(Player) == 0xb7e78);
-extern Player g_Players[TH07_MULTI_MAX_PLAYERS];
-extern bool g_PlayerActive[TH07_MULTI_MAX_PLAYERS];
-// Diagnostic: how much each player raised cherryMax during the current stage,
-// split by source. cherryMax feeds the stage clear bonus raw, and it was
-// reaching its 9,999,990 ceiling within two stages. Attributing the growth is
-// the only way to tell "three players doing the normal thing" apart from one
-// player running away.
-extern i32 g_cherryMaxGrazeGrowth[TH07_MULTI_MAX_PLAYERS];
-extern i32 g_cherryMaxBreakGrowth[TH07_MULTI_MAX_PLAYERS];
-
-// Compatibility names keep the original decompilation readable while the
-// multiplayer-specific code moves to slot-indexed loops.
-#define g_Player (g_Players[0])
-#define g_Player2 (g_Players[1])
-#define g_Player3 (g_Players[2])
-#define g_Player2Active (g_PlayerActive[1])
-#define g_Player3Active (g_PlayerActive[2])
-
-Player *GetPlayerById(u8 playerId);
-const Player *GetPlayerByIdConst(u8 playerId);
-bool IsPlayerSlotActive(u8 playerId);
-// Five bomb taps while overlapping a partner hand over power. The counter
-// and its window live outside Player because Player's layout is fixed by a
-// size assertion; the rollback snapshot carries them explicitly instead.
-const i32 POWER_GIVE_TAPS_REQUIRED = 8;
-const i32 POWER_GIVE_TAP_WINDOW = 24;
-const i32 POWER_GIVE_AMOUNT = 20;
-// Ordinary shooting produces press edges all the time. Showing the count
-// from the first one would put a counter over the ship whenever two
-// players happened to be close, so it waits until the taps look
-// deliberate.
-const i32 POWER_GIVE_PROMPT_AFTER = 4;
-extern i32 g_powerGiveTaps[TH07_MULTI_MAX_PLAYERS];
-extern i32 g_powerGiveWindow[TH07_MULTI_MAX_PLAYERS];
-u8 GetActivePlayerMask();
-i32 GetActivePlayerCount();
-bool IsAnyActivePlayerBombing();
-bool VerifyThreePlayerLifeTransferSelectionRules();
-
-Player *GetClosestActivePlayer(D3DXVECTOR3 *position);
-u8 GetPlayerOverlapAlpha(const Player *player);
-bool IsSharedBorderActive();
-void ActivateSharedBorder();
-i32 GetPlayerAnmScript(const Player *player, i32 script);
-i32 GetPlayerEffectSlot(const Player *player, i32 p1Slot);
+C_ASSERT(offsetof(Player, seat) == 0xb7e78);
+extern Player (&g_Players)[MAX_PLAYERS];
+extern u16 g_SeatGameInput[MAX_PLAYERS];
+extern u16 g_SeatLastGameInput[MAX_PLAYERS];
 
 typedef i32 (*ShtFunc1)(Player *, PlayerBullet *, i32, struct ShtEntry *);
 extern ShtFunc1 g_ShtFireFuncs[6];
@@ -368,7 +358,7 @@ typedef i32 (*ShtFunc2)(Player *, PlayerBullet *);
 extern ShtFunc2 g_ShtUpdateFuncs[6];
 typedef i32 (*ShtFunc3)(Player *, PlayerBullet *);
 extern ShtFunc3 g_ShtDrawFuncs[2];
-typedef i32 (*ShtFunc4)(Player *, PlayerBullet *, D3DXVECTOR3 *);
+typedef i32 (*ShtFunc4)(Player *, PlayerBullet *, Float3 *);
 extern ShtFunc4 g_ShtHitFuncs[4];
 
 struct ShtEntry
@@ -387,7 +377,7 @@ struct ShtEntry
     i32 (*fireCallback)(Player *, PlayerBullet *, i32, struct ShtEntry *);
     i32 (*updateCallback)(Player *, PlayerBullet *);
     i32 (*drawCallback)(Player *, PlayerBullet *);
-    i32 (*hitCallback)(Player *, PlayerBullet *, D3DXVECTOR3 *);
+    i32 (*hitCallback)(Player *, PlayerBullet *, Float3 *);
 };
 
 struct ShtLevel
@@ -420,12 +410,12 @@ struct ShtData
     static i32 DrawBulletWithTrail(Player *player, PlayerBullet *bullet);
 
     static i32 OnMissileHit(Player *player, PlayerBullet *bullet,
-                            D3DXVECTOR3 *pos);
+                            Float3 *pos);
     static i32 SpawnHitParticles(Player *player, PlayerBullet *bullet,
-                                 D3DXVECTOR3 *pos);
+                                 Float3 *pos);
 
-    i16 numLevels;
-    u16 entryCount;
+    i16 unused;
+    u16 numLevels;
     f32 initialBombs;
     i32 initialRespawnTimer;
     f32 hitboxRadius;
@@ -438,6 +428,6 @@ struct ShtData
     f32 speedFocus;
     f32 speedDiagonal;
     f32 speedDiagonalFocus;
-    ShtLevel levels;
+    ShtLevel levels[1];
 };
 C_ASSERT(sizeof(ShtData) == 0x3c);

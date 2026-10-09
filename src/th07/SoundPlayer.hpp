@@ -60,9 +60,18 @@ struct SoundPlayerCommand
 };
 C_ASSERT(sizeof(SoundPlayerCommand) == 0x10c);
 
+#define MAX_SOUND_COMMANDS 31
+
 struct SoundPlayer
 {
-    SoundPlayer();
+    SoundPlayer()
+    {
+        memset(this, 0, sizeof(SoundPlayer));
+        for (i32 i = 0; i < 128; i++)
+        {
+            this->unusedSoundVolRelated[i] = -1;
+        }
+    }
 
     static DWORD __stdcall BackgroundMusicPlayerThread(LPVOID lpThreadParameter);
     i32 GetFmtIndexByName(const char *param_1);
@@ -108,7 +117,7 @@ struct SoundPlayer
     DWORD bgmPreloadAllocSizes[16];
     i32 curBgmIdx;
     ThBgmFormat *bgmFmtData;
-    SoundPlayerCommand commandQueue[32];
+    SoundPlayerCommand commandQueue[MAX_SOUND_COMMANDS + 1];
     char bgmFileNames[16][256];
     char bgmArchivePath[256];
     CStreamingSound *backgroundMusic;
@@ -118,3 +127,6 @@ struct SoundPlayer
 };
 C_ASSERT(sizeof(SoundPlayer) == 0x39cc);
 extern SoundPlayer g_SoundPlayer;
+
+extern i32 g_SoundSilenced;
+extern i32 (*g_BgmCommandFilter)(i32 opcode, i32 arg1, const char *name);
